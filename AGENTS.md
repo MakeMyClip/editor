@@ -120,5 +120,3 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md). Summary:
 - Commit: Conventional Commits — `<type>(<scope>): <description>`.
 - Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`.
 - Scopes for this project: `mcp`, `tools`, `timeline`, `ffmpeg`, `cli`, `preview`, `schema`, `deps`, `docs`, `ci`.
-
-A GitHub Actions workflow (`.github/workflows/branch-name.yml`) rejects PRs from branches that don't match the pattern.

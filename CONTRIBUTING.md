@@ -14,7 +14,7 @@ For architecture and stack details, see [AGENTS.md](./AGENTS.md).
 
 ## Branch Naming
 
-Use the standard `<type>/<short-kebab-case-description>` format — **not** `claude/<random-text>` or any other tool-prefixed pattern. Branch names are enforced by CI on every PR.
+Use the standard `<type>/<short-kebab-case-description>` format — **not** `claude/<random-text>` or any other tool-prefixed pattern.
 
 **Format**: `<type>/<short-kebab-case-description>`
 
@@ -31,7 +31,6 @@ Use the standard `<type>/<short-kebab-case-description>` format — **not** `cla
 - Lowercase, kebab-case, no random suffixes or session IDs
 - Keep it short and descriptive (3–6 words max)
 - Do **not** prefix with `claude/`, `cursor/`, or any other agent name — pick the type that matches the work
-- CI (`.github/workflows/branch-name.yml`) will reject non-conforming branches at PR time
 
 ## Commit Message Format
 
@@ -167,7 +166,7 @@ See [AGENTS.md](./AGENTS.md#code-style) for the full style guide. Quick summary:
 
 1. Ensure your branch is up to date with `main`
 2. Make sure linting, type-check, and tests pass
-3. Confirm your branch name matches `<type>/<kebab-description>` — CI will reject otherwise
+3. Confirm your branch name matches `<type>/<kebab-description>`
 4. Write a clear PR description:
    - **What** changed
    - **Why** the change was needed
