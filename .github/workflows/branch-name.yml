@@ -1,0 +1,38 @@
+name: Branch name check
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  validate:
+    name: Validate branch name
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR branch matches <type>/<kebab-description>
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          PATTERN='^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)/[a-z0-9]+(-[a-z0-9]+)*$'
+
+          echo "Branch: $BRANCH"
+          echo "Pattern: $PATTERN"
+
+          if [[ "$BRANCH" =~ ^(claude|cursor|copilot|bot|ai|gpt)/ ]]; then
+            echo "::error::Branch '$BRANCH' uses a forbidden agent prefix."
+            echo "Rename it to <type>/<kebab-description> — see CONTRIBUTING.md."
+            exit 1
+          fi
+
+          if [[ ! "$BRANCH" =~ $PATTERN ]]; then
+            echo "::error::Branch '$BRANCH' does not match required format."
+            echo "Expected: <type>/<short-kebab-description>"
+            echo "Types: feat, fix, chore, docs, style, refactor, perf, test, build, ci, revert"
+            echo "Example: feat/zoom-pan-tool"
+            echo "See CONTRIBUTING.md#branch-naming."
+            exit 1
+          fi
+
+          echo "Branch name OK."
