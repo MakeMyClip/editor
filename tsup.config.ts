@@ -6,7 +6,7 @@ export default defineConfig({
     cli: 'src/cli.ts',
   },
   format: ['esm'],
-  target: 'node20',
+  target: 'node24',
   dts: true,
   clean: true,
   sourcemap: true,
