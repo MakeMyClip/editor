@@ -54,7 +54,7 @@ All tools accept and return a structured **timeline JSON** (Zod-validated). Edit
 
 - FFmpeg is spawned with arguments as an array — no shell interpolation, no injection.
 - All file paths are sandboxed to a workspace directory by default.
-- The skill never makes network calls unless the user invokes a paid generation tool (voiceover, music, b-roll) that calls the MakeMyClip.com API.
+- The skill never makes network calls. All editing is local.
 
 ## Install
 

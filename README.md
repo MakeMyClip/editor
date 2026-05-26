@@ -89,19 +89,11 @@ All edits are non-destructive — the agent builds a timeline JSON, you can insp
 - **Subprocess:** `execa` — args as an array, no shell injection
 - **FFmpeg:** bundled via `@ffmpeg-installer/ffmpeg`, or use system binary
 
-## Free vs paid
+## Free & open source
 
-The editor is **MIT licensed and free forever** for local editing. Anything FFmpeg can do, this does for free.
+The editor is **MIT licensed and free forever** for local editing. Anything FFmpeg can do, this does for free — no account, no telemetry, no limits.
 
-When you want **AI-generated content** — voiceover, music, b-roll, stock footage, premium templates — the editor calls the [MakeMyClip.com](https://makemyclip.com) generation API, which is metered. Local editing never requires an account.
-
-| Free & open source | Paid (MakeMyClip.com) |
-|---|---|
-| All FFmpeg editing | AI voiceover generation |
-| Trim, zoom, caption, render | AI music & b-roll |
-| Timeline JSON + schema | Premium templates |
-| HTML preview | Cloud rendering |
-| Basic templates | Team workspaces |
+Paid AI-generation features (voice, music, stock, premium templates) will live on [MakeMyClip.com](https://makemyclip.com) when ready.
 
 ## License
 
