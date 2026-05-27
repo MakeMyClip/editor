@@ -4,7 +4,13 @@ export {
   buildAddAudioArgs,
 } from './ffmpeg/args/add-audio.js';
 export { type AddTextArgs, buildAddTextArgs, type NamedPosition } from './ffmpeg/args/add-text.js';
+export { type AdjustArgs, buildAdjustArgs } from './ffmpeg/args/adjust.js';
 export { buildConcatArgs, type ConcatArgs } from './ffmpeg/args/concat.js';
+export {
+  buildOverlayArgs,
+  type OverlayArgs,
+  type OverlayPosition,
+} from './ffmpeg/args/overlay.js';
 export { buildPreviewFrameArgs, type PreviewFrameArgs } from './ffmpeg/args/preview.js';
 export {
   buildRenderArgs,
@@ -12,13 +18,26 @@ export {
   type RenderFormat,
   type RenderPreset,
 } from './ffmpeg/args/render.js';
+export { buildAtempoChain, buildSpeedArgs, type SpeedArgs } from './ffmpeg/args/speed.js';
 export { buildSplitArgs } from './ffmpeg/args/split.js';
+export {
+  buildCropArgs,
+  buildFlipArgs,
+  buildRotateArgs,
+  buildScaleArgs,
+  type CropArgs,
+  type FlipArgs,
+  type RotateArgs,
+  type ScaleArgs,
+  type TransformOp,
+} from './ffmpeg/args/transform.js';
 export {
   buildTransitionArgs,
   type TransitionArgs,
   type TransitionKind,
 } from './ffmpeg/args/transition.js';
 export { buildTrimArgs, type TrimArgs } from './ffmpeg/args/trim.js';
+export { buildZoomPanArgs, type ZoomPanArgs } from './ffmpeg/args/zoom-pan.js';
 export { quoteFilterArg } from './ffmpeg/escape.js';
 export {
   type AudioStream,
@@ -55,6 +74,7 @@ export {
   type AddTextResult,
   addText,
 } from './tools/add-text.js';
+export { AdjustInput, type AdjustInputType, type AdjustResult, adjust } from './tools/adjust.js';
 export {
   buildConcatListContent,
   ConcatInput,
@@ -64,13 +84,26 @@ export {
 } from './tools/concat.js';
 export { IngestInput, type IngestInputType, type IngestResult, ingest } from './tools/ingest.js';
 export {
+  OverlayInput,
+  type OverlayInputType,
+  type OverlayResult,
+  overlay,
+} from './tools/overlay.js';
+export {
   PreviewInput,
   type PreviewInputType,
   type PreviewResult,
   preview,
 } from './tools/preview.js';
 export { RenderInput, type RenderInputType, type RenderResult, render } from './tools/render.js';
+export { SpeedInput, type SpeedInputType, type SpeedResult, speed } from './tools/speed.js';
 export { SplitInput, type SplitInputType, type SplitResult, split } from './tools/split.js';
+export {
+  TransformInput,
+  type TransformInputType,
+  type TransformResult,
+  transform,
+} from './tools/transform.js';
 export {
   TransitionInput,
   type TransitionInputType,
@@ -78,3 +111,9 @@ export {
   transition,
 } from './tools/transition.js';
 export { TrimInput, type TrimInputType, type TrimResult, trim } from './tools/trim.js';
+export {
+  ZoomPanInput,
+  type ZoomPanInputType,
+  type ZoomPanResult,
+  zoomPan,
+} from './tools/zoom-pan.js';

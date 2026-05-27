@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 import { addAudio } from './tools/add-audio.js';
 import { addText } from './tools/add-text.js';
+import { adjust } from './tools/adjust.js';
 import { concat } from './tools/concat.js';
 import { ingest } from './tools/ingest.js';
+import { overlay } from './tools/overlay.js';
 import { preview } from './tools/preview.js';
 import { render } from './tools/render.js';
+import { speed } from './tools/speed.js';
 import { split } from './tools/split.js';
+import { type TransformResult, transform } from './tools/transform.js';
 import { transition } from './tools/transition.js';
 import { trim } from './tools/trim.js';
+import { zoomPan } from './tools/zoom-pan.js';
 
 const HELP = `clip — MakeMyClip Editor
 
@@ -55,6 +60,31 @@ Usage:
       CRF: 0 (lossless) to 51 (worst); default 23.
       Preset: ultrafast..veryslow (libx264 only); default medium.
       Defaults: format=mp4, crf=23, preset=medium, no resize.
+
+  clip transform <op> <input> [<op-args>...]
+      Geometric transform. <op> is one of:
+        crop <x> <y> <width> <height>
+        rotate <90|180|270>
+        flip <horizontal|vertical>
+        scale [<width>] [<height>]    (-1 for either = auto-fit even-pixel)
+
+  clip adjust <input> [--brightness N] [--contrast N] [--saturation N] [--volume N]
+      Color/audio adjustment. At least one knob must be set.
+      Ranges: brightness -1..1 (0=none), contrast 0..4 (1=none),
+              saturation 0..3 (1=none), volume 0..2 (1=none).
+
+  clip speed <input> [<factor>] [<reverse>]
+      Slow-mo / fast-forward / reverse. factor=2 means double speed;
+      0.5 means half (slow-mo). reverse is 'true' or 'false'.
+
+  clip overlay <base> <overlay> [<position>] [<scaleToWidth>] [<startSec>] [<endSec>]
+      PiP / image overlay. position defaults to top-right.
+      Positions: top-left top-center top-right center-left center center-right
+                 bottom-left bottom-center bottom-right
+
+  clip zoom_pan <input> [<fromZoom>] [<toZoom>] [<centerX>] [<centerY>]
+      Ken Burns / focus zoom over the full clip duration.
+      Defaults: fromZoom=1, toZoom=1.5, center=(0.5, 0.5).
 
   clip --help
       Show this help.
@@ -204,6 +234,146 @@ async function main(argv: string[]): Promise<void> {
       position: position as any,
       startSec: Number(startSec),
       endSec: Number(endSec),
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (command === 'transform') {
+    const [op, input, ...rest] = args;
+    if (!op || !input) {
+      process.stderr.write(
+        'Usage: clip transform <crop|rotate|flip|scale> <input> [<op-args>...]\n',
+      );
+      process.exit(1);
+    }
+    let result: TransformResult;
+    if (op === 'crop') {
+      const [x, y, width, height] = rest;
+      if (!x || !y || !width || !height) {
+        process.stderr.write('Usage: clip transform crop <input> <x> <y> <width> <height>\n');
+        process.exit(1);
+      }
+      result = await transform({
+        op: 'crop',
+        input,
+        x: Number(x),
+        y: Number(y),
+        width: Number(width),
+        height: Number(height),
+      });
+    } else if (op === 'rotate') {
+      const [degrees] = rest;
+      if (!degrees) {
+        process.stderr.write('Usage: clip transform rotate <input> <90|180|270>\n');
+        process.exit(1);
+      }
+      const d = Number(degrees);
+      if (d !== 90 && d !== 180 && d !== 270) {
+        process.stderr.write('rotate degrees must be 90, 180, or 270\n');
+        process.exit(1);
+      }
+      result = await transform({ op: 'rotate', input, degrees: d });
+    } else if (op === 'flip') {
+      const [axis] = rest;
+      if (axis !== 'horizontal' && axis !== 'vertical') {
+        process.stderr.write('Usage: clip transform flip <input> <horizontal|vertical>\n');
+        process.exit(1);
+      }
+      result = await transform({ op: 'flip', input, axis });
+    } else if (op === 'scale') {
+      const [width, height] = rest;
+      result = await transform({
+        op: 'scale',
+        input,
+        width: width ? Number(width) : undefined,
+        height: height ? Number(height) : undefined,
+      });
+    } else {
+      process.stderr.write(`Unknown transform op: ${op} (expected crop|rotate|flip|scale)\n`);
+      process.exit(1);
+    }
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (command === 'adjust') {
+    const [input, ...rest] = args;
+    if (!input) {
+      process.stderr.write(
+        'Usage: clip adjust <input> [--brightness N] [--contrast N] [--saturation N] [--volume N]\n',
+      );
+      process.exit(1);
+    }
+    const flags: Record<string, number> = {};
+    for (let i = 0; i < rest.length; i += 2) {
+      const flag = rest[i];
+      const value = rest[i + 1];
+      if (flag?.startsWith('--') && value !== undefined) {
+        flags[flag.slice(2)] = Number(value);
+      }
+    }
+    const result = await adjust({
+      input,
+      brightness: flags.brightness,
+      contrast: flags.contrast,
+      saturation: flags.saturation,
+      volume: flags.volume,
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (command === 'speed') {
+    const [input, factor, reverse] = args;
+    if (!input) {
+      process.stderr.write('Usage: clip speed <input> [<factor>] [<reverse>]\n');
+      process.exit(1);
+    }
+    const result = await speed({
+      input,
+      factor: factor ? Number(factor) : undefined,
+      reverse: reverse === 'true' ? true : reverse === 'false' ? false : undefined,
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (command === 'overlay') {
+    const [input, overlayPath, position, scaleToWidth, startSec, endSec] = args;
+    if (!input || !overlayPath) {
+      process.stderr.write(
+        'Usage: clip overlay <base> <overlay> [<position>] [<scaleToWidth>] [<startSec>] [<endSec>]\n',
+      );
+      process.exit(1);
+    }
+    const result = await overlay({
+      input,
+      overlay: overlayPath,
+      // biome-ignore lint/suspicious/noExplicitAny: Zod validates at runtime
+      position: (position as any) ?? undefined,
+      scaleToWidth: scaleToWidth ? Number(scaleToWidth) : undefined,
+      startSec: startSec ? Number(startSec) : undefined,
+      endSec: endSec ? Number(endSec) : undefined,
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (command === 'zoom_pan') {
+    const [input, fromZoom, toZoom, centerX, centerY] = args;
+    if (!input) {
+      process.stderr.write(
+        'Usage: clip zoom_pan <input> [<fromZoom>] [<toZoom>] [<centerX>] [<centerY>]\n',
+      );
+      process.exit(1);
+    }
+    const result = await zoomPan({
+      input,
+      fromZoom: fromZoom ? Number(fromZoom) : undefined,
+      toZoom: toZoom ? Number(toZoom) : undefined,
+      centerX: centerX ? Number(centerX) : undefined,
+      centerY: centerY ? Number(centerY) : undefined,
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
