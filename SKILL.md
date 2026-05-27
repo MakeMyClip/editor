@@ -48,6 +48,20 @@ Returns metadata as JSON — duration, video stream (codec, dimensions, fps), au
 
 Call this first to ground yourself in what the source actually contains — duration for trim calculations, dimensions for zoom/overlay placement, presence of audio before suggesting `add_audio`. Same input path always returns the same `mediaId`.
 
+### Split a clip at a point (implemented)
+
+```bash
+npx -y @makemyclip/editor split <input> <atSec>
+```
+
+Divides a clip into two halves at `atSec`. Stream-copy (no re-encode), so it's fast — both halves are produced in parallel. Returns paths to both:
+
+```json
+{ "before": "/var/folders/.../split-before-abc.mp4", "after": "/var/folders/.../split-after-xyz.mp4", "atSec": 12.5, "durationMs": 38 }
+```
+
+Keyframe-accurate (not frame-exact) because stream-copy can't decode-and-cut mid-GOP. If you need a frame-exact split, run `render` first to re-encode, then `split`.
+
 ### Trim a clip (implemented)
 
 ```bash
@@ -133,6 +147,45 @@ Audio: if both inputs have audio, the tool wires an `acrossfade` of the same dur
 
 Combined with `concat` and `add_text`, this is the polish layer that makes multi-clip outputs feel intentional rather than abrupt.
 
+### Re-encode for export or normalization (implemented)
+
+```bash
+npx -y @makemyclip/editor render <input> [<format>] [<crf>] [<preset>] [<maxWidth>]
+```
+
+Re-encodes a video to a specific format/quality. Useful for final export, normalizing inputs before `concat`/`transition` when codecs don't match, or downsizing for web delivery.
+
+- `<format>` is one of: `mp4` (default, h264+aac), `mov` (h264+aac), `webm` (vp9+opus)
+- `<crf>` is the quality knob (0 = lossless, 51 = worst). Default `23` is a good baseline; lower for higher quality
+- `<preset>` controls libx264 speed/efficiency tradeoff: `ultrafast` … `veryslow`. Default `medium`. Ignored for webm
+- `<maxWidth>` (optional) caps width in pixels. Preserves aspect ratio; never upscales
+
+Returns JSON:
+
+```json
+{ "path": "/var/folders/.../makemyclip-editor/render-abc.mp4", "format": "mp4", "durationMs": 412 }
+```
+
+### Add audio — mix or replace (implemented)
+
+```bash
+npx -y @makemyclip/editor add_audio <input> <audio> [<mode>] [<audioVolume>] [<startSec>]
+```
+
+Add a background-music bed, a voiceover, or replace the original audio entirely.
+
+- `<mode>` is `mix` (default — keeps base audio, overlays new audio) or `replace` (drops base audio, uses new audio only)
+- `<audioVolume>` is the overlay volume multiplier (0–2, default `0.5` — sensible background-music level; use `1.0` for voiceover)
+- `<startSec>` is when the overlay starts (default `0`)
+
+Returns JSON:
+
+```json
+{ "path": "/var/folders/.../makemyclip-editor/add-audio-abc.mp4", "mode": "mix", "durationMs": 412 }
+```
+
+Mix mode requires the input video to have an audio track (use `ingest` to confirm first). Output duration matches the original video — overlay audio is truncated if longer, padded with silence if shorter.
+
 ### Roadmap (not yet implemented)
 
 These tools are designed and will land in this skill as they ship:
@@ -140,8 +193,6 @@ These tools are designed and will land in this skill as they ship:
 | Tool | What it will do |
 |---|---|
 | `zoom_pan` | Ken Burns / focus zoom on a region |
-| `add_audio` | Background music, voiceover overlay |
-| `render` | Export to MP4 / MOV / WebM with codec control |
 
 Until a tool ships, calling `npx -y @makemyclip/editor <toolname>` will return an unknown-command error — don't promise the user functionality that isn't here yet.
 

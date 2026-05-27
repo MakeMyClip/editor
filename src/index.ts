@@ -1,6 +1,18 @@
+export {
+  type AddAudioArgs,
+  type AddAudioMode,
+  buildAddAudioArgs,
+} from './ffmpeg/args/add-audio.js';
 export { type AddTextArgs, buildAddTextArgs, type NamedPosition } from './ffmpeg/args/add-text.js';
 export { buildConcatArgs, type ConcatArgs } from './ffmpeg/args/concat.js';
 export { buildPreviewFrameArgs, type PreviewFrameArgs } from './ffmpeg/args/preview.js';
+export {
+  buildRenderArgs,
+  type RenderArgs,
+  type RenderFormat,
+  type RenderPreset,
+} from './ffmpeg/args/render.js';
+export { buildSplitArgs } from './ffmpeg/args/split.js';
 export {
   buildTransitionArgs,
   type TransitionArgs,
@@ -32,6 +44,12 @@ export {
   VideoStreamSchema,
 } from './timeline/schema.js';
 export {
+  AddAudioInput,
+  type AddAudioInputType,
+  type AddAudioResult,
+  addAudio,
+} from './tools/add-audio.js';
+export {
   AddTextInput,
   type AddTextInputType,
   type AddTextResult,
@@ -51,6 +69,8 @@ export {
   type PreviewResult,
   preview,
 } from './tools/preview.js';
+export { RenderInput, type RenderInputType, type RenderResult, render } from './tools/render.js';
+export { SplitInput, type SplitInputType, type SplitResult, split } from './tools/split.js';
 export {
   TransitionInput,
   type TransitionInputType,
