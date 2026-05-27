@@ -82,13 +82,28 @@ Returns JSON:
 
 The text is written to a temp file before being passed to ffmpeg, so quotes, colons, commas, brackets, and most Unicode work without manual escaping. Caveat: literal `%{...}` in the text would be interpreted as a drawtext expression (rare in real captions; avoid).
 
+### Stitch clips together (implemented)
+
+```bash
+npx -y @makemyclip/editor concat <input1> <input2> [<input3> ...]
+```
+
+Concatenates two or more clips back-to-back into a single output, stream-copy (no re-encode), so it's fast and lossless.
+
+Returns JSON:
+
+```json
+{ "path": "/var/folders/.../makemyclip-editor/concat-abc123.mp4", "durationMs": 95, "inputCount": 3 }
+```
+
+All inputs must have matching codecs and resolution; if they don't, ffmpeg will fail with a clear error and the agent should re-encode (e.g. via `add_text` with a no-op text, or a future `render` call) before concatenating. The combined `trim → concat` flow is the bread-and-butter highlight-reel workflow: trim N segments, then concat them in order.
+
 ### Roadmap (not yet implemented)
 
 These tools are designed and will land in this skill as they ship:
 
 | Tool | What it will do |
 |---|---|
-| `concat` | Stitch clips together |
 | `zoom_pan` | Ken Burns / focus zoom on a region |
 | `add_audio` | Background music, voiceover overlay |
 | `transition` | Crossfade, cut, dip-to-black |
