@@ -8,8 +8,8 @@ For architecture and stack details, see [AGENTS.md](./AGENTS.md).
 
 1. Create a feature branch from `main` (see [Branch Naming](#branch-naming) below)
 2. Make changes in `src/`
-3. Run `npm run lint`, `npm run type-check`, and `npm test` to ensure quality
-4. Test locally with `npm run dev`
+3. Run `pnpm lint`, `pnpm type-check`, and `pnpm test` to ensure quality
+4. Test locally with `pnpm dev`
 5. Submit a pull request with a clear description
 
 ## Branch Naming
@@ -156,9 +156,9 @@ See [AGENTS.md](./AGENTS.md#code-style) for the full style guide. Quick summary:
 
 ## Testing
 
-- Run `npm run lint` before committing
-- Run `npm run type-check` to ensure types pass
-- Run `npm test` to execute the unit test suite
+- Run `pnpm lint` before committing
+- Run `pnpm type-check` to ensure types pass
+- Run `pnpm test` to execute the unit test suite
 - Tool unit tests assert built FFmpeg arg arrays (no FFmpeg needed)
 - Integration tests live in `tests/integration/` and run on CI
 

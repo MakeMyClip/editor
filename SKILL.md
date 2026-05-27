@@ -1,6 +1,6 @@
 ---
 name: MakeMyClip/editor
-description: AI-native video editor. Trim, zoom, caption, and assemble clips from any AI agent via MCP.
+description: AI-native video editor for any agent. Trim, zoom, caption, concat, and render via structured timeline JSON.
 version: 0.0.0
 license: MIT
 homepage: https://github.com/MakeMyClip/editor

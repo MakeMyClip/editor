@@ -28,15 +28,15 @@ editor/
 
 ## Stack
 
-- **Language:** TypeScript (Node 20+)
-- **Package manager:** npm (single registry, no pnpm/yarn lockfile drift)
+- **Language:** TypeScript (Node 24+)
+- **Package manager:** pnpm (fast installs, strict resolution, content-addressable store; version pinned via `packageManager` field in `package.json`)
 - **MCP:** `@modelcontextprotocol/sdk`
 - **Validation:** `zod` (timeline schema is shared with MakeMyClip.com)
 - **Subprocess:** `execa` — args always as an array, never shell-string
-- **FFmpeg:** `@ffmpeg-installer/ffmpeg` (bundled) with fallback to system binary
+- **FFmpeg:** `ffmpeg-static` (bundled) with fallback to `$MAKEMYCLIP_FFMPEG_PATH` or system binary
 - **Image ops:** `sharp` (frame thumbnails, simple CV)
 - **Tests:** `vitest`
-- **Lint/format:** `eslint` + `prettier`
+- **Lint/format:** `@biomejs/biome` (single Rust binary, replaces eslint + prettier)
 
 ## Non-negotiables
 
@@ -44,7 +44,7 @@ editor/
 2. **Timeline JSON is the source of truth.** Tools build/mutate a timeline; rendering reads it. Never render straight from tool args.
 3. **Workspace sandbox.** File paths from MCP tools are resolved against a workspace directory. No reads/writes outside it without explicit user consent.
 4. **No network calls in the OSS core.** Generation tools (voiceover, music, b-roll) live behind a separate `@makemyclip/generation` package and require explicit user opt-in.
-5. **MIT compatible deps only.** Don't pull in GPL/AGPL/BSL packages.
+5. **MIT-compatible npm dependencies only.** Don't pull in GPL/AGPL/BSL packages into the TypeScript dependency graph. The bundled FFmpeg binary is separately licensed (GPL) — that's fine because we invoke it as a subprocess, not link to it. See the README's License section for the full posture.
 
 ## Code style
 
@@ -105,9 +105,9 @@ Rules:
 
 ## Testing
 
-- `npm test` runs vitest.
-- `npm run type-check` runs `tsc --noEmit`.
-- `npm run lint` runs eslint.
+- `pnpm test` runs vitest.
+- `pnpm type-check` runs `tsc --noEmit`.
+- `pnpm lint` runs `biome check`.
 - Run all three before committing.
 - For tool handlers: write a unit test that asserts the built FFmpeg arg array, not the rendered output (deterministic, fast, no FFmpeg needed in CI).
 - Integration tests against real FFmpeg live in `tests/integration/` and run on CI only.

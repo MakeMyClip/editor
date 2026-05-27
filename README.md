@@ -27,7 +27,7 @@ Existing video editors are mouse-and-timeline. Existing AI video tools are black
 - caption and zoom a tutorial without opening Premiere,
 - assemble a social clip from raw footage in one prompt.
 
-This editor is the missing piece: **deterministic, local, scriptable editing** that any AI agent can drive.
+This editor is the missing piece: **deterministic, local, scriptable editing** that any AI agent can drive. Every edit is a structured timeline document the agent can inspect, version, and hand off — not an opaque sequence of FFmpeg commands.
 
 ## Install
 
@@ -83,11 +83,11 @@ All edits are non-destructive — the agent builds a timeline JSON, you can insp
                                        ffmpeg binary
 ```
 
-- **Language:** TypeScript (Node 20+)
+- **Language:** TypeScript (Node 24+)
 - **MCP framework:** `@modelcontextprotocol/sdk`
 - **Timeline schema:** Zod (shareable with the [MakeMyClip.com](https://makemyclip.com) web app)
 - **Subprocess:** `execa` — args as an array, no shell injection
-- **FFmpeg:** bundled via `@ffmpeg-installer/ffmpeg`, or use system binary
+- **FFmpeg:** bundled via `ffmpeg-static`, with `$MAKEMYCLIP_FFMPEG_PATH` override or system-binary fallback
 
 ## Free & open source
 
@@ -97,7 +97,11 @@ Paid AI-generation features (voice, music, stock, premium templates) will live o
 
 ## License
 
-[MIT](./LICENSE) — use it, fork it, ship it.
+The MakeMyClip Editor source code is [MIT](./LICENSE) licensed — use it, fork it, ship it.
+
+The bundled FFmpeg binary (via `ffmpeg-static`) is **GPL** licensed because it includes codecs like libx264 and libx265. This is fine for personal use, open-source projects, internal company use, server-side SaaS, and most commercial desktop products — your own code stays MIT, and the subprocess invocation pattern keeps the GPL terms confined to the FFmpeg binary itself, not your application code.
+
+If your situation requires an LGPL-only or custom FFmpeg build (e.g. strict no-copyleft enterprise policy, iOS App Store distribution), set `MAKEMYCLIP_FFMPEG_PATH` to your own binary and the bundled one will be ignored.
 
 ## Links
 
