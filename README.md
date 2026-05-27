@@ -49,7 +49,7 @@ No global install, no config edits, no client restart. The skill auto-discovers 
 npm i -g @makemyclip/editor
 ```
 
-Then use the `clip` CLI directly. Run `clip --help` for usage.
+Then use the `clip` CLI directly. Run `clip --help` for usage. Run `clip ui` to open a local browser UI showing the session log + outputs.
 
 > MCP server for other clients (Cursor, Claude Desktop, Continue) is on the roadmap — see the [project shape](./AGENTS.md) for what's currently in vs out.
 

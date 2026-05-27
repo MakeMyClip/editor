@@ -296,6 +296,16 @@ Two-pass `vidstab`: pass 1 (`vidstabdetect`) analyzes motion and writes a transf
 
 Requires `vidstab`-enabled ffmpeg. The bundled `ffmpeg-static` includes it; the tool fails with a clear error otherwise.
 
+### Open the local UI (implemented)
+
+```bash
+npx -y @makemyclip/editor ui
+```
+
+Starts a tiny local server on `http://127.0.0.1:5573` and opens your browser. The UI renders the session log (every op the agent has run), shows result paths and timestamps, and lets the user click an op to play its output. Useful as a companion to the chat-driven workflow — the user can watch the session evolve in real time and check outputs without touching the terminal.
+
+The UI is local-only and read-mostly in v0.1; manual editing controls and a visual timeline land in later milestones.
+
 ### Session safety — snapshot, undo, inspect, delete (implemented)
 
 Every successful tool call is logged to `$MAKEMYCLIP_WORKSPACE/session.json`. The agent can inspect that log, snapshot the current state, undo, or remove individual ops.
