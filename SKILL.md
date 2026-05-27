@@ -98,6 +98,20 @@ Returns JSON:
 
 All inputs must have matching codecs and resolution; if they don't, ffmpeg will fail with a clear error and the agent should re-encode (e.g. via `add_text` with a no-op text, or a future `render` call) before concatenating. The combined `trim → concat` flow is the bread-and-butter highlight-reel workflow: trim N segments, then concat them in order.
 
+### Extract a preview frame (implemented)
+
+```bash
+npx -y @makemyclip/editor preview <input> <atSec>
+```
+
+Extracts a single JPEG frame at the given timecode. Use this **after every mutating edit** to verify the output before moving on — text overlays land where you intended, trim cuts at the right point, concat seams line up. Returns JSON:
+
+```json
+{ "path": "/var/folders/.../makemyclip-editor/preview-abc123.jpg", "atSec": 1.5, "durationMs": 12 }
+```
+
+Fast (~10-50 ms) because it uses ffmpeg's input-seek (`-ss` before `-i`) — keyframe-accurate, not frame-exact, which is fine for thumbnails. The user can open the JPEG to confirm; agents that support image inputs can read it back to self-correct.
+
 ### Roadmap (not yet implemented)
 
 These tools are designed and will land in this skill as they ship:
@@ -107,8 +121,7 @@ These tools are designed and will land in this skill as they ship:
 | `zoom_pan` | Ken Burns / focus zoom on a region |
 | `add_audio` | Background music, voiceover overlay |
 | `transition` | Crossfade, cut, dip-to-black |
-| `render` | Export to MP4 / MOV / WebM |
-| `preview` | Generate a scrubbable HTML preview |
+| `render` | Export to MP4 / MOV / WebM with codec control |
 
 Until a tool ships, calling `npx -y @makemyclip/editor <toolname>` will return an unknown-command error — don't promise the user functionality that isn't here yet.
 

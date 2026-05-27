@@ -2,6 +2,7 @@
 import { addText } from './tools/add-text.js';
 import { concat } from './tools/concat.js';
 import { ingest } from './tools/ingest.js';
+import { preview } from './tools/preview.js';
 import { trim } from './tools/trim.js';
 
 const HELP = `clip — MakeMyClip Editor
@@ -23,6 +24,10 @@ Usage:
                  bottom-left bottom-center bottom-right
       Defaults: fontsize 48, white text, translucent box for readability.
 
+  clip preview <input> <atSec>
+      Extract a single frame as JPEG. Use after any edit to verify
+      output before continuing.
+
   clip --help
       Show this help.
 
@@ -31,6 +36,7 @@ Examples:
   clip trim screen.mp4 00:00:05 00:00:42
   clip concat intro.mp4 demo.mp4 outro.mp4
   clip add_text screen.mp4 "New dashboard" bottom-center 5 9
+  clip preview screen.mp4 12.5
 `;
 
 async function main(argv: string[]): Promise<void> {
@@ -69,6 +75,17 @@ async function main(argv: string[]): Promise<void> {
       process.exit(1);
     }
     const result = await concat({ inputs: args });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (command === 'preview') {
+    const [input, atSec] = args;
+    if (!input || atSec === undefined) {
+      process.stderr.write('Usage: clip preview <input> <atSec>\n');
+      process.exit(1);
+    }
+    const result = await preview({ input, atSec: Number(atSec) });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
