@@ -48,6 +48,22 @@ export {
 } from './ffmpeg/probe.js';
 export { runFfmpeg } from './ffmpeg/run.js';
 export {
+  appendOp,
+  makeEntryId,
+  readSession,
+  sessionPath,
+  snapshotPath,
+  snapshotsDir,
+  writeSession,
+} from './session/store.js';
+export {
+  EMPTY_SESSION,
+  type Session,
+  type SessionEntry,
+  SessionEntrySchema,
+  SessionSchema,
+} from './session/types.js';
+export {
   AudioStreamSchema,
   type Clip,
   ClipSchema,
@@ -68,12 +84,25 @@ export {
   type AddAudioResult,
   addAudio,
 } from './tools/add-audio.js';
+// Phase 3 — safety + composites
+export {
+  AddCaptionsInput,
+  type AddCaptionsInputType,
+  type AddCaptionsResult,
+  addCaptions,
+} from './tools/add-captions.js';
 export {
   AddTextInput,
   type AddTextInputType,
   type AddTextResult,
   addText,
 } from './tools/add-text.js';
+export {
+  AddTitleCardInput,
+  type AddTitleCardInputType,
+  type AddTitleCardResult,
+  addTitleCard,
+} from './tools/add-title-card.js';
 export { AdjustInput, type AdjustInputType, type AdjustResult, adjust } from './tools/adjust.js';
 export {
   buildConcatListContent,
@@ -82,7 +111,25 @@ export {
   type ConcatResult,
   concat,
 } from './tools/concat.js';
+export {
+  DeleteOpInput,
+  type DeleteOpInputType,
+  type DeleteOpResult,
+  deleteOp,
+} from './tools/delete-op.js';
+export {
+  HighlightReelInput,
+  type HighlightReelInputType,
+  type HighlightReelResult,
+  highlightReel,
+} from './tools/highlight-reel.js';
 export { IngestInput, type IngestInputType, type IngestResult, ingest } from './tools/ingest.js';
+export {
+  InspectInput,
+  type InspectInputType,
+  type InspectResult,
+  inspect,
+} from './tools/inspect.js';
 export {
   OverlayInput,
   type OverlayInputType,
@@ -96,6 +143,20 @@ export {
   preview,
 } from './tools/preview.js';
 export { RenderInput, type RenderInputType, type RenderResult, render } from './tools/render.js';
+export {
+  computeKeepRegions,
+  parseSilences,
+  SilenceRemoveInput,
+  type SilenceRemoveInputType,
+  type SilenceRemoveResult,
+  silenceRemove,
+} from './tools/silence-remove.js';
+export {
+  SnapshotInput,
+  type SnapshotInputType,
+  type SnapshotResult,
+  snapshot,
+} from './tools/snapshot.js';
 export { SpeedInput, type SpeedInputType, type SpeedResult, speed } from './tools/speed.js';
 export { SplitInput, type SplitInputType, type SplitResult, split } from './tools/split.js';
 export {
@@ -111,6 +172,7 @@ export {
   transition,
 } from './tools/transition.js';
 export { TrimInput, type TrimInputType, type TrimResult, trim } from './tools/trim.js';
+export { UndoInput, type UndoInputType, type UndoResult, undo } from './tools/undo.js';
 export {
   ZoomPanInput,
   type ZoomPanInputType,

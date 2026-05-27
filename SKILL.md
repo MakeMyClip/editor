@@ -240,11 +240,50 @@ npx -y @makemyclip/editor zoom_pan <input> [<fromZoom>] [<toZoom>] [<centerX>] [
 
 Smoothly zoom from `fromZoom` to `toZoom` over the full clip duration, centered on `(centerX, centerY)` in normalized `[0, 1]` coordinates. Defaults: `fromZoom=1`, `toZoom=1.5`, center is `(0.5, 0.5)`. Use `fromZoom > toZoom` for zoom-out. Tool probes the input to match output resolution and fps.
 
-### Roadmap (not yet implemented)
+### Add a title card (implemented)
 
-Phase 3 — safety + composites — is next: `snapshot`/`undo`, `inspect`, `delete`/`move`, `add_title_card`, `add_captions` (needs a transcriber dep), `silence_remove` (wraps `auto-editor`), `highlight_reel`.
+```bash
+npx -y @makemyclip/editor add_title_card <input> <text> [<durationSec>] [<background>] [<fontSize>] [<fontColor>]
+```
 
-Until a tool ships, calling `npx -y @makemyclip/editor <toolname>` will return an unknown-command error — don't promise the user functionality that isn't here yet.
+Generates a full-screen colored card (default 2 s, black background, white text) with centered title, then concatenates it before the input. Auto-probes the input to match dimensions, fps, and audio sample rate so the join is seamless.
+
+### Add multiple captions in one call (implemented)
+
+```bash
+npx -y @makemyclip/editor add_captions <input> <cuesJson>
+```
+
+`cuesJson` is a JSON array of `{ text, startSec, endSec, position? }`. Loops `add_text` per cue. **Does not transcribe** — the agent (or user) supplies the cues. Composability beats coupling: pair this with a separate transcription step when needed.
+
+### Remove silence (implemented)
+
+```bash
+npx -y @makemyclip/editor silence_remove <input> [<noiseDb>] [<minSilenceSec>]
+```
+
+Detects silent regions via ffmpeg's `silencedetect` filter, then trims the non-silent regions and concatenates them. Defaults: `noiseDb=-30`, `minSilenceSec=0.5`. Pure-FFmpeg, no Python `auto-editor` dependency.
+
+### Build a highlight reel (implemented)
+
+```bash
+npx -y @makemyclip/editor highlight_reel <input> <segmentsJson> [<transitionKind>] [<transitionSec>]
+```
+
+`segmentsJson` is a JSON array of `{ startSec, endSec }`. Trims each segment in parallel (stream-copy, fast), then either concatenates with hard cuts (no `transitionKind`) or chains the transitions tool pairwise to crossfade between them. The classic "best moments of a long video" workflow as a single agent-callable tool.
+
+### Session safety — snapshot, undo, inspect, delete (implemented)
+
+Every successful tool call is logged to `$MAKEMYCLIP_WORKSPACE/session.json`. The agent can inspect that log, snapshot the current state, undo, or remove individual ops.
+
+```bash
+npx -y @makemyclip/editor snapshot [<label>]            # Save the current session as <label>.json (default: snap-<N>)
+npx -y @makemyclip/editor undo [<snapshotLabel>]        # Pop the last op, OR restore a named snapshot
+npx -y @makemyclip/editor inspect [<limit>]             # Show recent ops with one-line summaries
+npx -y @makemyclip/editor delete <id> [<removeFile>]    # Remove an op (and optionally unlink its output file)
+```
+
+These are the recovery loop the council called must-haves. Snapshot before any uncertain edit; undo if it didn't land right; inspect to remember what you did.
 
 ## Safety
 
