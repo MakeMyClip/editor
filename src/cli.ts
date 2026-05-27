@@ -3,6 +3,7 @@ import { addText } from './tools/add-text.js';
 import { concat } from './tools/concat.js';
 import { ingest } from './tools/ingest.js';
 import { preview } from './tools/preview.js';
+import { transition } from './tools/transition.js';
 import { trim } from './tools/trim.js';
 
 const HELP = `clip — MakeMyClip Editor
@@ -28,6 +29,14 @@ Usage:
       Extract a single frame as JPEG. Use after any edit to verify
       output before continuing.
 
+  clip transition <inputA> <inputB> [<kind>] [<durationSec>]
+      Crossfade or slide between two clips. Auto-probes clip A so
+      you don't need to know its duration.
+      Kinds: fade fadeblack fadewhite dissolve
+             wipeleft wiperight wipeup wipedown
+             slideleft slideright circleopen circleclose
+      Defaults: kind=fade, durationSec=1.
+
   clip --help
       Show this help.
 
@@ -37,6 +46,7 @@ Examples:
   clip concat intro.mp4 demo.mp4 outro.mp4
   clip add_text screen.mp4 "New dashboard" bottom-center 5 9
   clip preview screen.mp4 12.5
+  clip transition intro.mp4 demo.mp4 fade 1
 `;
 
 async function main(argv: string[]): Promise<void> {
@@ -86,6 +96,23 @@ async function main(argv: string[]): Promise<void> {
       process.exit(1);
     }
     const result = await preview({ input, atSec: Number(atSec) });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (command === 'transition') {
+    const [inputA, inputB, kind, durationSec] = args;
+    if (!inputA || !inputB) {
+      process.stderr.write('Usage: clip transition <inputA> <inputB> [<kind>] [<durationSec>]\n');
+      process.exit(1);
+    }
+    const result = await transition({
+      inputA,
+      inputB,
+      // biome-ignore lint/suspicious/noExplicitAny: Zod validates the value at runtime
+      kind: (kind as any) ?? undefined,
+      durationSec: durationSec ? Number(durationSec) : undefined,
+    });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
