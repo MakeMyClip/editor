@@ -26,6 +26,28 @@ Do **not** invoke for: pure transcription (use a speech-to-text skill), thumbnai
 
 ## How to use
 
+### Probe a media file (implemented)
+
+```bash
+npx -y @makemyclip/editor ingest <input>
+```
+
+Returns metadata as JSON — duration, video stream (codec, dimensions, fps), audio stream (codec, sample rate, channels), plus a deterministic `mediaId` derived from the absolute path:
+
+```json
+{
+  "mediaId": "m_a1b2c3d4e5f6",
+  "ref": {
+    "path": "/abs/path/screen.mp4",
+    "durationSec": 83.5,
+    "video": { "codec": "h264", "width": 1920, "height": 1080, "fps": 30 },
+    "audio": { "codec": "aac", "sampleRate": 48000, "channels": "stereo" }
+  }
+}
+```
+
+Call this first to ground yourself in what the source actually contains — duration for trim calculations, dimensions for zoom/overlay placement, presence of audio before suggesting `add_audio`. Same input path always returns the same `mediaId`.
+
 ### Trim a clip (implemented)
 
 ```bash
