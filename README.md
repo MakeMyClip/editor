@@ -1,10 +1,10 @@
 # MakeMyClip Editor
 
-**AI-native video editor — talk to make video.**
+**AI-native video editor — talk to Claude to make video.**
 
-Trim, zoom, caption, and assemble clips from any AI agent (Claude, Cursor, Copilot). Delivered as an [MCP](https://modelcontextprotocol.io) server + [agent skill](https://skills.sh).
+Trim, zoom, caption, and assemble clips by asking Claude. Ships as a [Claude Code skill](https://skills.sh) + a `clip` CLI for direct use from terminal, scripts, or any agent that can shell out.
 
-> Status: pre-alpha. Repo reserved, design locked, code landing soon. Star to follow along.
+> Status: pre-alpha. Walking skeleton (skill + `trim` tool) is shipping; more tools landing iteratively. Star to follow along.
 
 ---
 
@@ -27,19 +27,27 @@ Existing video editors are mouse-and-timeline. Existing AI video tools are black
 - caption and zoom a tutorial without opening Premiere,
 - assemble a social clip from raw footage in one prompt.
 
-This editor is the missing piece: **deterministic, local, scriptable editing** that any AI agent can drive.
+This editor is the missing piece: **deterministic, local, scriptable editing** that any AI agent can drive. Every edit is a structured timeline document the agent can inspect, version, and hand off — not an opaque sequence of FFmpeg commands.
 
 ## Install
 
-```bash
-# via the skills registry (recommended)
-npx skills add MakeMyClip/editor
+**Claude Code** — one command:
 
-# or directly via npm
+```bash
+npx skills add MakeMyClip/editor
+```
+
+No global install, no config edits, no client restart. The skill auto-discovers triggers and shells out to the CLI on demand (`npx -y` downloads the package on first use, cached after).
+
+**Terminal, scripts, CI:**
+
+```bash
 npm i -g @makemyclip/editor
 ```
 
-This installs the `clip` CLI and registers the MCP server with your Claude / Cursor / Copilot config. From then on, just chat.
+Then use the `clip` CLI directly. Run `clip --help` for usage.
+
+> MCP server for other clients (Cursor, Claude Desktop, Continue) is on the roadmap — see the [project shape](./AGENTS.md) for what's currently in vs out.
 
 ## When to use it
 
@@ -71,41 +79,35 @@ All edits are non-destructive — the agent builds a timeline JSON, you can insp
 ## Architecture
 
 ```
-┌─────────────────────────┐       ┌────────────────────────┐
-│  AI Agent               │ MCP   │  MakeMyClip Editor      │
-│  (Claude / Cursor / …)  │ ◄───► │  - timeline schema      │
-└─────────────────────────┘       │  - tool handlers        │
-                                  │  - FFmpeg runner        │
-                                  │  - HTML preview         │
-                                  └────────────────────────┘
-                                            │
-                                            ▼
-                                       ffmpeg binary
+Claude Code  →  skill auto-discovery  →  npx -y @makemyclip/editor <tool>
+                                              │
+                                              ▼
+                                         clip CLI (tool handlers)
+                                              │
+                                              ▼
+                                    FFmpeg subprocess (stream-copy / filter)
 ```
 
-- **Language:** TypeScript (Node 20+)
-- **MCP framework:** `@modelcontextprotocol/sdk`
+The skill is intent-matching markdown; the CLI is the single execution surface. No persistent server, no daemon, no client-specific wiring — just one process per invocation.
+
+- **Language:** TypeScript (Node 24+)
 - **Timeline schema:** Zod (shareable with the [MakeMyClip.com](https://makemyclip.com) web app)
 - **Subprocess:** `execa` — args as an array, no shell injection
-- **FFmpeg:** bundled via `@ffmpeg-installer/ffmpeg`, or use system binary
+- **FFmpeg:** bundled via `ffmpeg-static`, with `$MAKEMYCLIP_FFMPEG_PATH` override or system-binary fallback
 
-## Free vs paid
+## Free & open source
 
-The editor is **MIT licensed and free forever** for local editing. Anything FFmpeg can do, this does for free.
+The editor is **MIT licensed and free forever** for local editing. Anything FFmpeg can do, this does for free — no account, no telemetry, no limits.
 
-When you want **AI-generated content** — voiceover, music, b-roll, stock footage, premium templates — the editor calls the [MakeMyClip.com](https://makemyclip.com) generation API, which is metered. Local editing never requires an account.
-
-| Free & open source | Paid (MakeMyClip.com) |
-|---|---|
-| All FFmpeg editing | AI voiceover generation |
-| Trim, zoom, caption, render | AI music & b-roll |
-| Timeline JSON + schema | Premium templates |
-| HTML preview | Cloud rendering |
-| Basic templates | Team workspaces |
+Paid AI-generation features (voice, music, stock, premium templates) will live on [MakeMyClip.com](https://makemyclip.com) when ready.
 
 ## License
 
-[MIT](./LICENSE) — use it, fork it, ship it.
+The MakeMyClip Editor source code is [MIT](./LICENSE) licensed — use it, fork it, ship it.
+
+The bundled FFmpeg binary (via `ffmpeg-static`) is **GPL** licensed because it includes codecs like libx264 and libx265. This is fine for personal use, open-source projects, internal company use, server-side SaaS, and most commercial desktop products — your own code stays MIT, and the subprocess invocation pattern keeps the GPL terms confined to the FFmpeg binary itself, not your application code.
+
+If your situation requires an LGPL-only or custom FFmpeg build (e.g. strict no-copyleft enterprise policy, iOS App Store distribution), set `MAKEMYCLIP_FFMPEG_PATH` to your own binary and the bundled one will be ignored.
 
 ## Links
 

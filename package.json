@@ -1,0 +1,71 @@
+{
+  "name": "@makemyclip/editor",
+  "version": "0.0.1",
+  "description": "AI-native video editor — talk to Claude to make video. Trim, zoom, caption, and assemble clips via the clip CLI and a Claude Code skill.",
+  "keywords": [
+    "video-editing",
+    "ffmpeg",
+    "claude",
+    "claude-code",
+    "agent-skill",
+    "ai-video",
+    "typescript"
+  ],
+  "homepage": "https://github.com/MakeMyClip/editor",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MakeMyClip/editor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MakeMyClip/editor/issues"
+  },
+  "license": "MIT",
+  "author": "MakeMyClip",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "clip": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "SKILL.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@10.32.1",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "type-check": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "execa": "^9.6.1",
+    "ffmpeg-static": "^5.3.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.15",
+    "@types/node": "^24.12.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "esbuild",
+      "ffmpeg-static"
+    ]
+  }
+}

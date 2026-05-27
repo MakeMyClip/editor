@@ -1,16 +1,16 @@
 ---
 name: MakeMyClip/editor
-description: AI-native video editor. Trim, zoom, caption, and assemble clips from any AI agent via MCP.
-version: 0.0.0
+description: AI-native video editor for any agent. Trim, zoom, caption, concat, and render via structured timeline JSON.
+version: 0.0.1
 license: MIT
 homepage: https://github.com/MakeMyClip/editor
 runtime: node
-install: npm i -g @makemyclip/editor
+install: npx skills add MakeMyClip/editor
 ---
 
 # MakeMyClip Editor — Agent Skill
 
-Drive a local video editor by chatting. The skill installs an MCP server that exposes editing tools (trim, zoom_pan, add_text, concat, render, …) to your agent. The agent plans the edit; FFmpeg executes it.
+Drive a local video editor by chatting. When triggered, this skill shells out to the `clip` CLI via `npx` (auto-downloaded on first use, cached after). No MCP setup, no global install, no config edits.
 
 ## When to invoke
 
@@ -21,46 +21,54 @@ Trigger this skill when the user asks to:
 - Add captions, titles, or lower-thirds to footage
 - Assemble multiple clips into one (concat, montage)
 - Render a screen recording into a demo or social clip
-- Generate an HTML preview of a timeline
 
 Do **not** invoke for: pure transcription (use a speech-to-text skill), thumbnail-only image work, or live streaming.
 
 ## How to use
 
-Once installed, the agent has access to these tools:
+### Trim a clip (implemented)
 
-| Tool | Inputs | Output |
-|---|---|---|
-| `trim` | `input`, `start`, `end` | clip path |
-| `concat` | `inputs[]` | clip path |
-| `zoom_pan` | `input`, `region`, `duration` | clip path |
-| `add_text` | `input`, `text`, `position`, `time_range` | clip path |
-| `add_audio` | `input`, `audio`, `mix` | clip path |
-| `transition` | `a`, `b`, `kind`, `duration` | clip path |
-| `render` | `timeline`, `output`, `format` | file path |
-| `preview` | `timeline` | HTML URL |
+```bash
+npx -y @makemyclip/editor trim <input> <start> <end>
+```
 
-All tools accept and return a structured **timeline JSON** (Zod-validated). Edits are non-destructive — build the timeline, inspect it, render at the end.
+Timecodes accept `HH:MM:SS[.ms]`, `MM:SS`, or seconds as a number. The output is JSON:
 
-## Typical flow
+```json
+{ "path": "/var/folders/.../makemyclip-editor/trim-abc123.mp4", "durationMs": 14 }
+```
 
-1. User shares an input video (path or URL).
-2. Agent calls `preview` to ground itself in the source.
-3. Agent proposes a timeline, calls edit tools to build it.
-4. Agent calls `render` to produce the final clip.
-5. Agent returns the output path.
+Trim is stream-copy (no re-encode), so it's fast and lossless. Output lands in `$MAKEMYCLIP_WORKSPACE` (defaults to `os.tmpdir()/makemyclip-editor`).
+
+### Roadmap (not yet implemented)
+
+These tools are designed and will land in this skill as they ship:
+
+| Tool | What it will do |
+|---|---|
+| `concat` | Stitch clips together |
+| `zoom_pan` | Ken Burns / focus zoom on a region |
+| `add_text` | Captions, titles, lower-thirds |
+| `add_audio` | Background music, voiceover overlay |
+| `transition` | Crossfade, cut, dip-to-black |
+| `render` | Export to MP4 / MOV / WebM |
+| `preview` | Generate a scrubbable HTML preview |
+
+Until a tool ships, calling `npx -y @makemyclip/editor <toolname>` will return an unknown-command error — don't promise the user functionality that isn't here yet.
 
 ## Safety
 
 - FFmpeg is spawned with arguments as an array — no shell interpolation, no injection.
-- All file paths are sandboxed to a workspace directory by default.
-- The skill never makes network calls unless the user invokes a paid generation tool (voiceover, music, b-roll) that calls the MakeMyClip.com API.
+- All file paths resolve against a workspace directory by default.
+- The skill makes no network calls beyond the one-time `npx` download of the package itself.
 
 ## Install
 
 ```bash
 npx skills add MakeMyClip/editor
 ```
+
+That's it.
 
 ## License
 

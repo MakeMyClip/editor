@@ -8,8 +8,8 @@ For architecture and stack details, see [AGENTS.md](./AGENTS.md).
 
 1. Create a feature branch from `main` (see [Branch Naming](#branch-naming) below)
 2. Make changes in `src/`
-3. Run `npm run lint`, `npm run type-check`, and `npm test` to ensure quality
-4. Test locally with `npm run dev`
+3. Run `pnpm lint`, `pnpm type-check`, and `pnpm test` to ensure quality
+4. Test locally with `pnpm dev`
 5. Submit a pull request with a clear description
 
 ## Branch Naming
@@ -69,13 +69,13 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/) speci
 ### Scopes
 
 Optional but recommended:
-- `mcp`: MCP server, tool registration, transport
 - `tools`: Individual tool handlers (trim, zoom_pan, add_text, …)
 - `timeline`: Timeline schema and helpers
 - `ffmpeg`: FFmpeg arg builders, escaping, subprocess
 - `cli`: `clip` CLI entry
 - `preview`: HTML preview generator
 - `schema`: Zod schemas shared with MakeMyClip.com
+- `skill`: SKILL.md and skill-registry integration
 - `deps`: Dependencies and packages
 - `docs`: Documentation
 - `ci`: GitHub Actions, release pipeline
@@ -156,9 +156,9 @@ See [AGENTS.md](./AGENTS.md#code-style) for the full style guide. Quick summary:
 
 ## Testing
 
-- Run `npm run lint` before committing
-- Run `npm run type-check` to ensure types pass
-- Run `npm test` to execute the unit test suite
+- Run `pnpm lint` before committing
+- Run `pnpm type-check` to ensure types pass
+- Run `pnpm test` to execute the unit test suite
 - Tool unit tests assert built FFmpeg arg arrays (no FFmpeg needed)
 - Integration tests live in `tests/integration/` and run on CI
 
