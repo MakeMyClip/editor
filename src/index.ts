@@ -5,6 +5,7 @@ export {
 } from './ffmpeg/args/add-audio.js';
 export { type AddTextArgs, buildAddTextArgs, type NamedPosition } from './ffmpeg/args/add-text.js';
 export { type AdjustArgs, buildAdjustArgs } from './ffmpeg/args/adjust.js';
+export { buildChromaKeyArgs, type ChromaKeyArgs } from './ffmpeg/args/chroma-key.js';
 export { buildConcatArgs, type ConcatArgs } from './ffmpeg/args/concat.js';
 export {
   buildOverlayArgs,
@@ -20,6 +21,12 @@ export {
 } from './ffmpeg/args/render.js';
 export { buildAtempoChain, buildSpeedArgs, type SpeedArgs } from './ffmpeg/args/speed.js';
 export { buildSplitArgs } from './ffmpeg/args/split.js';
+export {
+  buildVidstabDetectArgs,
+  buildVidstabTransformArgs,
+  type VidstabDetectArgs,
+  type VidstabTransformArgs,
+} from './ffmpeg/args/stabilize.js';
 export {
   buildCropArgs,
   buildFlipArgs,
@@ -104,6 +111,13 @@ export {
   addTitleCard,
 } from './tools/add-title-card.js';
 export { AdjustInput, type AdjustInputType, type AdjustResult, adjust } from './tools/adjust.js';
+// Phase 4 — specialty
+export {
+  ChromaKeyInput,
+  type ChromaKeyInputType,
+  type ChromaKeyResult,
+  chromaKey,
+} from './tools/chroma-key.js';
 export {
   buildConcatListContent,
   ConcatInput,
@@ -159,6 +173,12 @@ export {
 } from './tools/snapshot.js';
 export { SpeedInput, type SpeedInputType, type SpeedResult, speed } from './tools/speed.js';
 export { SplitInput, type SplitInputType, type SplitResult, split } from './tools/split.js';
+export {
+  StabilizeInput,
+  type StabilizeInputType,
+  type StabilizeResult,
+  stabilize,
+} from './tools/stabilize.js';
 export {
   TransformInput,
   type TransformInputType,
