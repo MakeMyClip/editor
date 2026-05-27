@@ -186,13 +186,63 @@ Returns JSON:
 
 Mix mode requires the input video to have an audio track (use `ingest` to confirm first). Output duration matches the original video — overlay audio is truncated if longer, padded with silence if shorter.
 
+### Crop / rotate / flip / scale (implemented)
+
+```bash
+npx -y @makemyclip/editor transform crop   <input> <x> <y> <width> <height>
+npx -y @makemyclip/editor transform rotate <input> <90|180|270>
+npx -y @makemyclip/editor transform flip   <input> <horizontal|vertical>
+npx -y @makemyclip/editor transform scale  <input> [<width>] [<height>]
+```
+
+Geometric operations on a single video. `transform scale` uses `-2` for an omitted dimension (auto-fit preserving aspect, even-pixel for H.264). Rotation is 90° increments only — for arbitrary angles, use `render` with a custom filter graph.
+
+### Adjust color / brightness / contrast / saturation / volume (implemented)
+
+```bash
+npx -y @makemyclip/editor adjust <input> --brightness N --contrast N --saturation N --volume N
+```
+
+One unified panel. Any subset of knobs can be set; at least one is required.
+
+| Knob | Range | No-op value |
+|---|---|---|
+| `--brightness` | -1 (black) … 1 (white) | 0 |
+| `--contrast` | 0 … 4 | 1 |
+| `--saturation` | 0 (grayscale) … 3 (vivid) | 1 |
+| `--volume` | 0 (mute) … 2 (double) | 1 |
+
+Stream-copies whichever stream isn't being adjusted (e.g. only `--volume` set → video stream-copies, fast).
+
+### Speed up / slow down / reverse (implemented)
+
+```bash
+npx -y @makemyclip/editor speed <input> [<factor>] [<reverse>]
+```
+
+Multiplier semantics: `factor=2` is double speed, `factor=0.5` is half (slow-mo). `reverse=true` plays backwards (audio reversed too). Either `factor != 1` or `reverse=true` is required (no-ops are rejected).
+
+Audio handling uses `atempo` which is range-limited to [0.5, 2.0]; wider factors chain multiple `atempo` links internally so `factor=4` and `factor=0.125` both work.
+
+### Picture-in-picture / image overlay (implemented)
+
+```bash
+npx -y @makemyclip/editor overlay <base> <overlay> [<position>] [<scaleToWidth>] [<startSec>] [<endSec>]
+```
+
+Place a video or image on top of the base. Same 9 named positions as `add_text`. Optional `scaleToWidth` to resize the overlay first (height auto-fits even-pixel). Optional time window via `startSec` + `endSec` (or just `startSec` for "from this moment to the end").
+
+### Ken Burns / focus zoom (implemented)
+
+```bash
+npx -y @makemyclip/editor zoom_pan <input> [<fromZoom>] [<toZoom>] [<centerX>] [<centerY>]
+```
+
+Smoothly zoom from `fromZoom` to `toZoom` over the full clip duration, centered on `(centerX, centerY)` in normalized `[0, 1]` coordinates. Defaults: `fromZoom=1`, `toZoom=1.5`, center is `(0.5, 0.5)`. Use `fromZoom > toZoom` for zoom-out. Tool probes the input to match output resolution and fps.
+
 ### Roadmap (not yet implemented)
 
-These tools are designed and will land in this skill as they ship:
-
-| Tool | What it will do |
-|---|---|
-| `zoom_pan` | Ken Burns / focus zoom on a region |
+Phase 3 — safety + composites — is next: `snapshot`/`undo`, `inspect`, `delete`/`move`, `add_title_card`, `add_captions` (needs a transcriber dep), `silence_remove` (wraps `auto-editor`), `highlight_reel`.
 
 Until a tool ships, calling `npx -y @makemyclip/editor <toolname>` will return an unknown-command error — don't promise the user functionality that isn't here yet.
 
