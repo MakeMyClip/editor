@@ -94,7 +94,6 @@ async function runAndLog<T>(
   return result;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: A single-file CLI dispatch is naturally large; splitting it into per-command modules would be more friction than benefit.
 async function main(argv: string[]): Promise<void> {
   const [command, ...args] = argv;
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export function Header({ totalOps }: { totalOps: number }) {
+export function Header({ totalOps, onNewOp }: { totalOps: number; onNewOp: () => void }) {
   const [workspace, setWorkspace] = useState<string>('');
 
   useEffect(() => {
@@ -13,8 +13,13 @@ export function Header({ totalOps }: { totalOps: number }) {
   return (
     <header className="header">
       <h1>MakeMyClip Editor</h1>
-      <div className="meta">
-        {totalOps} op{totalOps === 1 ? '' : 's'} · {workspace || '...'}
+      <div className="header-right">
+        <span className="meta">
+          {totalOps} op{totalOps === 1 ? '' : 's'} · {workspace || '...'}
+        </span>
+        <button type="button" className="btn-primary header-btn" onClick={onNewOp}>
+          + New op
+        </button>
       </div>
     </header>
   );
