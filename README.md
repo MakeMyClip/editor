@@ -1,10 +1,10 @@
 # MakeMyClip Editor
 
-**AI-native video editor — talk to make video.**
+**AI-native video editor — talk to Claude to make video.**
 
-Trim, zoom, caption, and assemble clips from any AI agent (Claude, Cursor, Copilot). Delivered as an [MCP](https://modelcontextprotocol.io) server + [agent skill](https://skills.sh).
+Trim, zoom, caption, and assemble clips by asking Claude. Ships as a [Claude Code skill](https://skills.sh) + a `clip` CLI for direct use from terminal, scripts, or any agent that can shell out.
 
-> Status: pre-alpha. Repo reserved, design locked, code landing soon. Star to follow along.
+> Status: pre-alpha. Walking skeleton (skill + `trim` tool) is shipping; more tools landing iteratively. Star to follow along.
 
 ---
 
@@ -39,17 +39,15 @@ npx skills add MakeMyClip/editor
 
 No global install, no config edits, no client restart. The skill auto-discovers triggers and shells out to the CLI on demand (`npx -y` downloads the package on first use, cached after).
 
-**Cursor, Claude Desktop, other MCP clients:**
+**Terminal, scripts, CI:**
 
 ```bash
 npm i -g @makemyclip/editor
 ```
 
-Then add an MCP server entry to your client config pointing at `clip serve`. See [docs/mcp-clients.md](./docs/mcp-clients.md) for copy-paste snippets per client.
+Then use the `clip` CLI directly. Run `clip --help` for usage.
 
-**Terminal, scripts, CI:**
-
-Same `npm i -g` as above, then use the `clip` CLI directly. Run `clip --help` for usage.
+> MCP server for other clients (Cursor, Claude Desktop, Continue) is on the roadmap — see the [project shape](./AGENTS.md) for what's currently in vs out.
 
 ## When to use it
 
@@ -81,20 +79,18 @@ All edits are non-destructive — the agent builds a timeline JSON, you can insp
 ## Architecture
 
 ```
-┌─────────────────────────┐       ┌────────────────────────┐
-│  AI Agent               │ MCP   │  MakeMyClip Editor      │
-│  (Claude / Cursor / …)  │ ◄───► │  - timeline schema      │
-└─────────────────────────┘       │  - tool handlers        │
-                                  │  - FFmpeg runner        │
-                                  │  - HTML preview         │
-                                  └────────────────────────┘
-                                            │
-                                            ▼
-                                       ffmpeg binary
+Claude Code  →  skill auto-discovery  →  npx -y @makemyclip/editor <tool>
+                                              │
+                                              ▼
+                                         clip CLI (tool handlers)
+                                              │
+                                              ▼
+                                    FFmpeg subprocess (stream-copy / filter)
 ```
 
+The skill is intent-matching markdown; the CLI is the single execution surface. No persistent server, no daemon, no client-specific wiring — just one process per invocation.
+
 - **Language:** TypeScript (Node 24+)
-- **MCP framework:** `@modelcontextprotocol/sdk`
 - **Timeline schema:** Zod (shareable with the [MakeMyClip.com](https://makemyclip.com) web app)
 - **Subprocess:** `execa` — args as an array, no shell injection
 - **FFmpeg:** bundled via `ffmpeg-static`, with `$MAKEMYCLIP_FFMPEG_PATH` override or system-binary fallback

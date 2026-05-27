@@ -69,13 +69,13 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/) speci
 ### Scopes
 
 Optional but recommended:
-- `mcp`: MCP server, tool registration, transport
 - `tools`: Individual tool handlers (trim, zoom_pan, add_text, …)
 - `timeline`: Timeline schema and helpers
 - `ffmpeg`: FFmpeg arg builders, escaping, subprocess
 - `cli`: `clip` CLI entry
 - `preview`: HTML preview generator
 - `schema`: Zod schemas shared with MakeMyClip.com
+- `skill`: SKILL.md and skill-registry integration
 - `deps`: Dependencies and packages
 - `docs`: Documentation
 - `ci`: GitHub Actions, release pipeline

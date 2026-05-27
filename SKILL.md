@@ -62,10 +62,6 @@ Until a tool ships, calling `npx -y @makemyclip/editor <toolname>` will return a
 - All file paths resolve against a workspace directory by default.
 - The skill makes no network calls beyond the one-time `npx` download of the package itself.
 
-## Cross-client setup (Cursor, Claude Desktop, other MCP clients)
-
-This skill is the easy path for **Claude Code**. For other MCP clients, install the package globally and add the MCP server to your client config — see [docs/mcp-clients.md](./docs/mcp-clients.md).
-
 ## Install
 
 ```bash

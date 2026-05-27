@@ -32,18 +32,3 @@ export async function trim(input: TrimInputType): Promise<TrimResult> {
   const { durationMs } = await runFfmpeg(args);
   return { path: output, durationMs };
 }
-
-export const trimTool = {
-  name: 'trim',
-  description:
-    'Cut a clip between two timecodes using stream copy (no re-encode). Returns the path to the trimmed file in the workspace.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      input: { type: 'string', description: 'Path to the source video.' },
-      start: { type: 'string', description: 'Start timecode (HH:MM:SS[.ms] or seconds).' },
-      end: { type: 'string', description: 'End timecode (HH:MM:SS[.ms] or seconds).' },
-    },
-    required: ['input', 'start', 'end'],
-  },
-} as const;
