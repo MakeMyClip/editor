@@ -31,15 +31,25 @@ This editor is the missing piece: **deterministic, local, scriptable editing** t
 
 ## Install
 
-```bash
-# via the skills registry (recommended)
-npx skills add MakeMyClip/editor
+**Claude Code** — one command:
 
-# or directly via npm
+```bash
+npx skills add MakeMyClip/editor
+```
+
+No global install, no config edits, no client restart. The skill auto-discovers triggers and shells out to the CLI on demand (`npx -y` downloads the package on first use, cached after).
+
+**Cursor, Claude Desktop, other MCP clients:**
+
+```bash
 npm i -g @makemyclip/editor
 ```
 
-This installs the `clip` CLI and registers the MCP server with your Claude / Cursor / Copilot config. From then on, just chat.
+Then add an MCP server entry to your client config pointing at `clip serve`. See [docs/mcp-clients.md](./docs/mcp-clients.md) for copy-paste snippets per client.
+
+**Terminal, scripts, CI:**
+
+Same `npm i -g` as above, then use the `clip` CLI directly. Run `clip --help` for usage.
 
 ## When to use it
 
