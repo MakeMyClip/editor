@@ -1,4 +1,6 @@
+export { type AddTextArgs, buildAddTextArgs, type NamedPosition } from './ffmpeg/args/add-text.js';
 export { buildTrimArgs, type TrimArgs } from './ffmpeg/args/trim.js';
+export { quoteFilterArg } from './ffmpeg/escape.js';
 export {
   type AudioStream,
   type MediaProbe,
@@ -22,5 +24,11 @@ export {
   TimelineSchema,
   VideoStreamSchema,
 } from './timeline/schema.js';
+export {
+  AddTextInput,
+  type AddTextInputType,
+  type AddTextResult,
+  addText,
+} from './tools/add-text.js';
 export { IngestInput, type IngestInputType, type IngestResult, ingest } from './tools/ingest.js';
 export { TrimInput, type TrimInputType, type TrimResult, trim } from './tools/trim.js';

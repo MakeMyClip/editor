@@ -1,18 +1,30 @@
 #!/usr/bin/env node
+import { addText } from './tools/add-text.js';
 import { ingest } from './tools/ingest.js';
 import { trim } from './tools/trim.js';
 
 const HELP = `clip — MakeMyClip Editor
 
 Usage:
-  clip ingest <input>                 Probe a media file and return its metadata
-  clip trim <input> <start> <end>     Trim a clip between two timecodes
-  clip --help                         Show this help
+  clip ingest <input>
+      Probe a media file and return its metadata.
+
+  clip trim <input> <start> <end>
+      Trim a clip between two timecodes (stream-copy, no re-encode).
+
+  clip add_text <input> <text> <position> <startSec> <endSec>
+      Burn a text overlay into a copy of the video.
+      Positions: top-left top-center top-right center-left center center-right
+                 bottom-left bottom-center bottom-right
+      Defaults: fontsize 48, white text, translucent box for readability.
+
+  clip --help
+      Show this help.
 
 Examples:
   clip ingest screen.mp4
   clip trim screen.mp4 00:00:05 00:00:42
-  clip trim podcast.mp4 0:30 1:45
+  clip add_text screen.mp4 "New dashboard" bottom-center 5 9
 `;
 
 async function main(argv: string[]): Promise<void> {
@@ -41,6 +53,27 @@ async function main(argv: string[]): Promise<void> {
       process.exit(1);
     }
     const result = await trim({ input, start, end });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (command === 'add_text') {
+    const [input, text, position, startSec, endSec] = args;
+    if (!input || !text || !position || !startSec || !endSec) {
+      process.stderr.write(
+        'Usage: clip add_text <input> <text> <position> <startSec> <endSec>\n' +
+          'Positions: top-left top-center top-right center-left center center-right bottom-left bottom-center bottom-right\n',
+      );
+      process.exit(1);
+    }
+    const result = await addText({
+      input,
+      text,
+      // biome-ignore lint/suspicious/noExplicitAny: Zod validates the value at runtime
+      position: position as any,
+      startSec: Number(startSec),
+      endSec: Number(endSec),
+    });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }

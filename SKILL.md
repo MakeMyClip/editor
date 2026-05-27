@@ -62,6 +62,26 @@ Timecodes accept `HH:MM:SS[.ms]`, `MM:SS`, or seconds as a number. The output is
 
 Trim is stream-copy (no re-encode), so it's fast and lossless. Output lands in `$MAKEMYCLIP_WORKSPACE` (defaults to `os.tmpdir()/makemyclip-editor`).
 
+### Add a text overlay (implemented)
+
+```bash
+npx -y @makemyclip/editor add_text <input> <text> <position> <startSec> <endSec>
+```
+
+Burns a text overlay into a copy of the video.
+
+- `<position>` is one of: `top-left`, `top-center`, `top-right`, `center-left`, `center`, `center-right`, `bottom-left`, `bottom-center`, `bottom-right`
+- `<startSec>` / `<endSec>` are seconds from the start of the input
+- Defaults: font size 48, white text, translucent black background box for readability
+
+Returns JSON:
+
+```json
+{ "path": "/var/folders/.../makemyclip-editor/add-text-abc123.mp4", "durationMs": 412 }
+```
+
+The text is written to a temp file before being passed to ffmpeg, so quotes, colons, commas, brackets, and most Unicode work without manual escaping. Caveat: literal `%{...}` in the text would be interpreted as a drawtext expression (rare in real captions; avoid).
+
 ### Roadmap (not yet implemented)
 
 These tools are designed and will land in this skill as they ship:
@@ -70,7 +90,6 @@ These tools are designed and will land in this skill as they ship:
 |---|---|
 | `concat` | Stitch clips together |
 | `zoom_pan` | Ken Burns / focus zoom on a region |
-| `add_text` | Captions, titles, lower-thirds |
 | `add_audio` | Background music, voiceover overlay |
 | `transition` | Crossfade, cut, dip-to-black |
 | `render` | Export to MP4 / MOV / WebM |
