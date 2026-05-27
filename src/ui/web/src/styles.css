@@ -1,0 +1,151 @@
+/* Tiny stylesheet — no Tailwind for v0.1; we keep things minimal. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #1a1a1a;
+  background: #fafafa;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.25rem;
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.header .meta {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.main {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  overflow: hidden;
+}
+
+.op-list {
+  border-right: 1px solid #e5e5e5;
+  overflow-y: auto;
+  background: #fff;
+}
+
+.op-list .empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: #888;
+  font-size: 0.9rem;
+}
+
+.op-list .op {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.op-list .op:hover {
+  background: #f5f5f5;
+}
+
+.op-list .op.selected {
+  background: #e8f0fe;
+  border-left: 3px solid #4a90e2;
+}
+
+.op-list .op .tool {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #1a1a1a;
+}
+
+.op-list .op .summary {
+  font-size: 0.8rem;
+  color: #555;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.op-list .op .timestamp {
+  font-size: 0.7rem;
+  color: #999;
+}
+
+.detail {
+  padding: 1.25rem;
+  overflow-y: auto;
+}
+
+.detail .placeholder {
+  color: #888;
+  text-align: center;
+  padding: 4rem 1rem;
+  font-size: 0.95rem;
+}
+
+.detail h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.1rem;
+}
+
+.detail .id {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  color: #888;
+  margin-bottom: 1rem;
+}
+
+.detail video,
+.detail img {
+  max-width: 100%;
+  max-height: 60vh;
+  border-radius: 6px;
+  background: #000;
+}
+
+.detail .no-preview {
+  padding: 2rem;
+  background: #f0f0f0;
+  border-radius: 6px;
+  color: #888;
+  text-align: center;
+}
+
+.detail pre.args {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: #f5f5f5;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  max-height: 200px;
+}

@@ -24,6 +24,7 @@ import { transition } from './tools/transition.js';
 import { trim } from './tools/trim.js';
 import { undo } from './tools/undo.js';
 import { zoomPan } from './tools/zoom-pan.js';
+import { startUiServer } from './ui/server.js';
 
 const HELP = `clip — MakeMyClip Editor
 
@@ -57,6 +58,10 @@ Specialty:
       Background can be a video or a still image (auto-detected, looped).
   clip stabilize <input> [<shakiness>] [<smoothing>] [<accuracy>] [<zoom>]
       Two-pass vidstab. Defaults: shakiness=5, smoothing=10, accuracy=9, zoom=5.
+
+UI:
+  clip ui                           Start the local browser UI on http://127.0.0.1:5573.
+                                    Renders the session log; click an op to play its output.
 
 Session safety (these tools do not log themselves):
   clip snapshot [<label>]           Save the current session as a named snapshot.
@@ -532,6 +537,27 @@ async function main(argv: string[]): Promise<void> {
     };
     const result = await runAndLog('stabilize', stabilizeArgs, () => stabilize(stabilizeArgs));
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  // ─── UI ──────────────────────────────────────────────────────────────
+
+  if (command === 'ui') {
+    const server = await startUiServer();
+    process.stdout.write(`MakeMyClip Editor UI: ${server.url}\n`);
+    process.stdout.write('Press Ctrl+C to stop.\n');
+    const stopAndExit = async () => {
+      process.stdout.write('\nShutting down…\n');
+      await server.stop();
+      process.exit(0);
+    };
+    process.on('SIGINT', stopAndExit);
+    process.on('SIGTERM', stopAndExit);
+    // Keep the process alive — serve() already binds a listener but doesn't
+    // hold the event loop open on its own when called from a short-lived CLI
+    // script. A no-op interval is the simplest way to stay running until
+    // SIGINT/SIGTERM fires.
+    setInterval(() => undefined, 1 << 30);
     return;
   }
 
