@@ -1,10 +1,14 @@
+<p align="center">
+  <img src="./logo.png" alt="MakeMyClip Editor" width="128" />
+</p>
+
 # MakeMyClip Editor
 
 **AI-native video editor — talk to Claude to make video.**
 
 Trim, zoom, caption, and assemble clips by asking Claude. Ships as a [Claude Code skill](https://skills.sh) + a `clip` CLI for direct use from terminal, scripts, or any agent that can shell out.
 
-> Status: pre-alpha. Walking skeleton (skill + `trim` tool) is shipping; more tools landing iteratively. Star to follow along.
+> Status: pre-alpha. Nine tools shipping (`ingest`, `trim`, `split`, `concat`, `transition`, `add_text`, `add_audio`, `preview`, `render`); more landing iteratively. Star to follow along.
 
 ---
 
