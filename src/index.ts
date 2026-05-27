@@ -1,5 +1,6 @@
 export { type AddTextArgs, buildAddTextArgs, type NamedPosition } from './ffmpeg/args/add-text.js';
 export { buildConcatArgs, type ConcatArgs } from './ffmpeg/args/concat.js';
+export { buildPreviewFrameArgs, type PreviewFrameArgs } from './ffmpeg/args/preview.js';
 export { buildTrimArgs, type TrimArgs } from './ffmpeg/args/trim.js';
 export { quoteFilterArg } from './ffmpeg/escape.js';
 export {
@@ -39,4 +40,10 @@ export {
   concat,
 } from './tools/concat.js';
 export { IngestInput, type IngestInputType, type IngestResult, ingest } from './tools/ingest.js';
+export {
+  PreviewInput,
+  type PreviewInputType,
+  type PreviewResult,
+  preview,
+} from './tools/preview.js';
 export { TrimInput, type TrimInputType, type TrimResult, trim } from './tools/trim.js';
