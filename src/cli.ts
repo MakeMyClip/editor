@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { addText } from './tools/add-text.js';
+import { concat } from './tools/concat.js';
 import { ingest } from './tools/ingest.js';
 import { trim } from './tools/trim.js';
 
@@ -11,6 +12,10 @@ Usage:
 
   clip trim <input> <start> <end>
       Trim a clip between two timecodes (stream-copy, no re-encode).
+
+  clip concat <input1> <input2> [<input3> ...]
+      Stitch two or more clips back-to-back (stream-copy; requires
+      matching codecs across all inputs).
 
   clip add_text <input> <text> <position> <startSec> <endSec>
       Burn a text overlay into a copy of the video.
@@ -24,6 +29,7 @@ Usage:
 Examples:
   clip ingest screen.mp4
   clip trim screen.mp4 00:00:05 00:00:42
+  clip concat intro.mp4 demo.mp4 outro.mp4
   clip add_text screen.mp4 "New dashboard" bottom-center 5 9
 `;
 
@@ -53,6 +59,16 @@ async function main(argv: string[]): Promise<void> {
       process.exit(1);
     }
     const result = await trim({ input, start, end });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (command === 'concat') {
+    if (args.length < 2) {
+      process.stderr.write('Usage: clip concat <input1> <input2> [<input3> ...]\n');
+      process.exit(1);
+    }
+    const result = await concat({ inputs: args });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
