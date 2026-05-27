@@ -12,20 +12,24 @@ concurrency:
 
 jobs:
   build:
-    name: type-check, test, build
+    name: lint, type-check, test, build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: 'npm'
+          cache: 'pnpm'
 
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
-      - run: npm run type-check
+      - run: pnpm lint
 
-      - run: npm test
+      - run: pnpm type-check
 
-      - run: npm run build
+      - run: pnpm test
+
+      - run: pnpm build

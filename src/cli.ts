@@ -34,7 +34,7 @@ async function main(argv: string[]): Promise<void> {
       process.exit(1);
     }
     const result = await trim({ input, start, end });
-    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
 

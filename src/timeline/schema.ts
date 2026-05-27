@@ -1,10 +1,8 @@
 import { z } from 'zod';
 
-export const TimecodeSchema = z
-  .string()
-  .regex(/^\d{1,2}:\d{2}:\d{2}(\.\d+)?$|^\d+(\.\d+)?$/, {
-    message: 'Timecode must be HH:MM:SS[.ms] or seconds (e.g. "00:01:23.5" or "83.5")',
-  });
+export const TimecodeSchema = z.string().regex(/^\d{1,2}:\d{2}:\d{2}(\.\d+)?$|^\d+(\.\d+)?$/, {
+  message: 'Timecode must be HH:MM:SS[.ms] or seconds (e.g. "00:01:23.5" or "83.5")',
+});
 
 export const ClipSchema = z.object({
   source: z.string().min(1),

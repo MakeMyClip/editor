@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { buildTrimArgs } from '../src/ffmpeg/args/trim.js';
+import { TimecodeSchema, TimelineSchema } from '../src/timeline/schema.js';
 import { TrimInput } from '../src/tools/trim.js';
-import { TimelineSchema, TimecodeSchema } from '../src/timeline/schema.js';
 
 describe('buildTrimArgs', () => {
   it('puts -ss/-to before -i for fast seeking and uses stream copy', () => {
@@ -13,10 +13,14 @@ describe('buildTrimArgs', () => {
     });
     expect(args).toEqual([
       '-y',
-      '-ss', '00:00:01',
-      '-to', '00:00:05',
-      '-i', 'in.mp4',
-      '-c', 'copy',
+      '-ss',
+      '00:00:01',
+      '-to',
+      '00:00:05',
+      '-i',
+      'in.mp4',
+      '-c',
+      'copy',
       'out.mp4',
     ]);
   });
@@ -41,21 +45,15 @@ describe('TrimInput schema', () => {
   });
 
   it('accepts plain seconds', () => {
-    expect(() =>
-      TrimInput.parse({ input: 'a.mp4', start: '1', end: '5.5' }),
-    ).not.toThrow();
+    expect(() => TrimInput.parse({ input: 'a.mp4', start: '1', end: '5.5' })).not.toThrow();
   });
 
   it('rejects garbage timecodes', () => {
-    expect(() =>
-      TrimInput.parse({ input: 'a.mp4', start: 'soon', end: 'later' }),
-    ).toThrow();
+    expect(() => TrimInput.parse({ input: 'a.mp4', start: 'soon', end: 'later' })).toThrow();
   });
 
   it('rejects empty input path', () => {
-    expect(() =>
-      TrimInput.parse({ input: '', start: '0', end: '5' }),
-    ).toThrow();
+    expect(() => TrimInput.parse({ input: '', start: '0', end: '5' })).toThrow();
   });
 });
 

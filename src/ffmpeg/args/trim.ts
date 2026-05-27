@@ -6,12 +6,5 @@ export interface TrimArgs {
 }
 
 export function buildTrimArgs({ input, start, end, output }: TrimArgs): string[] {
-  return [
-    '-y',
-    '-ss', start,
-    '-to', end,
-    '-i', input,
-    '-c', 'copy',
-    output,
-  ];
+  return ['-y', '-ss', start, '-to', end, '-i', input, '-c', 'copy', output];
 }
