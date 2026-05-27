@@ -112,6 +112,27 @@ Extracts a single JPEG frame at the given timecode. Use this **after every mutat
 
 Fast (~10-50 ms) because it uses ffmpeg's input-seek (`-ss` before `-i`) — keyframe-accurate, not frame-exact, which is fine for thumbnails. The user can open the JPEG to confirm; agents that support image inputs can read it back to self-correct.
 
+### Transition between two clips (implemented)
+
+```bash
+npx -y @makemyclip/editor transition <inputA> <inputB> [<kind>] [<durationSec>]
+```
+
+Crossfades, slides, or fades-through-black/white between two clips. The tool auto-probes clip A to compute the right offset, so the agent never has to know clip durations.
+
+- `<kind>` is one of: `fade`, `fadeblack`, `fadewhite`, `dissolve`, `wipeleft`, `wiperight`, `wipeup`, `wipedown`, `slideleft`, `slideright`, `circleopen`, `circleclose`. Defaults to `fade` (safest, most invisible).
+- `<durationSec>` defaults to `1`. Capped at 10.
+
+Returns JSON:
+
+```json
+{ "path": "/var/folders/.../makemyclip-editor/transition-abc.mp4", "durationMs": 320, "offsetSec": 4, "hasAudio": true }
+```
+
+Audio: if both inputs have audio, the tool wires an `acrossfade` of the same duration. If neither has audio, the output is silent. If exactly one has audio, the tool fails with a clear message — re-encode the silent one with a silent audio track first.
+
+Combined with `concat` and `add_text`, this is the polish layer that makes multi-clip outputs feel intentional rather than abrupt.
+
 ### Roadmap (not yet implemented)
 
 These tools are designed and will land in this skill as they ship:
@@ -120,7 +141,6 @@ These tools are designed and will land in this skill as they ship:
 |---|---|
 | `zoom_pan` | Ken Burns / focus zoom on a region |
 | `add_audio` | Background music, voiceover overlay |
-| `transition` | Crossfade, cut, dip-to-black |
 | `render` | Export to MP4 / MOV / WebM with codec control |
 
 Until a tool ships, calling `npx -y @makemyclip/editor <toolname>` will return an unknown-command error — don't promise the user functionality that isn't here yet.
