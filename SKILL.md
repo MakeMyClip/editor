@@ -272,6 +272,30 @@ npx -y @makemyclip/editor highlight_reel <input> <segmentsJson> [<transitionKind
 
 `segmentsJson` is a JSON array of `{ startSec, endSec }`. Trims each segment in parallel (stream-copy, fast), then either concatenates with hard cuts (no `transitionKind`) or chains the transitions tool pairwise to crossfade between them. The classic "best moments of a long video" workflow as a single agent-callable tool.
 
+### Green-screen / color keying (implemented)
+
+```bash
+npx -y @makemyclip/editor chroma_key <foreground> <background> [<color>] [<similarity>] [<blend>]
+```
+
+Removes a color from the foreground video and composites it over the background. The background can be a video OR a still image (auto-detected, looped to match foreground length).
+
+- `<color>` defaults to `green`. Named colors, `#RRGGBB`, or `0xRRGGBB`
+- `<similarity>` (0..1, default 0.3) — how close a pixel must be to count as the key color
+- `<blend>` (0..1, default 0.1) — soft-edge amount; 0 = hard cut, higher = softer
+
+Audio is taken from the background by default (the "scene"). Override with `preferForegroundAudio=true` if the foreground holds the voice.
+
+### Stabilize shaky footage (implemented)
+
+```bash
+npx -y @makemyclip/editor stabilize <input> [<shakiness>] [<smoothing>] [<accuracy>] [<zoom>]
+```
+
+Two-pass `vidstab`: pass 1 (`vidstabdetect`) analyzes motion and writes a transforms file; pass 2 (`vidstabtransform`) warps each frame to follow a smoothed camera path. Defaults are sensible (5, 10, 9, 5) — bump `shakiness` for very erratic input, `smoothing` for a more cinematic feel, `zoom` to hide warp borders.
+
+Requires `vidstab`-enabled ffmpeg. The bundled `ffmpeg-static` includes it; the tool fails with a clear error otherwise.
+
 ### Session safety — snapshot, undo, inspect, delete (implemented)
 
 Every successful tool call is logged to `$MAKEMYCLIP_WORKSPACE/session.json`. The agent can inspect that log, snapshot the current state, undo, or remove individual ops.

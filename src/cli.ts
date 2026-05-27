@@ -5,6 +5,7 @@ import { addCaptions } from './tools/add-captions.js';
 import { addText } from './tools/add-text.js';
 import { addTitleCard } from './tools/add-title-card.js';
 import { adjust } from './tools/adjust.js';
+import { chromaKey } from './tools/chroma-key.js';
 import { concat } from './tools/concat.js';
 import { deleteOp } from './tools/delete-op.js';
 import { highlightReel } from './tools/highlight-reel.js';
@@ -17,6 +18,7 @@ import { silenceRemove } from './tools/silence-remove.js';
 import { snapshot } from './tools/snapshot.js';
 import { speed } from './tools/speed.js';
 import { split } from './tools/split.js';
+import { stabilize } from './tools/stabilize.js';
 import { type TransformResult, transform } from './tools/transform.js';
 import { transition } from './tools/transition.js';
 import { trim } from './tools/trim.js';
@@ -48,6 +50,13 @@ Composites:
   clip silence_remove <input> [<noiseDb>] [<minSilenceSec>]
   clip highlight_reel <input> <segmentsJson> [<transitionKind>] [<transitionSec>]
       segmentsJson = JSON array of { startSec, endSec }
+
+Specialty:
+  clip chroma_key <foreground> <background> [<color>] [<similarity>] [<blend>]
+      Key out a color (default green) and composite over the background.
+      Background can be a video or a still image (auto-detected, looped).
+  clip stabilize <input> [<shakiness>] [<smoothing>] [<accuracy>] [<zoom>]
+      Two-pass vidstab. Defaults: shakiness=5, smoothing=10, accuracy=9, zoom=5.
 
 Session safety (these tools do not log themselves):
   clip snapshot [<label>]           Save the current session as a named snapshot.
@@ -480,6 +489,48 @@ async function main(argv: string[]): Promise<void> {
       transitionSec: transitionSec ? Number(transitionSec) : undefined,
     };
     const result = await runAndLog('highlight_reel', reelArgs, () => highlightReel(reelArgs));
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  // ─── Specialty ───────────────────────────────────────────────────────
+
+  if (command === 'chroma_key') {
+    const [foreground, background, color, similarity, blend] = args;
+    if (!foreground || !background) {
+      process.stderr.write(
+        'Usage: clip chroma_key <foreground> <background> [<color>] [<similarity>] [<blend>]\n',
+      );
+      process.exit(1);
+    }
+    const chromaArgs = {
+      foreground,
+      background,
+      color: color ?? undefined,
+      similarity: similarity ? Number(similarity) : undefined,
+      blend: blend ? Number(blend) : undefined,
+    };
+    const result = await runAndLog('chroma_key', chromaArgs, () => chromaKey(chromaArgs));
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (command === 'stabilize') {
+    const [input, shakiness, smoothing, accuracy, zoom] = args;
+    if (!input) {
+      process.stderr.write(
+        'Usage: clip stabilize <input> [<shakiness>] [<smoothing>] [<accuracy>] [<zoom>]\n',
+      );
+      process.exit(1);
+    }
+    const stabilizeArgs = {
+      input,
+      shakiness: shakiness ? Number(shakiness) : undefined,
+      smoothing: smoothing ? Number(smoothing) : undefined,
+      accuracy: accuracy ? Number(accuracy) : undefined,
+      zoom: zoom ? Number(zoom) : undefined,
+    };
+    const result = await runAndLog('stabilize', stabilizeArgs, () => stabilize(stabilizeArgs));
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
