@@ -7,9 +7,11 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import getPort from 'get-port';
 import { Hono } from 'hono';
 import open from 'open';
-import { readSession } from '../session/store.js';
+import { ZodError } from 'zod';
+import { appendOp, readSession } from '../session/store.js';
 import { preview } from '../tools/preview.js';
 import { getWorkspace } from '../workspace.js';
+import { isRegisteredTool, TOOL_REGISTRY } from './tool-registry.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // `HERE` resolves to different paths depending on whether we're running
@@ -57,6 +59,51 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   app.get('/api/session', async (c) => {
     const session = await readSession();
     return c.json(session);
+  });
+
+  /**
+   * List the tools the UI can dispatch via POST. Lets the frontend build
+   * a picker without hardcoding the registry on its side.
+   */
+  app.get('/api/tools', (c) => {
+    return c.json({ tools: Object.keys(TOOL_REGISTRY).sort() });
+  });
+
+  /**
+   * Run a tool. Body is JSON matching the tool's Zod input schema.
+   * Validates → calls → appends to session log → returns the result.
+   * Zod errors become 400s with structured details; everything else 500.
+   */
+  app.post('/api/tools/:name', async (c) => {
+    const name = c.req.param('name');
+    if (!isRegisteredTool(name)) {
+      return c.json({ error: `Unknown tool: ${name}` }, 404);
+    }
+    const entry = TOOL_REGISTRY[name];
+    if (!entry) return c.json({ error: `Unknown tool: ${name}` }, 404);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Body must be JSON' }, 400);
+    }
+
+    try {
+      const validated = entry.schema.parse(body);
+      const result = await entry.fn(validated);
+      await appendOp({
+        tool: name,
+        args: body as Record<string, unknown>,
+        result: result as Record<string, unknown>,
+      });
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof ZodError) {
+        return c.json({ error: 'Validation failed', issues: err.issues }, 400);
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 500);
+    }
   });
 
   /**

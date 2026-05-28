@@ -149,3 +149,219 @@ body,
   overflow-x: auto;
   max-height: 200px;
 }
+
+/* ─── Header right side / actions ────────────────────────────────────── */
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.btn-primary,
+.btn-secondary,
+.header-btn {
+  font: inherit;
+  padding: 0.4rem 0.85rem;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.btn-primary {
+  background: #4a90e2;
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: #357ac0;
+}
+
+.btn-primary:disabled {
+  background: #aac6e8;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: #1a1a1a;
+  border-color: #ccc;
+}
+
+.btn-secondary:hover {
+  background: #f0f0f0;
+}
+
+.header-btn {
+  background: #fff;
+  color: #1a1a1a;
+}
+
+.header-btn:hover {
+  background: #f0f0f0;
+}
+
+/* ─── Modal / tool picker ────────────────────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.modal-backdrop-button {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 8px;
+  width: 480px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.2);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.modal-close {
+  font-size: 1.4rem;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: #888;
+  line-height: 1;
+  padding: 0 0.5rem;
+}
+
+.modal-close:hover {
+  color: #1a1a1a;
+}
+
+.tool-picker {
+  overflow-y: auto;
+}
+
+.tool-pick {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #f0f0f0;
+  padding: 0.85rem 1.25rem;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+.tool-pick:hover {
+  background: #f5f5f5;
+}
+
+.tool-pick-label {
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.tool-pick-desc {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+/* ─── Forms ──────────────────────────────────────────────────────────── */
+
+.tool-form {
+  max-width: 540px;
+}
+
+.tool-form h3 {
+  margin: 0 0 1.25rem 0;
+  font-size: 1.05rem;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.85rem;
+  /* Reset default fieldset styling */
+  border: 0;
+  padding: 0;
+  margin-left: 0;
+  margin-right: 0;
+  min-width: 0;
+}
+
+.form-field-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #444;
+}
+
+.form-field-hint {
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.form-input {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.form-input:focus {
+  border-color: #4a90e2;
+  outline: 0;
+  box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.2);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+
+.form-error {
+  background: #fff0f0;
+  border: 1px solid #f0caca;
+  color: #a02020;
+  padding: 0.6rem 0.85rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  margin: 0.75rem 0;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
