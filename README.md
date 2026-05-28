@@ -196,35 +196,77 @@ The session is the source of truth: every editing operation appends one entry wi
 
 ## Frequently asked questions
 
-### Is MakeMyClip Editor free?
-Yes — MIT-licensed, free forever for local editing. There is no paid tier, no signup, and no upsell in the editor itself. Paid AI-generation features (voice synthesis, music libraries, stock footage) will live on [MakeMyClip.com](https://makemyclip.com) when they ship, and require explicit opt-in via a separate `@makemyclip/generation` package.
+### Setup & installation
 
-### Does it require an API key?
-Only the chat panel needs `ANTHROPIC_API_KEY`. The CLI, the browser UI's visual editing, the Claude Code skill, and every editing tool work without any API key — Claude Code provides its own credentials when invoking the skill, and the CLI calls FFmpeg directly.
+**Do I need FFmpeg installed separately?**
+No. MakeMyClip Editor bundles FFmpeg via `ffmpeg-static`, so installing the npm package or running `npx skills add MakeMyClip/editor` is all you need. If you want to use your own FFmpeg build (LGPL-only, custom codecs, hardware acceleration variants), set `MAKEMYCLIP_FFMPEG_PATH` to its path and the bundled binary is ignored.
 
-### Does it send my video files anywhere?
-No. The editor makes zero network calls in its core. The optional chat panel sends conversation text (not video files) to Anthropic's API when enabled. The `@makemyclip/generation` package (for voice / music / stock) requires explicit opt-in and is the only path that talks to external services.
+**What platforms does it run on?**
+macOS, Linux, and Windows — anywhere Node 24+ runs. The browser UI binds to `127.0.0.1` and needs no internet connection. The Claude Code skill works on all three platforms via the same `npx -y @makemyclip/editor` invocation pattern.
 
-### How does it compare to Descript?
-Descript edits text-as-video using generative AI to rewrite audio. MakeMyClip Editor edits video as video, using deterministic FFmpeg operations — every cut is exact, lossless where possible, and reproducible. Descript is closed-source and cloud-only; MakeMyClip Editor is MIT and local. Different tools for different needs.
-
-### Can I use it without Claude Code?
+**Can I use it without Claude Code?**
 Yes. The `clip` CLI and `clip ui` browser app are first-class surfaces. The Claude Code skill is one of three entry points — the editor itself is agnostic to which agent (or human) drives it.
 
-### Does it support MCP (Model Context Protocol)?
+**Does it require an API key?**
+Only the chat panel inside `clip ui` needs `ANTHROPIC_API_KEY`. The CLI, the browser UI's visual editing, the Claude Code skill, and every editing tool work without any API key — Claude Code provides its own credentials when invoking the skill, and the CLI calls FFmpeg directly.
+
+### Capabilities & limits
+
+**Is it production-ready?**
+v0.6 is feature-complete for local editing — 19 tools, 356 tests passing, browser UI shipped, chat panel shipped. We call it "almost production-ready" because the API surface is still pre-1.0 (tool schemas may change in minor ways before v1.0). Use it for real work; pin a version in CI.
+
+**What's the maximum video size or duration?**
+No hardcoded limit. FFmpeg streams the file rather than loading it into memory, and the browser UI's drag-drop streams uploads to disk too — so multi-GB screen recordings work fine. v0.6 isn't tuned for projects with hundreds of clips or runtime above 30 minutes; for those, drive the CLI directly rather than the browser UI.
+
+**Does it support 4K, HDR, or vertical (TikTok / Reels) formats?**
+4K and vertical aspect ratios work out of the box — `render` takes a `maxWidth` and preserves the source aspect ratio. HDR pass-through works; deliberate HDR-to-SDR tone-mapping isn't a named tool yet but can be done with `add_audio`-style custom-filter extension.
+
+**Does it support MCP (Model Context Protocol)?**
 Not yet in v0.6. The MCP server is deferred to a later milestone — the skill + CLI path covers the primary audience (Claude Code users) with one-command setup. The 19-tool registry is already MCP-shaped (`{ name, schema, fn }`), so adding the MCP transport is small when the demand surfaces.
 
-### What's the license situation with the bundled FFmpeg?
-The MakeMyClip Editor source code is [MIT](./LICENSE). The bundled FFmpeg binary (via `ffmpeg-static`) is GPL-licensed because it includes codecs like libx264 and libx265. This is fine for personal use, open-source projects, internal company use, server-side SaaS, and most commercial desktop products — your own code stays MIT, and invoking FFmpeg as a subprocess keeps the GPL terms confined to the binary, not your application code. For LGPL-only or custom-build requirements (e.g. iOS App Store), set `MAKEMYCLIP_FFMPEG_PATH` to your own binary and the bundled one is ignored.
+### Privacy & data
 
-### What platforms does it run on?
-macOS, Linux, and Windows — anywhere Node 24+ and FFmpeg run. The browser UI is local (`127.0.0.1`); no internet connection is required to edit.
+**Does it send my video files anywhere?**
+No. The editor makes zero network calls in its core. The optional chat panel sends conversation text (not video files) to Anthropic's API when enabled. The `@makemyclip/generation` package (for voice / music / stock) requires explicit opt-in and is the only path that talks to external services.
 
-### How do I extend it with my own tools?
-Add a file in `src/tools/<name>.ts` exporting a Zod input schema and a handler, register it in [`src/ui/tool-registry.ts`](src/ui/tool-registry.ts), and the tool becomes available in the CLI, the browser UI's tool picker, and the chat panel's agent. See [AGENTS.md](./AGENTS.md) for conventions and [CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution flow.
+**Where does it store my files?**
+In a local workspace folder — `$TMPDIR/makemyclip-editor` by default; override with `MAKEMYCLIP_WORKSPACE`. The folder holds your input files, generated output files, `session.json` (the op log), `chat.json` (chat history if used), and `snapshots/` (named save points). You can version-control the whole folder; everything in it is portable.
 
-### Is it production-ready?
-v0.6 is feature-complete for local editing — 19 tools, 356 tests passing, browser UI shipped, chat panel shipped. We call it "almost production-ready" because the API surface is still pre-1.0 (tool schemas may change in minor ways before v1.0). Use it for real work; pin a version in CI.
+**Is my chat history private?**
+Chat history is stored locally in `workspace/chat.json` — nothing about it leaves your machine except what you explicitly send. Each chat turn forwards your messages plus a summary of recent session ops to Anthropic's API (the model needs that context to pick which tool to call); responses stream back. If that's not acceptable, keep the chat panel closed — every editing tool works without it.
+
+### AI integration
+
+**Can I use a different AI model (Gemini, OpenAI, local LLMs)?**
+The chat panel uses `claude-sonnet-4-6` via the [Vercel AI SDK](https://ai-sdk.dev/), which supports Gemini, OpenAI, Mistral, local Ollama, and others through provider imports. Swapping is one import + one config change away in [`src/ui/server.ts`](src/ui/server.ts); a UI-level model picker is on the v0.7 roadmap. The CLI is model-agnostic — any agent that can shell out works.
+
+**How does the agent know which tool to call?**
+Each of the 19 tools ships with a Zod input schema (parameter descriptions inline via `.describe()`) and a one-line tool description. The chat panel passes the full catalog to the model via the AI SDK's `tool()` interface; the model reads the descriptions, picks a tool, and fills in the arguments. Same pattern as Anthropic's standard tool-use loop, just abstracted by the SDK.
+
+**What if the agent makes a mistake or runs the wrong tool?**
+Every edit appends to `session.json` and produces a new output file in the workspace; nothing is destructive. Press `⌘Z` (or click Undo) to pop the last op; click Snapshot before risky operations to save a named restore point; the entire workspace is a folder you can `git init`. Telling the agent to call `inspect` first is a good habit for non-trivial edits.
+
+### Compared to alternatives
+
+**How does it compare to Descript?**
+Descript edits text-as-video using generative AI to rewrite audio. MakeMyClip Editor edits video as video, using deterministic FFmpeg operations — every cut is exact, lossless where possible, and reproducible. Descript is closed-source and cloud-only; MakeMyClip Editor is MIT and local. Different tools for different needs.
+
+**How is this different from running FFmpeg directly?**
+FFmpeg is one binary with a complex CLI; MakeMyClip Editor is 19 named tools with typed inputs, a session log, snapshot/undo, a browser UI, and an agent-callable API. You're still running FFmpeg under the hood — but with a catalog any LLM can call, input validation that prevents bad commands, and a log you can inspect or version-control. Raw FFmpeg is the right tool when you know which filter graph you want; this editor is the right tool when you want an agent to plan it.
+
+**What's the relationship between this editor and the MakeMyClip.com website?**
+The editor (this repo) is MIT-licensed, free, local, and limited to deterministic FFmpeg operations. [MakeMyClip.com](https://makemyclip.com) is the separate hosted product where paid AI generation features (voice synthesis, stock music, b-roll generation) will live. The two share the timeline schema, so you can move projects between them. The editor is fully independent of the website — you never need an account to use it.
+
+### Pricing, license, contributing
+
+**Is MakeMyClip Editor free?**
+Yes — MIT-licensed, free forever for local editing. There is no paid tier, no signup, and no upsell in the editor itself. Paid AI-generation features (voice synthesis, music libraries, stock footage) will live on [MakeMyClip.com](https://makemyclip.com) when they ship, and require explicit opt-in via a separate `@makemyclip/generation` package.
+
+**What's the license situation with the bundled FFmpeg?**
+The MakeMyClip Editor source code is [MIT](./LICENSE). The bundled FFmpeg binary (via `ffmpeg-static`) is GPL-licensed because it includes codecs like libx264 and libx265. This is fine for personal use, open-source projects, internal company use, server-side SaaS, and most commercial desktop products — your own code stays MIT, and invoking FFmpeg as a subprocess keeps GPL terms confined to the binary, not your application code. For LGPL-only or custom-build requirements (e.g. iOS App Store), set `MAKEMYCLIP_FFMPEG_PATH` to your own binary and the bundled one is ignored.
+
+**How do I add my own editing tool?**
+Add a file in `src/tools/<name>.ts` exporting a Zod input schema and a handler, register it in [`src/ui/tool-registry.ts`](src/ui/tool-registry.ts), and the tool becomes available in the CLI, the browser UI's tool picker, and the chat panel's agent — all three surfaces dispatch through the same registry. See [AGENTS.md](./AGENTS.md) for conventions and [CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution flow.
 
 ## When to use it
 
