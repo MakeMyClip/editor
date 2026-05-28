@@ -11,7 +11,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://127.0.0.1:5574',
+      // Match the Hono server's default port (`clip ui` runs there).
+      // Override via VITE_API_PORT when running on a custom port.
+      '/api': `http://127.0.0.1:${process.env.VITE_API_PORT ?? 5573}`,
     },
   },
   build: {

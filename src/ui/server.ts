@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, existsSync } from 'node:fs';
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, readdir, stat } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -11,9 +11,11 @@ import getPort from 'get-port';
 import { Hono } from 'hono';
 import open from 'open';
 import { ZodError } from 'zod';
-import { appendOp, readSession } from '../session/store.js';
+import { appendOp, readSession, snapshotsDir } from '../session/store.js';
 import { ingest } from '../tools/ingest.js';
 import { preview } from '../tools/preview.js';
+import { snapshot } from '../tools/snapshot.js';
+import { undo } from '../tools/undo.js';
 import { ensureWorkspace, getWorkspace } from '../workspace.js';
 import { isRegisteredTool, TOOL_REGISTRY } from './tool-registry.js';
 
@@ -108,6 +110,72 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       const message = err instanceof Error ? err.message : String(err);
       return c.json({ error: message }, 500);
     }
+  });
+
+  /**
+   * Session safety endpoints. These intentionally live outside the
+   * /api/tools/:name registry because snapshot/undo are meta-operations on
+   * the session log itself — they shouldn't appear as ops *in* the log.
+   */
+
+  /** POST /api/session/snapshot — body: { label?: string }. */
+  app.post('/api/session/snapshot', async (c) => {
+    let body: { label?: unknown };
+    try {
+      body = (await c.req.json()) as { label?: unknown };
+    } catch {
+      body = {};
+    }
+    const label = typeof body.label === 'string' && body.label.length > 0 ? body.label : undefined;
+    try {
+      const result = await snapshot({ label });
+      return c.json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  /**
+   * POST /api/session/undo — body: { snapshotLabel?: string }. Pops the
+   * last op when label is absent, or restores the named snapshot otherwise.
+   */
+  app.post('/api/session/undo', async (c) => {
+    let body: { snapshotLabel?: unknown };
+    try {
+      body = (await c.req.json()) as { snapshotLabel?: unknown };
+    } catch {
+      body = {};
+    }
+    const snapshotLabel =
+      typeof body.snapshotLabel === 'string' && body.snapshotLabel.length > 0
+        ? body.snapshotLabel
+        : undefined;
+    try {
+      const result = await undo({ snapshotLabel });
+      return c.json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // "nothing to undo" / "missing snapshot" → 400, server faults → 500.
+      const status = /empty|nothing|ENOENT|not found/i.test(message) ? 400 : 500;
+      return c.json({ error: message }, status);
+    }
+  });
+
+  /**
+   * GET /api/session/snapshots — list of available labels. We just read the
+   * filenames; reading each file to count entries would be wasted I/O for
+   * the header dropdown's purposes.
+   */
+  app.get('/api/session/snapshots', async (c) => {
+    const dir = snapshotsDir();
+    if (!existsSync(dir)) return c.json({ snapshots: [] });
+    const files = await readdir(dir);
+    const labels = files
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => f.replace(/\.json$/, ''))
+      .sort();
+    return c.json({ snapshots: labels });
   });
 
   /**

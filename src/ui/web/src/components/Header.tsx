@@ -1,7 +1,24 @@
 import { useEffect, useState } from 'react';
 
-export function Header({ totalOps, onNewOp }: { totalOps: number; onNewOp: () => void }) {
+export function Header({
+  totalOps,
+  onNewOp,
+  onUndo,
+  onSnapshot,
+  snapshots,
+  onRestore,
+  safetyLoading,
+}: {
+  totalOps: number;
+  onNewOp: () => void;
+  onUndo: () => void;
+  onSnapshot: () => void;
+  snapshots: string[];
+  onRestore: (label: string) => void;
+  safetyLoading: boolean;
+}) {
   const [workspace, setWorkspace] = useState<string>('');
+  const [snapsOpen, setSnapsOpen] = useState(false);
 
   useEffect(() => {
     fetch('/api/workspace')
@@ -17,6 +34,59 @@ export function Header({ totalOps, onNewOp }: { totalOps: number; onNewOp: () =>
         <span className="meta">
           {totalOps} op{totalOps === 1 ? '' : 's'} · {workspace || '...'}
         </span>
+        <button
+          type="button"
+          className="btn-secondary header-btn-secondary"
+          onClick={onUndo}
+          disabled={safetyLoading || totalOps === 0}
+          title="Undo last op (⌘Z)"
+        >
+          Undo
+        </button>
+        <button
+          type="button"
+          className="btn-secondary header-btn-secondary"
+          onClick={onSnapshot}
+          disabled={safetyLoading || totalOps === 0}
+          title="Save snapshot (⌘S)"
+        >
+          Snapshot
+        </button>
+        {snapshots.length > 0 ? (
+          <div className="snapshots-dropdown">
+            <button
+              type="button"
+              className="btn-secondary header-btn-secondary"
+              onClick={() => setSnapsOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={snapsOpen}
+              title="Restore from snapshot"
+            >
+              ⤺ {snapshots.length}
+            </button>
+            {snapsOpen ? (
+              // Lightweight menu — clicking anywhere outside closes via the
+              // click-on-item handler; an outside-click hook would be tidier
+              // but isn't worth the complexity for a 1-deep dropdown.
+              <div className="snapshots-menu" role="menu" onMouseLeave={() => setSnapsOpen(false)}>
+                {snapshots.map((label) => (
+                  <button
+                    key={label}
+                    type="button"
+                    className="snapshot-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setSnapsOpen(false);
+                      onRestore(label);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <button type="button" className="btn-primary header-btn" onClick={onNewOp}>
           + New op
         </button>
