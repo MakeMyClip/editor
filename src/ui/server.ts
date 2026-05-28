@@ -1,22 +1,26 @@
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, existsSync } from 'node:fs';
-import { mkdir, readdir, stat } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import { anthropic } from '@ai-sdk/anthropic';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
+import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 'ai';
 import getPort from 'get-port';
 import { Hono } from 'hono';
 import open from 'open';
 import { ZodError } from 'zod';
+import { probe } from '../ffmpeg/probe.js';
 import { appendOp, readSession, snapshotsDir } from '../session/store.js';
 import { ingest } from '../tools/ingest.js';
 import { preview } from '../tools/preview.js';
 import { snapshot } from '../tools/snapshot.js';
 import { undo } from '../tools/undo.js';
 import { ensureWorkspace, getWorkspace } from '../workspace.js';
+import { buildChatTools } from './chat-tools.js';
 import { isRegisteredTool, TOOL_REGISTRY } from './tool-registry.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -176,6 +180,177 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       .map((f) => f.replace(/\.json$/, ''))
       .sort();
     return c.json({ snapshots: labels });
+  });
+
+  // ─── Chat (Anthropic via AI SDK) ───────────────────────────────────
+
+  /**
+   * Path to the persisted chat history. We store one file per workspace so
+   * a project's chat moves with its session.json.
+   */
+  function chatPath(): string {
+    return resolve(getWorkspace(), 'chat.json');
+  }
+
+  async function readChatHistory(): Promise<UIMessage[]> {
+    try {
+      const raw = await readFile(chatPath(), 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as UIMessage[];
+      return [];
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') return [];
+      // Corrupt history → start fresh; better than blocking chat outright.
+      return [];
+    }
+  }
+
+  async function writeChatHistory(messages: UIMessage[]): Promise<void> {
+    await ensureWorkspace();
+    await writeFile(chatPath(), `${JSON.stringify(messages, null, 2)}\n`);
+  }
+
+  function summarizeEntryForChat(e: {
+    id: string;
+    tool: string;
+    args: Record<string, unknown>;
+    result: Record<string, unknown>;
+  }): string {
+    const path =
+      typeof e.result.path === 'string'
+        ? e.result.path
+        : typeof (e.result.ref as { path?: unknown })?.path === 'string'
+          ? (e.result.ref as { path: string }).path
+          : '(no playable path)';
+    return `- ${e.id} ${e.tool} → ${path}`;
+  }
+
+  function buildSystemPrompt(): Promise<string> {
+    return readSession().then((session) => {
+      const workspace = getWorkspace();
+      const recent = session.entries.slice(-20).map(summarizeEntryForChat).join('\n');
+      const head =
+        session.entries.length > 20
+          ? `\n(showing last 20 of ${session.entries.length}; older ops exist)\n`
+          : '';
+      return [
+        'You are the assistant inside MakeMyClip Editor — an FFmpeg-backed video editor.',
+        'You run editing operations by calling tools. Each tool call produces a new output file and appends one entry to the session log; the UI picks it up automatically.',
+        '',
+        'Conventions:',
+        '- Refer to media by absolute file paths only — never relative.',
+        "- Chain ops by passing the previous op result's `path` as the next op's `input` (or `result.ref.path` for ingest).",
+        '- Prefer stream-copy ops (trim, split, concat) before re-encoding ops (transition, add_text, render) to keep results fast and lossless.',
+        '- When the user asks for something ambiguous, call `inspect`-style tools or read the session list to ground yourself before editing.',
+        '',
+        `Workspace: ${workspace}`,
+        `Session has ${session.entries.length} entries.${head}`,
+        recent ? `Recent ops:\n${recent}` : 'Session is empty.',
+      ].join('\n');
+    });
+  }
+
+  /**
+   * GET /api/chat — persisted history (UIMessage[]). Returns empty array
+   * for a fresh workspace.
+   */
+  app.get('/api/chat', async (c) => {
+    const messages = await readChatHistory();
+    return c.json({ messages });
+  });
+
+  /**
+   * DELETE /api/chat — clear history.
+   */
+  app.delete('/api/chat', async (c) => {
+    await writeChatHistory([]);
+    return c.json({ messages: [] });
+  });
+
+  /**
+   * POST /api/chat — `useChat` transport target. Body is `{ messages:
+   * UIMessage[] }`. Returns a UI message stream the @ai-sdk/react hook
+   * consumes. Each agent turn can fire several tool calls (multi-step)
+   * up to `stopWhen` — tools mutate session.json, the UI's session poll
+   * picks them up.
+   */
+  app.post('/api/chat', async (c) => {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return c.json(
+        {
+          error: 'ANTHROPIC_API_KEY is not set. Add it to your environment and restart `clip ui`.',
+        },
+        400,
+      );
+    }
+    let body: { messages?: UIMessage[] };
+    try {
+      body = (await c.req.json()) as { messages?: UIMessage[] };
+    } catch {
+      return c.json({ error: 'Body must be JSON with a `messages` array.' }, 400);
+    }
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+
+    const system = await buildSystemPrompt();
+    const modelMessages = await convertToModelMessages(messages);
+    const result = streamText({
+      // Sonnet 4.6 is the sweet spot for tool-use latency / cost; the user
+      // can swap models later via env / a settings panel.
+      model: anthropic('claude-sonnet-4-6'),
+      system,
+      messages: modelMessages,
+      tools: buildChatTools(),
+      // Up to 8 chained tool calls per turn — enough for "trim three clips
+      // then concat" without runaway loops.
+      stopWhen: stepCountIs(8),
+    });
+
+    return result.toUIMessageStreamResponse({
+      // Persist the full updated conversation when the stream finishes so
+      // a page reload restores the chat.
+      onFinish: async ({ messages: finalMessages }) => {
+        try {
+          await writeChatHistory(finalMessages);
+        } catch (err) {
+          // Don't block the response on persistence — log it server-side.
+          console.warn('Could not persist chat history:', err);
+        }
+      },
+    });
+  });
+
+  // ─── Duration probe (Timeline scrub slider) ───────────────────────
+
+  // In-memory cache: session entries are append-only and clip files don't
+  // change, so a duration we measured once stays valid for the lifetime
+  // of the server.
+  const durationCache = new Map<string, number>();
+
+  /**
+   * GET /api/duration/:opId — { durationSec } for the op's playable file.
+   * Used by the Timeline scrub slider so each card knows its range.
+   */
+  app.get('/api/duration/:opId', async (c) => {
+    const opId = c.req.param('opId');
+    const cached = durationCache.get(opId);
+    if (cached !== undefined) return c.json({ durationSec: cached });
+
+    const session = await readSession();
+    const entry = session.entries.find((e) => e.id === opId);
+    if (!entry) return c.json({ error: `No op ${opId}` }, 404);
+
+    const path = playablePathOf(entry);
+    if (!path || !existsSync(path)) {
+      return c.json({ error: `No playable path for op ${opId}` }, 404);
+    }
+    try {
+      const probed = await probe(path);
+      durationCache.set(opId, probed.durationSec);
+      return c.json({ durationSec: probed.durationSec });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 500);
+    }
   });
 
   /**
