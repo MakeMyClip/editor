@@ -9,7 +9,7 @@ export default defineConfig({
   target: 'node24',
   dts: true,
   clean: true,
-  sourcemap: true,
+  sourcemap: false,
   splitting: false,
   shims: false,
 });

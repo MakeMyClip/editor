@@ -1,6 +1,6 @@
 # MakeMyClip Editor
 
-> Open-source, local-first AI video editor. Wraps FFmpeg in 19 deterministic editing tools any LLM can call. Ships as a Claude Code skill, a `clip` CLI, and a browser UI (`clip ui`) with visual timeline, drag-drop import, chat panel, snapshot/undo, and keyboard shortcuts. MIT licensed. No telemetry, no cloud, no account. Last updated 2026-05-28, status v0.6 (feature-complete local editing).
+> Open-source, local-first AI video editor. Wraps FFmpeg in 19 deterministic editing tools any LLM can call. Ships as a Claude Code skill, a `clip` CLI, and a browser UI (`clip ui`) with visual timeline, drag-drop import, chat panel, snapshot/undo, and keyboard shortcuts. MIT licensed. No telemetry, no cloud, no account. First npm release: feature-complete local editing.
 
 ## What it is
 
@@ -18,7 +18,7 @@
 - CLI: `npm i -g @makemyclip/editor` then `clip --help`
 - Browser UI: `clip ui` (opens http://127.0.0.1:5573)
 
-## Tool catalog (19 in v0.6)
+## Tool catalog (19 tools)
 
 - **Cut & arrange:** trim, split, concat, transition
 - **Text & captions:** add_text, add_title_card, add_captions

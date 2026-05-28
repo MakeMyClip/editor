@@ -1,11 +1,14 @@
 ---
-name: MakeMyClip/editor
-description: AI-native video editor for any agent. Trim, zoom, caption, concat, and render via structured timeline JSON.
-version: 0.0.1
+name: editor
+description: AI-native video editor for any agent. Use when the user asks to edit, trim, splice, caption, zoom into, add a title card, transition between, remove silence from, chroma-key, stabilize, or render video files. Wraps FFmpeg in 19 deterministic tools and a session log; runs locally; no generative AI.
 license: MIT
-homepage: https://github.com/MakeMyClip/editor
-runtime: node
-install: npx skills add MakeMyClip/editor
+compatibility: Requires Node 24+. FFmpeg is auto-downloaded via ffmpeg-static on first use; override with MAKEMYCLIP_FFMPEG_PATH.
+metadata:
+  author: makemyclip
+  version: "0.0.1"
+  homepage: https://github.com/MakeMyClip/editor
+  runtime: node
+  install: npx skills add MakeMyClip/editor
 ---
 
 # MakeMyClip Editor — Agent Skill
@@ -304,7 +307,7 @@ npx -y @makemyclip/editor ui
 
 Starts a tiny local server on `http://127.0.0.1:5573` and opens your browser. The UI renders the session log (every op the agent has run), shows result paths and timestamps, and lets the user click an op to play its output. Useful as a companion to the chat-driven workflow — the user can watch the session evolve in real time and check outputs without touching the terminal.
 
-The UI is local-only and read-mostly in v0.1; manual editing controls and a visual timeline land in later milestones.
+Local-only. The UI includes drag-drop import, a horizontal timeline of every clip the session produced, a render queue, a chat sidebar that talks to the same agent, snapshot/undo, and keyboard shortcuts — so the user can take over visually whenever the agent goes off-script.
 
 ### Session safety — snapshot, undo, inspect, delete (implemented)
 
