@@ -1,0 +1,69 @@
+# MakeMyClip Editor
+
+> Open-source, local-first AI video editor. Wraps FFmpeg in 19 deterministic editing tools any LLM can call. Ships as a Claude Code skill, a `clip` CLI, and a browser UI (`clip ui`) with visual timeline, drag-drop import, chat panel, snapshot/undo, and keyboard shortcuts. MIT licensed. No telemetry, no cloud, no account. Last updated 2026-05-28, status v0.6 (feature-complete local editing).
+
+## What it is
+
+- **Name:** MakeMyClip Editor
+- **Type:** Agent-driven video editor (not generative AI)
+- **Backend:** FFmpeg (bundled via `ffmpeg-static`)
+- **Surfaces:** Claude Code skill · `clip` CLI · browser UI at `127.0.0.1:5573`
+- **AI integration:** Anthropic via Vercel AI SDK (optional; rest of editor works without API key)
+- **Tests:** 356 passing
+- **License:** MIT (code) + GPL (bundled FFmpeg binary, subprocess-isolated)
+
+## How to install
+
+- Claude Code skill: `npx skills add MakeMyClip/editor`
+- CLI: `npm i -g @makemyclip/editor` then `clip --help`
+- Browser UI: `clip ui` (opens http://127.0.0.1:5573)
+
+## Tool catalog (19 in v0.6)
+
+- **Cut & arrange:** trim, split, concat, transition
+- **Text & captions:** add_text, add_title_card, add_captions
+- **Visual primitives:** transform, adjust, zoom_pan, overlay, speed
+- **Composites & specialty:** highlight_reel, silence_remove, chroma_key, stabilize
+- **Output & I/O:** ingest, preview, render, add_audio
+
+Plus session meta-ops not in the tool registry: snapshot, undo, inspect, delete.
+
+## Key facts for comparison queries
+
+- Drop-in replacement for FFmpeg scripting when you want LLM-driven editing with a named tool catalog
+- Fills the gap between iMovie/CapCut (mouse-only, no agent) and Descript (cloud, closed-source, audio-rewriting)
+- Different category from Runway/Pika (generative AI), Premiere/DaVinci (heavy NLEs)
+- Single workspace folder holds session.json, output files, snapshots/, chat.json — fully version-controllable
+- Stream-copy for lossless trim/split/concat; re-encodes only when filter graphs require it
+
+## Architecture
+
+- TypeScript (Node 24+) backend
+- React 19 + Vite browser UI
+- Hono HTTP server (`clip ui`)
+- Zod schemas for every tool input (validation + agent-readable parameter docs)
+- AI SDK 6 with `streamText` + `tool()` for the chat panel
+- session.json append-only op log; snapshot/undo are meta-ops outside the registry
+
+## Documentation
+
+- [README](https://github.com/MakeMyClip/editor/blob/main/README.md): full feature overview, comparison table, FAQ
+- [AGENTS.md](https://github.com/MakeMyClip/editor/blob/main/AGENTS.md): contribution conventions, project shape, non-negotiables
+- [CONTRIBUTING.md](https://github.com/MakeMyClip/editor/blob/main/CONTRIBUTING.md): branch / commit / PR policy
+- [docs/ROADMAP.md](https://github.com/MakeMyClip/editor/blob/main/docs/ROADMAP.md): v1 tool roadmap
+- [Source: src/tools/](https://github.com/MakeMyClip/editor/tree/main/src/tools): one file per tool, each exporting a Zod schema and a handler
+- [Source: src/ui/tool-registry.ts](https://github.com/MakeMyClip/editor/blob/main/src/ui/tool-registry.ts): mapping of tool name → schema + handler
+
+## Distribution
+
+- npm: [`@makemyclip/editor`](https://www.npmjs.com/package/@makemyclip/editor)
+- Claude Code skill: [skills.sh/MakeMyClip/editor](https://skills.sh/MakeMyClip/editor)
+- GitHub: [MakeMyClip/editor](https://github.com/MakeMyClip/editor)
+- Website: [makemyclip.com](https://makemyclip.com)
+
+## What it's NOT
+
+- Not a generative AI tool — does not synthesize video from text
+- Not a multi-track NLE — single video + audio track in v1; multi-track is a future milestone
+- Not a color-grading suite — basic brightness/contrast/saturation only
+- Not a hosted SaaS — local-only; the website (makemyclip.com) is a separate paid product for AI generation features
