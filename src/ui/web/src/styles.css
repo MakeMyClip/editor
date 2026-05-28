@@ -17,7 +17,7 @@ body,
 
 .app {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   height: 100%;
 }
 
@@ -364,4 +364,130 @@ body,
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 1rem;
+}
+
+.form-hint {
+  font-size: 0.8rem;
+  color: #555;
+  margin: -0.5rem 0 1rem 0;
+  line-height: 1.45;
+}
+
+.form-hint code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85em;
+  background: #f0f0f0;
+  padding: 0.05rem 0.25rem;
+  border-radius: 3px;
+}
+
+/* ─── Import zone ────────────────────────────────────────────────────── */
+
+.import-zone {
+  border-bottom: 1px solid #e5e5e5;
+  background: #f7f9fc;
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.import-zone-active {
+  background: #e3edff;
+  outline: 2px dashed #4a90e2;
+  outline-offset: -8px;
+}
+
+.import-zone-prompt {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #1a1a1a;
+}
+
+.import-zone-prompt strong {
+  font-weight: 600;
+}
+
+.import-zone-sub {
+  color: #666;
+}
+
+.import-zone-browse {
+  padding: 0.25rem 0.65rem;
+  font-size: 0.85rem;
+}
+
+.import-zone-error {
+  font-size: 0.8rem;
+  color: #a02020;
+}
+
+.import-zone-recent {
+  font-size: 0.8rem;
+  color: #2a6f2a;
+}
+
+/* ─── Concat row list ─────────────────────────────────────────────────── */
+
+.row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.row-index {
+  font-size: 0.85rem;
+  color: #888;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  text-align: right;
+}
+
+.row-input {
+  min-width: 0;
+}
+
+.row-buttons {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.btn-icon {
+  font: inherit;
+  width: 1.85rem;
+  height: 1.85rem;
+  border: 1px solid #d0d0d0;
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #444;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: #f0f0f0;
+}
+
+.btn-icon:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn-add-row {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
 }

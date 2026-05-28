@@ -16,6 +16,15 @@ describe('TOOL_REGISTRY', () => {
     }
   });
 
+  it('includes composites with primitive-only schemas (v0.3 onward)', () => {
+    // add_title_card joined the registry in v0.3 — its schema is all
+    // primitives so the generic form pattern works. Composites with
+    // structured inputs (add_captions cues, highlight_reel segments)
+    // stay excluded until they get bespoke UI.
+    expect(TOOL_REGISTRY.add_title_card).toBeDefined();
+    expect(typeof TOOL_REGISTRY.add_title_card?.fn).toBe('function');
+  });
+
   it('every entry has both schema and fn', () => {
     for (const [name, entry] of Object.entries(TOOL_REGISTRY)) {
       expect(entry.schema, `schema for ${name}`).toBeDefined();
@@ -47,9 +56,12 @@ describe('isRegisteredTool', () => {
     expect(isRegisteredTool('TRIM')).toBe(false); // case-sensitive
   });
 
-  it('returns false for excluded tools (composites, safety, transform)', () => {
-    // We intentionally don't register these in v0.2 — they need bespoke UI
-    expect(isRegisteredTool('add_title_card')).toBe(false);
+  it('returns true for composites with primitive schemas (v0.3)', () => {
+    expect(isRegisteredTool('add_title_card')).toBe(true);
+  });
+
+  it('returns false for excluded tools (structured composites, safety, transform)', () => {
+    // Still excluded — schemas need bespoke UI or are meta-ops
     expect(isRegisteredTool('add_captions')).toBe(false);
     expect(isRegisteredTool('silence_remove')).toBe(false);
     expect(isRegisteredTool('highlight_reel')).toBe(false);

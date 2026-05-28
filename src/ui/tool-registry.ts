@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import { AddAudioInput, addAudio } from '../tools/add-audio.js';
 import { AddTextInput, addText } from '../tools/add-text.js';
+import { AddTitleCardInput, addTitleCard } from '../tools/add-title-card.js';
 import { AdjustInput, adjust } from '../tools/adjust.js';
 import { ConcatInput, concat } from '../tools/concat.js';
 import { IngestInput, ingest } from '../tools/ingest.js';
@@ -19,12 +20,13 @@ import { ZoomPanInput, zoomPan } from '../tools/zoom-pan.js';
  *  - dispatch POST /api/tools/:name to the right function with Zod-validated input
  *  - render forms for the schemas (eventually; for now forms are hand-built)
  *
- * Composites (add_title_card, add_captions, silence_remove, highlight_reel)
- * and session-management tools (snapshot/undo/inspect/delete) and the
- * discriminated-union tool (transform) are deliberately excluded — they
- * either have schemas that need bespoke UI (cue arrays, discriminated
- * unions) or are meta-operations that don't fit the "submit a form, get
- * a new op" pattern. They land in later milestones.
+ * Composites with primitive-only inputs (add_title_card) are registered here
+ * because their schemas form-render cleanly. Composites that take structured
+ * inputs (add_captions cue arrays, highlight_reel segment arrays, silence_remove)
+ * stay out until their forms are bespoke-built. Session-management tools
+ * (snapshot/undo/inspect/delete) and the discriminated-union tool (transform)
+ * are also excluded — they're meta-ops that don't fit the "submit a form,
+ * get a new op" pattern.
  */
 export const TOOL_REGISTRY: Record<
   string,
@@ -41,6 +43,7 @@ export const TOOL_REGISTRY: Record<
   concat: { schema: ConcatInput, fn: concat },
   add_text: { schema: AddTextInput, fn: addText },
   add_audio: { schema: AddAudioInput, fn: addAudio },
+  add_title_card: { schema: AddTitleCardInput, fn: addTitleCard },
   transition: { schema: TransitionInput, fn: transition },
   render: { schema: RenderInput, fn: render },
   preview: { schema: PreviewInput, fn: preview },
