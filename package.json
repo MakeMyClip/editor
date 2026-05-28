@@ -1,6 +1,6 @@
 {
   "name": "@makemyclip/editor",
-  "version": "0.0.1",
+  "version": "0.0.0-development",
   "description": "AI-native video editor — talk to Claude to make video. Trim, zoom, caption, and assemble clips via the clip CLI and a Claude Code skill.",
   "keywords": [
     "video-editing",
@@ -33,6 +33,9 @@
     "SKILL.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=24"
   },
@@ -64,12 +67,19 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/exec": "^7.1.0",
+    "@semantic-release/github": "^12.0.6",
+    "@semantic-release/npm": "^13.1.5",
+    "@semantic-release/release-notes-generator": "^14.1.0",
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "semantic-release": "^25.0.3",
     "tsup": "^8.5.1",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3",
