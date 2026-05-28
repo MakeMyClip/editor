@@ -179,6 +179,21 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   });
 
   /**
+   * Pull the on-disk path out of an op result, accounting for the different
+   * shapes each tool produces. Ingest hides its file under `result.ref.path`;
+   * split has two halves (we play the first); most others use `result.path`.
+   */
+  function playablePathOf(entry: { tool: string; result: Record<string, unknown> }): string | null {
+    if (entry.tool === 'ingest') {
+      const ref = entry.result.ref as { path?: unknown } | undefined;
+      return typeof ref?.path === 'string' ? ref.path : null;
+    }
+    if (typeof entry.result.path === 'string') return entry.result.path;
+    if (typeof entry.result.before === 'string') return entry.result.before;
+    return null;
+  }
+
+  /**
    * Stream the output file recorded under an op. We resolve the path from
    * `session.json` rather than accepting it from the client so the server
    * never serves files outside the workspace, even though it's localhost-only.
@@ -189,12 +204,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
     const entry = session.entries.find((e) => e.id === opId);
     if (!entry) return c.text(`No op ${opId}`, 404);
 
-    const path =
-      typeof entry.result.path === 'string'
-        ? entry.result.path
-        : typeof entry.result.before === 'string'
-          ? entry.result.before
-          : null;
+    const path = playablePathOf(entry);
     if (!path) return c.text(`Op ${opId} has no playable output`, 404);
     if (!existsSync(path)) return c.text(`Output file missing: ${path}`, 410);
 
@@ -247,12 +257,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
     const entry = session.entries.find((e) => e.id === opId);
     if (!entry) return c.text(`No op ${opId}`, 404);
 
-    const path =
-      typeof entry.result.path === 'string'
-        ? entry.result.path
-        : typeof entry.result.before === 'string'
-          ? entry.result.before
-          : null;
+    const path = playablePathOf(entry);
     if (!path || !existsSync(path)) return c.text(`No preview-able output for op ${opId}`, 404);
 
     const { path: jpegPath } = await preview({ input: path, atSec });

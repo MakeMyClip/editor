@@ -10,6 +10,7 @@ import { TrimForm } from './components/forms/TrimForm.js';
 import { Header } from './components/Header.js';
 import { ImportZone } from './components/ImportZone.js';
 import { OpList } from './components/OpList.js';
+import { Timeline } from './components/Timeline.js';
 import { ToolPickerModal } from './components/ToolPickerModal.js';
 import { useSession } from './hooks/useSession.js';
 
@@ -45,6 +46,15 @@ export function App() {
     <div className="app">
       <Header totalOps={session.entries.length} onNewOp={() => setPickerOpen(true)} />
       <ImportZone onImported={handleImported} />
+      <Timeline
+        session={session}
+        selectedOpId={selectedId}
+        onSelect={(id) => {
+          setSelectedId(id);
+          setActiveTool(null);
+        }}
+        onConcatSuccess={refresh}
+      />
       <main className="main">
         <OpList
           entries={session.entries}
