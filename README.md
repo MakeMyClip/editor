@@ -47,20 +47,44 @@ MakeMyClip Editor closes the gap: **deterministic FFmpeg editing with a 19-tool 
 
 ## How it compares
 
+Different editors win at different jobs. The two tables below cut the same comparison two ways: **what features each tool has**, then **which jobs each tool is the right pick for**. Legend: ✅ great fit · ⚠️ works but not the best · ❌ doesn't fit.
+
+### Feature matrix
+
 | Feature | MakeMyClip Editor | iMovie / CapCut | Descript | Runway / Pika | Raw FFmpeg |
 |---|:---:|:---:|:---:|:---:|:---:|
-| Agent-driven (chat to edit) | ✅ | ❌ | partial | ❌ | ❌ |
+| Agent-driven (chat to edit) | ✅ | ❌ | ⚠️ | ❌ | ❌ |
 | Open-source (MIT) | ✅ | ❌ | ❌ | ❌ | LGPL/GPL |
 | Local-only (no cloud) | ✅ | ✅ | ❌ | ❌ | ✅ |
 | Deterministic output (no AI generation) | ✅ | ✅ | ✅ | ❌ | ✅ |
 | Free forever | ✅ | ✅ | freemium | paid | ✅ |
 | Programmable CLI | ✅ | ❌ | ❌ | API | ✅ |
 | Visual timeline UI | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Snapshot & undo | ✅ | ✅ | ✅ | partial | ❌ |
+| Snapshot & undo | ✅ | ✅ | ✅ | ⚠️ | ❌ |
 | Inspectable session log (JSON) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Works as a [Claude Code](https://claude.com/claude-code) skill | ✅ | ❌ | ❌ | ❌ | manual |
-| Stream-copy for lossless cuts | ✅ | partial | partial | ❌ | ✅ |
+| Stream-copy for lossless cuts | ✅ | ⚠️ | ⚠️ | ❌ | ✅ |
 | Zero telemetry | ✅ | ❌ | ❌ | ❌ | ✅ |
+
+### Use-case matrix — which tool is the right pick?
+
+| Job to be done | MakeMyClip Editor | iMovie / CapCut | Descript | Runway / Pika | Raw FFmpeg |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Trim screen recordings to highlights | ✅ | ✅ | ✅ | ❌ | ✅ |
+| Assemble a product demo from N clips + title cards | ✅ | ✅ | ⚠️ | ❌ | ⚠️ |
+| Add script-provided timed captions | ✅ | ⚠️ | ✅ | ❌ | ⚠️ |
+| Auto-transcribe & edit text-as-video | ⚠️ (bring transcript) | ⚠️ | ✅ | ❌ | ❌ |
+| Auto-cut silence from a recording | ✅ | ❌ | ✅ | ❌ | ⚠️ |
+| Chroma-key / green-screen compositing | ✅ | ⚠️ (basic) | ⚠️ | ⚠️ | ✅ |
+| Generate b-roll / VFX shots from a prompt | ❌ | ❌ | ⚠️ | ✅ | ❌ |
+| Multi-track audio mixing with effects | ❌ | ⚠️ | ✅ | ❌ | ⚠️ |
+| Frame-accurate color grading | ⚠️ (basic adjust) | ⚠️ | ❌ | ❌ | ✅ |
+| Drive editing from an AI agent in natural language | ✅ | ❌ | ⚠️ | ⚠️ | ❌ |
+| Run as a scriptable CI pipeline | ✅ | ❌ | ❌ | ⚠️ (API) | ✅ |
+| Long-form (>30 min) projects with hundreds of clips | ⚠️ | ✅ | ✅ | ❌ | ✅ |
+| Edit on Linux / headless / fully offline | ✅ | ❌ | ❌ | ❌ | ✅ |
+
+Honest summary: **MakeMyClip Editor is the right pick when you want deterministic, scriptable editing that an AI agent can drive end-to-end.** It is *not* the right pick when you want generative video (Runway), text-as-video transcript editing (Descript), or a heavy multi-track NLE (DaVinci Resolve, Premiere).
 
 ## Quick start
 
