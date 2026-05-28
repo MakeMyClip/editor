@@ -46,7 +46,7 @@
     "start": "node dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit && tsc --noEmit -p src/ui/web/tsconfig.json",
     "lint": "biome check .",
     "format": "biome format --write .",
     "prepublishOnly": "pnpm build"

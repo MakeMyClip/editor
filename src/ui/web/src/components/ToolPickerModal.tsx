@@ -4,7 +4,7 @@ interface ToolMeta {
   description: string;
 }
 
-// Tools that v0.2 has hand-built forms for. The backend supports more, but
+// Tools the UI has hand-built forms for. The backend supports more, but
 // these are the ones the modal exposes. Add to this list as forms ship.
 const TOOLS_WITH_FORMS: ToolMeta[] = [
   {
@@ -18,9 +18,19 @@ const TOOLS_WITH_FORMS: ToolMeta[] = [
     description: 'Divide a clip at a point into before + after halves.',
   },
   {
+    name: 'concat',
+    label: 'Concat',
+    description: 'Stitch two or more clips back-to-back in order.',
+  },
+  {
     name: 'add_text',
     label: 'Add text',
     description: 'Burn a caption or title overlay onto the video.',
+  },
+  {
+    name: 'add_title_card',
+    label: 'Add title card',
+    description: 'Prepend a colored card with centered text to a clip.',
   },
   {
     name: 'transition',

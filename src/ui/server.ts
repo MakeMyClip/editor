@@ -1,6 +1,9 @@
-import { existsSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { createWriteStream, existsSync } from 'node:fs';
+import { mkdir, stat } from 'node:fs/promises';
+import { basename, dirname, resolve } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -9,8 +12,9 @@ import { Hono } from 'hono';
 import open from 'open';
 import { ZodError } from 'zod';
 import { appendOp, readSession } from '../session/store.js';
+import { ingest } from '../tools/ingest.js';
 import { preview } from '../tools/preview.js';
-import { getWorkspace } from '../workspace.js';
+import { ensureWorkspace, getWorkspace } from '../workspace.js';
 import { isRegisteredTool, TOOL_REGISTRY } from './tool-registry.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -103,6 +107,74 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       }
       const message = err instanceof Error ? err.message : String(err);
       return c.json({ error: message }, 500);
+    }
+  });
+
+  /**
+   * Drag-drop / Browse upload. Streams each file into `<workspace>/imports/`
+   * under a uniquified name, runs `ingest` to probe + register it, and
+   * appends one session entry per file — mirroring exactly what
+   * `clip ingest <path>` does. Returns the new entries so the UI can refresh
+   * without waiting for the next poll.
+   *
+   * Filename safety: we take only `basename(file.name)` (no traversal),
+   * replace any remaining separators with underscores, and prefix with 4
+   * random hex bytes so concurrent uploads of the same name don't collide.
+   */
+  app.post('/api/import', async (c) => {
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.parseBody({ all: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: `Could not parse upload: ${message}` }, 400);
+    }
+
+    // Accept either repeated `files` (preferred) or a single `file` key.
+    const raw = body.files ?? body.file;
+    const files: File[] = (Array.isArray(raw) ? raw : [raw]).filter(
+      (f): f is File => f instanceof File,
+    );
+    if (files.length === 0) {
+      return c.json(
+        { error: 'No files in upload — expected multipart field "files" or "file".' },
+        400,
+      );
+    }
+
+    const workspace = await ensureWorkspace();
+    const importsDir = resolve(workspace, 'imports');
+    await mkdir(importsDir, { recursive: true });
+
+    const imported: Array<{ entry: unknown; originalName: string; path: string }> = [];
+    try {
+      for (const file of files) {
+        const safeBase = basename(file.name).replace(/[/\\]/g, '_') || 'upload';
+        const id = randomBytes(4).toString('hex');
+        const destPath = resolve(importsDir, `${id}-${safeBase}`);
+
+        // Stream the upload to disk so multi-GB screen recordings don't sit
+        // in memory. `Readable.fromWeb` adapts the web ReadableStream that
+        // File.stream() returns into a Node stream `pipeline` can drive.
+        const nodeStream = Readable.fromWeb(
+          file.stream() as Parameters<typeof Readable.fromWeb>[0],
+        );
+        await pipeline(nodeStream, createWriteStream(destPath));
+
+        const result = await ingest({ path: destPath });
+        const entry = await appendOp({
+          tool: 'ingest',
+          args: { path: destPath },
+          result: result as unknown as Record<string, unknown>,
+        });
+        imported.push({ entry, originalName: file.name, path: destPath });
+      }
+      return c.json({ imported });
+    } catch (err) {
+      // Partial-success is possible — earlier files are already on disk and
+      // logged. Surface the failing filename so the user knows where it broke.
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message, imported }, 500);
     }
   });
 
