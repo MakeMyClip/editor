@@ -16,13 +16,19 @@ describe('TOOL_REGISTRY', () => {
     }
   });
 
-  it('includes composites with primitive-only schemas (v0.3 onward)', () => {
-    // add_title_card joined the registry in v0.3 — its schema is all
-    // primitives so the generic form pattern works. Composites with
-    // structured inputs (add_captions cues, highlight_reel segments)
-    // stay excluded until they get bespoke UI.
-    expect(TOOL_REGISTRY.add_title_card).toBeDefined();
-    expect(typeof TOOL_REGISTRY.add_title_card?.fn).toBe('function');
+  it('includes composites once the UI has a form for them (v0.3 / v0.5)', () => {
+    // add_title_card joined in v0.3 (primitive schema). The rest joined in
+    // v0.5 once the row-list form pattern proved out for structured input.
+    for (const name of [
+      'add_title_card',
+      'chroma_key',
+      'silence_remove',
+      'highlight_reel',
+      'add_captions',
+    ]) {
+      expect(TOOL_REGISTRY[name], `${name} should be registered`).toBeDefined();
+      expect(typeof TOOL_REGISTRY[name]?.fn).toBe('function');
+    }
   });
 
   it('every entry has both schema and fn', () => {
@@ -56,20 +62,27 @@ describe('isRegisteredTool', () => {
     expect(isRegisteredTool('TRIM')).toBe(false); // case-sensitive
   });
 
-  it('returns true for composites with primitive schemas (v0.3)', () => {
-    expect(isRegisteredTool('add_title_card')).toBe(true);
+  it('returns true for all v0.3 / v0.5 composites', () => {
+    for (const name of [
+      'add_title_card',
+      'chroma_key',
+      'silence_remove',
+      'highlight_reel',
+      'add_captions',
+    ]) {
+      expect(isRegisteredTool(name), name).toBe(true);
+    }
   });
 
-  it('returns false for excluded tools (structured composites, safety, transform)', () => {
-    // Still excluded — schemas need bespoke UI or are meta-ops
-    expect(isRegisteredTool('add_captions')).toBe(false);
-    expect(isRegisteredTool('silence_remove')).toBe(false);
-    expect(isRegisteredTool('highlight_reel')).toBe(false);
+  it('returns false for session-management and discriminated-union tools', () => {
+    // Snapshot/undo/inspect/delete are meta-ops served by dedicated endpoints
+    // (POST /api/session/snapshot, /api/session/undo, etc.) rather than the
+    // generic tool dispatch. transform is a discriminated union that needs
+    // bespoke UI.
     expect(isRegisteredTool('snapshot')).toBe(false);
     expect(isRegisteredTool('undo')).toBe(false);
     expect(isRegisteredTool('inspect')).toBe(false);
     expect(isRegisteredTool('delete')).toBe(false);
-    expect(isRegisteredTool('chroma_key')).toBe(false);
     expect(isRegisteredTool('transform')).toBe(false);
   });
 });

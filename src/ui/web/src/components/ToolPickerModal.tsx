@@ -4,43 +4,88 @@ interface ToolMeta {
   description: string;
 }
 
-// Tools the UI has hand-built forms for. The backend supports more, but
-// these are the ones the modal exposes. Add to this list as forms ship.
-const TOOLS_WITH_FORMS: ToolMeta[] = [
+interface ToolGroup {
+  label: string;
+  tools: ToolMeta[];
+}
+
+// Tools the UI has hand-built forms for. Grouped because we're past the
+// flat-list-readable threshold. Add to these lists as new forms ship.
+const TOOL_GROUPS: ToolGroup[] = [
   {
-    name: 'trim',
-    label: 'Trim',
-    description: 'Cut a clip between two timecodes (stream-copy, no re-encode).',
+    label: 'Cut & arrange',
+    tools: [
+      {
+        name: 'trim',
+        label: 'Trim',
+        description: 'Cut a clip between two timecodes (stream-copy, no re-encode).',
+      },
+      {
+        name: 'split',
+        label: 'Split',
+        description: 'Divide a clip at a point into before + after halves.',
+      },
+      {
+        name: 'concat',
+        label: 'Concat',
+        description: 'Stitch two or more clips back-to-back in order.',
+      },
+      {
+        name: 'transition',
+        label: 'Transition',
+        description: 'Crossfade, slide, or fade between two clips.',
+      },
+    ],
   },
   {
-    name: 'split',
-    label: 'Split',
-    description: 'Divide a clip at a point into before + after halves.',
+    label: 'Text & captions',
+    tools: [
+      {
+        name: 'add_text',
+        label: 'Add text',
+        description: 'Burn a caption or title overlay onto the video.',
+      },
+      {
+        name: 'add_title_card',
+        label: 'Add title card',
+        description: 'Prepend a colored card with centered text to a clip.',
+      },
+      {
+        name: 'add_captions',
+        label: 'Add captions',
+        description: 'Burn multiple timed caption cues onto a video.',
+      },
+    ],
   },
   {
-    name: 'concat',
-    label: 'Concat',
-    description: 'Stitch two or more clips back-to-back in order.',
+    label: 'Composites',
+    tools: [
+      {
+        name: 'highlight_reel',
+        label: 'Highlight reel',
+        description: 'Extract several time ranges and stitch them with optional transitions.',
+      },
+      {
+        name: 'silence_remove',
+        label: 'Remove silence',
+        description: 'Detect and cut silent stretches from a video with audio.',
+      },
+      {
+        name: 'chroma_key',
+        label: 'Chroma key',
+        description: 'Key out a color from the foreground and composite over a background.',
+      },
+    ],
   },
   {
-    name: 'add_text',
-    label: 'Add text',
-    description: 'Burn a caption or title overlay onto the video.',
-  },
-  {
-    name: 'add_title_card',
-    label: 'Add title card',
-    description: 'Prepend a colored card with centered text to a clip.',
-  },
-  {
-    name: 'transition',
-    label: 'Transition',
-    description: 'Crossfade, slide, or fade between two clips.',
-  },
-  {
-    name: 'render',
-    label: 'Render',
-    description: 'Re-encode to a specific format / quality / size.',
+    label: 'Output',
+    tools: [
+      {
+        name: 'render',
+        label: 'Render',
+        description: 'Re-encode to a specific format / quality / size.',
+      },
+    ],
   },
 ];
 
@@ -56,9 +101,6 @@ export function ToolPickerModal({
   if (!open) return null;
 
   return (
-    // The backdrop is a click-to-dismiss affordance, not a control. We model
-    // it as a button so Biome's a11y rule is satisfied while keeping the
-    // visual behavior identical.
     <div className="modal-backdrop">
       <button
         type="button"
@@ -84,16 +126,21 @@ export function ToolPickerModal({
           </button>
         </header>
         <div className="tool-picker">
-          {TOOLS_WITH_FORMS.map((tool) => (
-            <button
-              type="button"
-              key={tool.name}
-              className="tool-pick"
-              onClick={() => onPick(tool.name)}
-            >
-              <div className="tool-pick-label">{tool.label}</div>
-              <div className="tool-pick-desc">{tool.description}</div>
-            </button>
+          {TOOL_GROUPS.map((group) => (
+            <div className="tool-pick-group" key={group.label}>
+              <div className="tool-pick-group-label">{group.label}</div>
+              {group.tools.map((tool) => (
+                <button
+                  type="button"
+                  key={tool.name}
+                  className="tool-pick"
+                  onClick={() => onPick(tool.name)}
+                >
+                  <div className="tool-pick-label">{tool.label}</div>
+                  <div className="tool-pick-desc">{tool.description}</div>
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       </div>
