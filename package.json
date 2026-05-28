@@ -29,7 +29,6 @@
   },
   "files": [
     "dist",
-    "web",
     "README.md",
     "SKILL.md",
     "LICENSE"
