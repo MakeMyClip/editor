@@ -57,11 +57,16 @@ export { runFfmpeg } from './ffmpeg/run.js';
 export {
   appendOp,
   makeEntryId,
+  mutateSession,
+  overwriteSession,
   readSession,
+  SessionConflictError,
+  SessionCorruptError,
   sessionPath,
   snapshotPath,
   snapshotsDir,
   writeSession,
+  writeSessionIfUnchanged,
 } from './session/store.js';
 export {
   EMPTY_SESSION,

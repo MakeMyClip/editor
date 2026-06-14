@@ -1,8 +1,8 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { appendOp, readSession } from '../src/session/store.js';
+import { appendOp, readSession, SessionCorruptError, sessionPath } from '../src/session/store.js';
 import { DeleteOpInput, deleteOp } from '../src/tools/delete-op.js';
 import { inspect } from '../src/tools/inspect.js';
 import { snapshot } from '../src/tools/snapshot.js';
@@ -96,6 +96,33 @@ describe('inspect', () => {
     // Last two ops only.
     expect(result.entries[0]?.tool).toBe('t3');
     expect(result.entries[1]?.tool).toBe('t4');
+  });
+});
+
+describe('corruption recovery', () => {
+  it('undo --snapshot restores even when the live session.json is corrupt', async () => {
+    await appendOp({ tool: 'a', args: {}, result: {} });
+    await snapshot({ label: 'good' });
+    await appendOp({ tool: 'b', args: {}, result: {} });
+
+    // Simulate a torn write / corrupted live log — the exact scenario the
+    // SessionCorruptError message tells the user to recover from.
+    await writeFile(sessionPath(), '{ not valid json');
+    await expect(readSession()).rejects.toBeInstanceOf(SessionCorruptError);
+
+    const result = await undo({ snapshotLabel: 'good' });
+    expect(result.restoredFrom).toBe('good');
+    expect(result.entryCount).toBe(1);
+    // The live file is readable again, restored to the snapshot's contents.
+    expect((await readSession()).entries.map((e) => e.tool)).toEqual(['a']);
+  });
+
+  it('inspect reports corruption instead of throwing', async () => {
+    await writeFile(sessionPath(), 'not json at all');
+    const result = await inspect({});
+    expect(result.totalOps).toBe(0);
+    expect(result.entries).toEqual([]);
+    expect(result.corrupt?.path).toBe(sessionPath());
   });
 });
 

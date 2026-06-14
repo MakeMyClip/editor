@@ -14,7 +14,7 @@ import { Hono } from 'hono';
 import open from 'open';
 import { ZodError } from 'zod';
 import { probe } from '../ffmpeg/probe.js';
-import { appendOp, readSession, snapshotsDir } from '../session/store.js';
+import { appendOp, readSession, SessionCorruptError, snapshotsDir } from '../session/store.js';
 import { ingest } from '../tools/ingest.js';
 import { preview } from '../tools/preview.js';
 import { snapshot } from '../tools/snapshot.js';
@@ -67,8 +67,18 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   });
 
   app.get('/api/session', async (c) => {
-    const session = await readSession();
-    return c.json(session);
+    try {
+      const session = await readSession();
+      return c.json(session);
+    } catch (err) {
+      // A corrupt session.json now surfaces (instead of silently resetting).
+      // Translate it into an actionable 409 so the pane shows the path + how to
+      // recover rather than a raw 500.
+      if (err instanceof SessionCorruptError) {
+        return c.json({ error: err.message, path: err.path, corrupt: true }, 409);
+      }
+      throw err;
+    }
   });
 
   /**
@@ -291,7 +301,22 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
     }
     const messages = Array.isArray(body.messages) ? body.messages : [];
 
-    const system = await buildSystemPrompt();
+    let system: string;
+    try {
+      // buildSystemPrompt reads the session; a corrupt file used to brick every
+      // chat turn with a raw 500. Degrade to an actionable message instead.
+      system = await buildSystemPrompt();
+    } catch (err) {
+      if (err instanceof SessionCorruptError) {
+        return c.json(
+          {
+            error: `Session file is corrupt: ${err.path}. Recover with \`clip undo <snapshotLabel>\` or remove it, then retry.`,
+          },
+          409,
+        );
+      }
+      throw err;
+    }
     const modelMessages = await convertToModelMessages(messages);
     const result = streamText({
       // Sonnet 4.6 is the sweet spot for tool-use latency / cost; the user
