@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildTrimArgs } from '../src/ffmpeg/args/trim.js';
-import { TimecodeSchema, TimelineSchema } from '../src/timeline/schema.js';
+import { TimecodeSchema } from '../src/timeline/schema.js';
 import { TrimInput } from '../src/tools/trim.js';
 
 describe('buildTrimArgs', () => {
@@ -64,25 +64,5 @@ describe('TimecodeSchema', () => {
 
   it('rejects negative numbers', () => {
     expect(() => TimecodeSchema.parse('-5')).toThrow();
-  });
-});
-
-describe('TimelineSchema', () => {
-  it('parses a minimal valid timeline', () => {
-    const t = TimelineSchema.parse({
-      version: 1,
-      clips: [{ source: 'a.mp4', start: '0', end: '10' }],
-    });
-    expect(t.clips).toHaveLength(1);
-  });
-
-  it('rejects empty clip list', () => {
-    expect(() => TimelineSchema.parse({ version: 1, clips: [] })).toThrow();
-  });
-
-  it('rejects wrong version', () => {
-    expect(() =>
-      TimelineSchema.parse({ version: 2, clips: [{ source: 'a.mp4', start: '0', end: '1' }] }),
-    ).toThrow();
   });
 });

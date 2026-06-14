@@ -1,6 +1,6 @@
 import { unlink } from 'node:fs/promises';
 import { z } from 'zod';
-import { readSession, writeSession } from '../session/store.js';
+import { mutateSession } from '../session/store.js';
 
 export const DeleteOpInput = z.object({
   id: z
@@ -24,17 +24,20 @@ export interface DeleteOpResult {
 export async function deleteOp(rawInput: DeleteOpInputType): Promise<DeleteOpResult> {
   const input = DeleteOpInput.parse(rawInput);
 
-  const session = await readSession();
-  const idx = session.entries.findIndex((e) => e.id === input.id);
-  if (idx === -1) {
-    throw new Error(`No op with id ${input.id} in session log.`);
-  }
-  const [removed] = session.entries.splice(idx, 1);
-  if (!removed) {
-    throw new Error('Unexpected: splice returned no entry.');
-  }
-  await writeSession(session);
+  const { result: removed, session } = await mutateSession((s) => {
+    const idx = s.entries.findIndex((e) => e.id === input.id);
+    if (idx === -1) {
+      throw new Error(`No op with id ${input.id} in session log.`);
+    }
+    const [entry] = s.entries.splice(idx, 1);
+    if (!entry) {
+      throw new Error('Unexpected: splice returned no entry.');
+    }
+    return entry;
+  });
 
+  // Unlink AFTER the mutation commits — file I/O must stay out of the mutator,
+  // which can re-run on a detected write race.
   let removedFile: string | null = null;
   if (input.removeFile && typeof removed.result.path === 'string') {
     removedFile = removed.result.path;
