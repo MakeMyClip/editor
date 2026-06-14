@@ -62,11 +62,28 @@ describe('compileTimeline — single clip', () => {
     );
     const args = plan.steps[0]?.args ?? [];
     expect(args.join(' ')).toContain('anullsrc=channel_layout=stereo:sample_rate=48000');
-    // The generated silence is the SECOND input, mapped as a bare stream
-    // specifier `1:a` (brackets would be parsed as a non-existent filter label).
+    // The generated silence (input 1) flows through the normalize chain and is
+    // mapped from the chain's [a] output.
+    const fc = args[args.indexOf('-filter_complex') + 1] ?? '';
+    expect(fc).toContain('[1:a]aformat=sample_rates=48000:channel_layouts=stereo');
     const mapIdxs = args.map((a, i) => (a === '-map' ? i : -1)).filter((i) => i >= 0);
-    expect(args[(mapIdxs[1] ?? -2) + 1]).toBe('1:a');
-    expect(args.join(' ')).not.toContain('[1:a]');
+    expect(args[(mapIdxs[1] ?? -2) + 1]).toBe('[a]');
+  });
+
+  it('normalizes every segment audio to stereo/48k (uniform layout for the fold)', () => {
+    // A media clip WITH audio and no audio effects must still run aformat, or a
+    // mono source would silently downmix the whole timeline at concat/acrossfade.
+    const comp = oneTrack({
+      op: 'addClip',
+      trackId: 'v0',
+      clip: mediaClip({ id: 'c1', mediaId: M1, sourceOutSec: 3, startSec: 0 }),
+    });
+    const plan = compileTimeline(comp, ctx());
+    const args = plan.steps[0]?.args ?? [];
+    const fc = args[args.indexOf('-filter_complex') + 1] ?? '';
+    expect(fc).toContain('[0:a]aformat=sample_rates=48000:channel_layouts=stereo');
+    const mapIdxs = args.map((a, i) => (a === '-map' ? i : -1)).filter((i) => i >= 0);
+    expect(args[(mapIdxs[1] ?? -2) + 1]).toBe('[a]');
   });
 });
 
@@ -248,5 +265,79 @@ describe('compileTimeline — v1 guards (explicit, not silent-wrong)', () => {
       clip: mediaClip({ id: 'a', mediaId: M2, sourceOutSec: 2, startSec: 0 }),
     });
     expect(() => compileTimeline(comp, ctx({ media: new Map() }))).toThrow(/No media registered/);
+  });
+
+  it('rejects a transition longer than an adjacent clip (degenerate/failing fold)', () => {
+    const comp = oneTrack(
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 0 }),
+      },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'b', mediaId: M2, sourceOutSec: 2, startSec: 2 }),
+      },
+      {
+        op: 'addTransition',
+        trackId: 'v0',
+        transition: { afterClipId: 'a', kind: 'fade', durationSec: 3 },
+      },
+    );
+    expect(() => compileTimeline(comp, ctx())).toThrow(
+      /shorter than\s+both adjacent clips|must be shorter/i,
+    );
+  });
+
+  it('rejects a timeline gap between clips instead of silently collapsing it', () => {
+    const comp = oneTrack(
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 0 }),
+      },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'b', mediaId: M2, sourceOutSec: 2, startSec: 5 }),
+      },
+    );
+    expect(() => compileTimeline(comp, ctx())).toThrow(/gap/i);
+  });
+
+  it('rejects a timeline overlap between clips', () => {
+    const comp = oneTrack(
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 4, startSec: 0 }),
+      },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'b', mediaId: M2, sourceOutSec: 4, startSec: 2 }),
+      },
+    );
+    expect(() => compileTimeline(comp, ctx())).toThrow(/overlap/i);
+  });
+});
+
+describe('compileTimeline — fade clamping', () => {
+  it('clamps a fadeOut longer than the clip to the clip duration', () => {
+    const comp = oneTrack(
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 0 }),
+      },
+      { op: 'addEffect', clipId: 'a', effect: { type: 'fadeOut', durationSec: 5 } },
+    );
+    const plan = compileTimeline(comp, ctx());
+    const args = plan.steps[0]?.args ?? [];
+    const fc = args[args.indexOf('-filter_complex') + 1] ?? '';
+    // d clamped to outDur (2), start = 0 — a full fade within the window.
+    expect(fc).toContain('fade=t=out:st=0:d=2');
+    expect(fc).toContain('afade=t=out:st=0:d=2');
   });
 });

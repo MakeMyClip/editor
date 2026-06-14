@@ -23,8 +23,10 @@ export async function runPlan(plan: FfmpegPlan): Promise<RunPlanResult> {
         await writeFile(textFile.path, textFile.content, 'utf-8');
         cleanup.push(textFile.path);
       }
-      await runFfmpeg(step.args);
+      // Register the intermediate BEFORE running so a step that fails after the
+      // muxer opens its output (ffmpeg runs with -y) doesn't leak a partial file.
       if (step.output !== plan.output) cleanup.push(step.output);
+      await runFfmpeg(step.args);
     }
     return { output: plan.output, steps: plan.steps.length, durationMs: Date.now() - start };
   } finally {

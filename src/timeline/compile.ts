@@ -5,6 +5,7 @@ import {
   type Clip,
   type Composition,
   clipDuration,
+  clipEndSec,
   type Effect,
   type Track,
 } from './composition.js';
@@ -23,10 +24,15 @@ import type { MediaId } from './schema.js';
  * the result is a plan of arg arrays a runner executes. That makes it testable
  * exactly like the other arg-builders — assert the args, no FFmpeg in CI.
  *
- * v1 scope is a single video-track sequence. Constructs that need true
- * compositing — multiple populated video/audio tracks, a non-identity per-clip
- * transform, or chromaKey (which needs a background layer) — throw a clear
- * `CompileError` rather than emitting a wrong graph.
+ * v1 scope is a single video-track sequence of abutting clips. Constructs that
+ * need true compositing — multiple populated video/audio tracks, a non-identity
+ * per-clip transform, chromaKey (which needs a background layer), or timeline
+ * gaps/overlaps — throw a clear `CompileError` rather than emitting a wrong graph.
+ *
+ * Known interaction (v1): a per-clip fadeOut/fadeIn placed on the SAME boundary
+ * as a transition double-darkens, since the xfade already supplies the blend over
+ * that window. Prefer one or the other on a given cut; fixing the overlap is a
+ * follow-up.
  */
 
 export interface MediaInfo {
@@ -172,13 +178,17 @@ function effectFilters(clip: Clip, outDur: number): FilterChains {
   }
 
   for (const e of clip.effects) {
+    // Clamp the fade to the clip so a fade longer than the clip still reaches
+    // full black/silence within the available window instead of ramping partway.
     if (e.type === 'fadeIn') {
-      video.push(`fade=t=in:st=0:d=${e.durationSec}`);
-      audio.push(`afade=t=in:st=0:d=${e.durationSec}`);
+      const d = Math.min(e.durationSec, outDur);
+      video.push(`fade=t=in:st=0:d=${d}`);
+      audio.push(`afade=t=in:st=0:d=${d}`);
     } else if (e.type === 'fadeOut') {
-      const st = Math.max(0, outDur - e.durationSec);
-      video.push(`fade=t=out:st=${st}:d=${e.durationSec}`);
-      audio.push(`afade=t=out:st=${st}:d=${e.durationSec}`);
+      const d = Math.min(e.durationSec, outDur);
+      const st = Math.max(0, outDur - d);
+      video.push(`fade=t=out:st=${st}:d=${d}`);
+      audio.push(`afade=t=out:st=${st}:d=${d}`);
     }
   }
 
@@ -251,7 +261,12 @@ function buildSegmentStep(
       audioSource = '1:a';
     }
   } else if (clip.kind === 'color') {
-    inputArgs.push('-f', 'lavfi', '-i', `color=c=${clip.color}:s=${width}x${height}:r=${fps}`);
+    inputArgs.push(
+      '-f',
+      'lavfi',
+      '-i',
+      `color=c=${quoteColor(clip.color)}:s=${width}x${height}:r=${fps}`,
+    );
     inputArgs.push(
       '-f',
       'lavfi',
@@ -262,7 +277,12 @@ function buildSegmentStep(
     audioSource = '1:a';
   } else {
     // text: a background-colour source with drawtext burned in.
-    inputArgs.push('-f', 'lavfi', '-i', `color=c=${background}:s=${width}x${height}:r=${fps}`);
+    inputArgs.push(
+      '-f',
+      'lavfi',
+      '-i',
+      `color=c=${quoteColor(background)}:s=${width}x${height}:r=${fps}`,
+    );
     inputArgs.push(
       '-f',
       'lavfi',
@@ -287,14 +307,15 @@ function buildSegmentStep(
   ];
 
   const videoChain = [...geometry, ...fx].join(',');
-  const audioChain = afx.length ? afx.join(',') : null;
+  // Always normalize audio to a uniform stereo/48k layout BEFORE any effects, so
+  // the fold's concat/acrossfade can't silently downmix when a source clip is
+  // mono (and so every segment exposes a real [a] output). aformat is a harmless
+  // no-op for the already-stereo silence sources. This makes the "guaranteed
+  // stereo AAC audio" invariant real, not aspirational.
+  const audioChain = ['aformat=sample_rates=48000:channel_layouts=stereo', ...afx].join(',');
 
-  const filterParts = [`${videoSource}${videoChain}[v]`];
-  if (audioChain) filterParts.push(`[${audioSource}]${audioChain}[a]`);
-
-  // Map a filtergraph label ([a]) when audio went through a chain, else the bare
-  // input stream specifier (0:a / 1:a) — brackets here would be read as a label.
-  const audioMap = audioChain ? '[a]' : audioSource;
+  const filterParts = [`${videoSource}${videoChain}[v]`, `[${audioSource}]${audioChain}[a]`];
+  const audioMap = '[a]';
 
   const args = [
     '-y',
@@ -374,10 +395,34 @@ function buildHardCutArgs(a: string, b: string, output: string): string[] {
   ];
 }
 
+/** Tolerance (seconds) for the abutting-sequence check — clip starts are float
+ *  sums of durations, so allow a hair of accumulated rounding. */
+const ABUT_EPSILON = 1e-4;
+
 export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegPlan {
   const track = selectVideoTrack(comp);
   const clips = [...track.clips].sort((a, b) => a.startSec - b.startSec);
   const transitionAfter = new Map(track.transitions.map((t) => [t.afterClipId, t]));
+
+  // v1 renders a track as an abutting sequence. Reject gaps/overlaps with a clear
+  // error rather than silently collapsing them — the document is the source of
+  // truth, so export must not diverge from the timeline it describes.
+  for (let i = 1; i < clips.length; i++) {
+    const prev = clips[i - 1];
+    const cur = clips[i];
+    if (!prev || !cur) continue;
+    const prevEnd = clipEndSec(prev);
+    const delta = cur.startSec - prevEnd;
+    if (Math.abs(delta) > ABUT_EPSILON) {
+      const kind = delta > 0 ? 'gap' : 'overlap';
+      throw new CompileError(
+        `Timeline ${kind} between "${prev.id}" (ends ${prevEnd.toFixed(3)}s) and "${cur.id}" ` +
+          `(starts ${cur.startSec}s): export needs clips to abut. ` +
+          `${kind === 'gap' ? 'Close the gap (or add a filler clip)' : 'Remove the overlap'} — ` +
+          `positioned gaps/overlaps are not supported in export yet.`,
+      );
+    }
+  }
 
   const steps: FfmpegStep[] = [];
 
@@ -410,7 +455,19 @@ export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegP
     const out = isLast ? ctx.output : resolve(ctx.dir, `${FOLD_PREFIX}-${i}.mp4`);
 
     if (transition) {
-      const offset = Math.max(0, accDur - transition.durationSec);
+      // A transition must fit inside BOTH sides: the accumulated A (offset ≥ 0)
+      // and the next segment B. An over-long xfade/acrossfade otherwise produces
+      // a degenerate blend or an intermediate with no audio stream that fails the
+      // next fold — so reject it explicitly (the standalone transition tool does
+      // the same).
+      if (transition.durationSec >= accDur || transition.durationSec >= seg.durationSec) {
+        throw new CompileError(
+          `Transition after "${prevClip?.id}" is ${transition.durationSec}s but must be shorter than ` +
+            `both adjacent clips (${accDur.toFixed(3)}s before it, ${seg.durationSec}s after). ` +
+            `Shorten the transition or lengthen the clips.`,
+        );
+      }
+      const offset = accDur - transition.durationSec; // > 0 by the guard above
       steps.push({
         label: `fold:xfade:${i}`,
         args: buildTransitionArgs({
