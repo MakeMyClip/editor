@@ -1,15 +1,19 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   appendOp,
   makeEntryId,
+  overwriteSession,
   readSession,
+  SessionConflictError,
+  SessionCorruptError,
   sessionPath,
   snapshotPath,
   snapshotsDir,
   writeSession,
+  writeSessionIfUnchanged,
 } from '../src/session/store.js';
 import { EMPTY_SESSION, SessionEntrySchema } from '../src/session/types.js';
 
@@ -49,17 +53,21 @@ describe('readSession', () => {
     expect(session).toEqual(EMPTY_SESSION);
   });
 
-  it('reads and validates an existing session file', async () => {
-    const initial = { version: 1, entries: [] };
-    await writeFile(sessionPath(), JSON.stringify(initial));
+  it('reads a rev-less legacy file, defaulting rev to 0', async () => {
+    // Files written before `rev` existed must still load — back-compat.
+    await writeFile(sessionPath(), JSON.stringify({ version: 1, entries: [] }));
     const session = await readSession();
-    expect(session).toEqual(initial);
+    expect(session).toEqual({ version: 1, rev: 0, entries: [] });
   });
 
-  it('falls back to EMPTY_SESSION when file is corrupt', async () => {
+  it('throws SessionCorruptError on unparseable JSON instead of silently resetting', async () => {
     await writeFile(sessionPath(), 'not valid json');
-    const session = await readSession();
-    expect(session).toEqual(EMPTY_SESSION);
+    await expect(readSession()).rejects.toBeInstanceOf(SessionCorruptError);
+  });
+
+  it('throws SessionCorruptError on valid JSON that fails the schema', async () => {
+    await writeFile(sessionPath(), JSON.stringify({ version: 2, entries: 'nope' }));
+    await expect(readSession()).rejects.toBeInstanceOf(SessionCorruptError);
   });
 });
 
@@ -112,5 +120,85 @@ describe('writeSession + readSession round-trip', () => {
     await mkdir(snapshotsDir(), { recursive: true });
     // Should not throw on second mkdir.
     await mkdir(snapshotsDir(), { recursive: true });
+  });
+});
+
+describe('single-writer serialization', () => {
+  it('does not lose entries under concurrent in-process appends', async () => {
+    // The original bug: appendOp was a lock-free read-modify-write, so N
+    // concurrent callers (the embedded agent + UI requests) clobbered each
+    // other and entries vanished. Serialization must land all of them.
+    const N = 25;
+    await Promise.all(
+      Array.from({ length: N }, (_, i) => appendOp({ tool: `t${i}`, args: {}, result: {} })),
+    );
+    const session = await readSession();
+    expect(session.entries).toHaveLength(N);
+    expect(session.rev).toBe(N);
+    // Every distinct tool name made it in — no overwrites.
+    expect(new Set(session.entries.map((e) => e.tool)).size).toBe(N);
+  });
+});
+
+describe('atomic writes', () => {
+  it('leaves no temp files behind and keeps session.json intact', async () => {
+    await appendOp({ tool: 'a', args: {}, result: {} });
+    await appendOp({ tool: 'b', args: {}, result: {} });
+    const files = await readdir(workspace);
+    expect(files).toContain('session.json');
+    expect(files.filter((f) => f.endsWith('.tmp'))).toHaveLength(0);
+  });
+});
+
+describe('optimistic concurrency (rev)', () => {
+  it('increments rev monotonically on each append', async () => {
+    expect((await readSession()).rev).toBe(0);
+    await appendOp({ tool: 'a', args: {}, result: {} });
+    expect((await readSession()).rev).toBe(1);
+    await appendOp({ tool: 'b', args: {}, result: {} });
+    expect((await readSession()).rev).toBe(2);
+  });
+
+  it('writeSessionIfUnchanged commits and bumps rev when the base is current', async () => {
+    await appendOp({ tool: 'a', args: {}, result: {} });
+    const current = await readSession();
+    const next = await writeSessionIfUnchanged(current, current.rev);
+    expect(next.rev).toBe(current.rev + 1);
+    expect((await readSession()).rev).toBe(current.rev + 1);
+  });
+
+  it('rejects a stale write whose base rev was superseded, without clobbering', async () => {
+    await appendOp({ tool: 'a', args: {}, result: {} });
+    const stale = await readSession(); // captured at rev 1
+    await appendOp({ tool: 'b', args: {}, result: {} }); // another writer wins → rev 2
+
+    await expect(writeSessionIfUnchanged(stale, stale.rev)).rejects.toBeInstanceOf(
+      SessionConflictError,
+    );
+    // The winner's entry survives; the rejected write did not overwrite it.
+    const final = await readSession();
+    expect(final.entries.map((e) => e.tool)).toEqual(['a', 'b']);
+  });
+});
+
+describe('overwriteSession (recovery primitive)', () => {
+  it('replaces entries WITHOUT parsing the live file, even when it is corrupt', async () => {
+    await appendOp({ tool: 'a', args: {}, result: {} }); // rev 1
+    await writeFile(sessionPath(), 'this is not valid json'); // live log now corrupt
+    await expect(readSession()).rejects.toBeInstanceOf(SessionCorruptError);
+
+    const entry = {
+      id: 'op_12345678',
+      tool: 'x',
+      args: {},
+      result: {},
+      timestamp: '1970-01-01T00:00:00.000Z',
+    };
+    const next = await overwriteSession([entry]);
+    expect(next.entries).toHaveLength(1);
+    expect(next.rev).toBe(1); // corrupt base → rev 0 → 1
+
+    const reread = await readSession();
+    expect(reread.entries.map((e) => e.tool)).toEqual(['x']);
   });
 });

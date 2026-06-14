@@ -29,24 +29,11 @@ export const MediaRefSchema = z.object({
   audio: AudioStreamSchema.nullable(),
 });
 
-export const ClipSchema = z.object({
-  source: z.string().min(1),
-  start: TimecodeSchema,
-  end: TimecodeSchema,
-});
-
-export const TimelineSchema = z.object({
-  version: z.literal(1),
-  clips: z.array(ClipSchema).min(1),
-});
-
 export type Timecode = z.infer<typeof TimecodeSchema>;
 export type MediaId = z.infer<typeof MediaIdSchema>;
 export type VideoStream = z.infer<typeof VideoStreamSchema>;
 export type AudioStream = z.infer<typeof AudioStreamSchema>;
 export type MediaRef = z.infer<typeof MediaRefSchema>;
-export type Clip = z.infer<typeof ClipSchema>;
-export type Timeline = z.infer<typeof TimelineSchema>;
 
 /**
  * Deterministic mediaId derived from the absolute media path.

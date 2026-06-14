@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { readSession } from '../session/store.js';
+import { readSession, SessionCorruptError } from '../session/store.js';
 
 export const InspectInput = z.object({
   limit: z
@@ -23,6 +23,9 @@ export interface InspectedEntry {
 export interface InspectResult {
   totalOps: number;
   entries: InspectedEntry[];
+  /** Present when the session file exists but is corrupt: inspect degrades to a
+   *  report (rather than throwing) so it stays a usable recovery affordance. */
+  corrupt?: { path: string };
 }
 
 function summarizeEntry(tool: string, args: Record<string, unknown>): string {
@@ -66,7 +69,17 @@ function summarizeEntry(tool: string, args: Record<string, unknown>): string {
 }
 
 export async function inspect(input: InspectInputType = {}): Promise<InspectResult> {
-  const session = await readSession();
+  let session: Awaited<ReturnType<typeof readSession>>;
+  try {
+    session = await readSession();
+  } catch (err) {
+    // Inspect is the read-tolerant escape hatch: when the log is corrupt, report
+    // it instead of throwing so the user can see the path and recover.
+    if (err instanceof SessionCorruptError) {
+      return { totalOps: 0, entries: [], corrupt: { path: err.path } };
+    }
+    throw err;
+  }
   const slice = input.limit ? session.entries.slice(-input.limit) : session.entries;
   return {
     totalOps: session.entries.length,

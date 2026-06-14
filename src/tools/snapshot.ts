@@ -1,6 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises';
 import { z } from 'zod';
-import { readSession, snapshotPath, snapshotsDir } from '../session/store.js';
+import { readSession, snapshotPath, writeSnapshot } from '../session/store.js';
 
 export const SnapshotInput = z.object({
   label: z
@@ -25,8 +24,6 @@ export interface SnapshotResult {
 export async function snapshot(input: SnapshotInputType = {}): Promise<SnapshotResult> {
   const session = await readSession();
   const label = input.label ?? `snap-${session.entries.length}`;
-  await mkdir(snapshotsDir(), { recursive: true });
-  const path = snapshotPath(label);
-  await writeFile(path, `${JSON.stringify(session, null, 2)}\n`);
-  return { label, path, entryCount: session.entries.length };
+  await writeSnapshot(label, session);
+  return { label, path: snapshotPath(label), entryCount: session.entries.length };
 }
