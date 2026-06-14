@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runTimeline } from './cli-timeline.js';
 import { appendOp } from './session/store.js';
 import { addAudio } from './tools/add-audio.js';
 import { addCaptions } from './tools/add-captions.js';
@@ -591,6 +592,11 @@ async function main(argv: string[]): Promise<void> {
     }
     const result = await deleteOp({ id, removeFile: removeFile === 'true' });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (command === 'timeline') {
+    await runTimeline(args);
     return;
   }
 
