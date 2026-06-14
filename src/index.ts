@@ -79,6 +79,15 @@ export {
   SessionSchema,
 } from './session/types.js';
 export {
+  type CompileContext,
+  CompileError,
+  compileTimeline,
+  type FfmpegPlan,
+  type FfmpegStep,
+  type MediaInfo,
+  type StepSideFile,
+} from './timeline/compile.js';
+export {
   type Anchor,
   AnchorSchema,
   type Clip,
@@ -115,6 +124,15 @@ export {
   TransitionSchema,
 } from './timeline/composition.js';
 export {
+  CompositionCorruptError,
+  compositionPath,
+  mutateComposition,
+  readComposition,
+  resetComposition,
+  writeComposition,
+} from './timeline/document-store.js';
+export { buildMediaMap } from './timeline/media-registry.js';
+export {
   applyOp,
   applyOps,
   audioTrack,
@@ -126,6 +144,7 @@ export {
   textClip,
   videoTrack,
 } from './timeline/ops.js';
+export { type RunPlanResult, runPlan } from './timeline/run-plan.js';
 export {
   AudioStreamSchema,
   type MediaId,
