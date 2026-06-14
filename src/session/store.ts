@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { type FileHandle, open, readFile, rename, unlink } from 'node:fs/promises';
+import { type FileHandle, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { ensureWorkspace, getWorkspace } from '../workspace.js';
 import { type Session, type SessionEntry, SessionSchema } from './types.js';
@@ -112,23 +112,23 @@ export async function readSession(): Promise<Session> {
 }
 
 /**
- * Atomically persist a session: write to a uniquely-named temp file in the same
- * directory, fsync it, `rename` over the target, then fsync the directory.
- * `rename` within one filesystem is atomic, so a reader never observes a
- * half-written file; the directory fsync makes the rename itself crash-durable.
- * Any failure unlinks the temp file so a failing (or retrying) write never
- * litters the workspace. Does NOT touch `rev` — callers own the revision bump.
+ * Atomically write `data` to `filePath`: create the directory if needed, write a
+ * uniquely-named temp file beside the target, fsync it, `rename` over the target,
+ * then fsync the directory. `rename` within one filesystem is atomic, so a reader
+ * never observes a half-written file; the directory fsync makes the rename itself
+ * crash-durable. Any failure unlinks the temp so a failing (or retrying) write
+ * never litters the directory. This is the shared durability primitive for both
+ * the session log and snapshots — the snapshot is a recovery source, so it must
+ * be as torn-write-safe as the file it recovers.
  */
-export async function writeSession(session: Session): Promise<void> {
-  await ensureWorkspace();
-  const target = sessionPath();
-  const dir = dirname(target);
-  const tmp = resolve(dir, `.session.${randomBytes(6).toString('hex')}.tmp`);
-  const data = `${JSON.stringify(session, null, 2)}\n`;
+export async function atomicWriteFile(filePath: string, data: string): Promise<void> {
+  const dir = dirname(filePath);
+  await mkdir(dir, { recursive: true });
+  const tmp = resolve(dir, `.${randomBytes(6).toString('hex')}.tmp`);
 
   // Write + fsync the temp file. On ANY failure (ENOSPC, EIO, EDQUOT, …) unlink
-  // the partial temp before rethrowing — the previous version only cleaned up on
-  // a rename failure, leaking one orphan per failed/retried write.
+  // the partial temp before rethrowing — leaving it would orphan one file per
+  // failed/retried write.
   try {
     const handle = await open(tmp, 'w');
     try {
@@ -137,13 +137,49 @@ export async function writeSession(session: Session): Promise<void> {
     } finally {
       await handle.close();
     }
-    await rename(tmp, target);
+    await rename(tmp, filePath);
   } catch (err) {
     await unlink(tmp).catch(() => undefined);
     throw err;
   }
 
   await fsyncDir(dir);
+}
+
+/**
+ * Atomically persist a session log. Does NOT touch `rev` — callers own the bump.
+ */
+export async function writeSession(session: Session): Promise<void> {
+  await atomicWriteFile(sessionPath(), `${JSON.stringify(session, null, 2)}\n`);
+}
+
+/** Atomically persist a snapshot under its label. */
+export async function writeSnapshot(label: string, session: Session): Promise<void> {
+  await atomicWriteFile(snapshotPath(label), `${JSON.stringify(session, null, 2)}\n`);
+}
+
+/**
+ * Read + validate a snapshot. A missing snapshot is a clear "no such label"
+ * error; a present-but-unparseable one throws `SessionCorruptError` (so a torn
+ * snapshot surfaces the same way a torn live log does, instead of a raw Zod/JSON
+ * stack) — the recovery path must fail legibly, not cryptically.
+ */
+export async function readSnapshot(label: string): Promise<Session> {
+  const path = snapshotPath(label);
+  let raw: string;
+  try {
+    raw = await readFile(path, 'utf-8');
+  } catch (err: unknown) {
+    if (err instanceof Error && 'code' in err && err.code === 'ENOENT') {
+      throw new Error(`Snapshot "${label}" not found (looked in ${path}).`);
+    }
+    throw err;
+  }
+  try {
+    return SessionSchema.parse(JSON.parse(raw));
+  } catch (err) {
+    throw new SessionCorruptError(path, { cause: err });
+  }
 }
 
 /**

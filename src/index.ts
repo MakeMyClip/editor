@@ -56,10 +56,12 @@ export {
 export { runFfmpeg } from './ffmpeg/run.js';
 export {
   appendOp,
+  atomicWriteFile,
   makeEntryId,
   mutateSession,
   overwriteSession,
   readSession,
+  readSnapshot,
   SessionConflictError,
   SessionCorruptError,
   sessionPath,
@@ -67,6 +69,7 @@ export {
   snapshotsDir,
   writeSession,
   writeSessionIfUnchanged,
+  writeSnapshot,
 } from './session/store.js';
 export {
   EMPTY_SESSION,

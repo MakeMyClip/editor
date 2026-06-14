@@ -15,6 +15,7 @@ import open from 'open';
 import { ZodError } from 'zod';
 import { probe } from '../ffmpeg/probe.js';
 import { appendOp, readSession, SessionCorruptError, snapshotsDir } from '../session/store.js';
+import type { SessionEntry } from '../session/types.js';
 import { ingest } from '../tools/ingest.js';
 import { preview } from '../tools/preview.js';
 import { snapshot } from '../tools/snapshot.js';
@@ -52,6 +53,27 @@ export interface UiServer {
   port: number;
   /** Stop the server (releases the port). */
   stop: () => Promise<void>;
+}
+
+/**
+ * Resolve an op entry by id for the per-op routes, folding a corrupt session log
+ * into a typed result instead of letting `readSession` throw a raw 500.
+ */
+async function resolveOpEntry(
+  opId: string,
+): Promise<
+  | { kind: 'ok'; entry: SessionEntry }
+  | { kind: 'corrupt'; error: SessionCorruptError }
+  | { kind: 'notfound' }
+> {
+  try {
+    const session = await readSession();
+    const entry = session.entries.find((e) => e.id === opId);
+    return entry ? { kind: 'ok', entry } : { kind: 'notfound' };
+  } catch (err) {
+    if (err instanceof SessionCorruptError) return { kind: 'corrupt', error: err };
+    throw err;
+  }
 }
 
 export async function startUiServer(options: UiServerOptions = {}): Promise<UiServer> {
@@ -169,9 +191,14 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       const result = await undo({ snapshotLabel });
       return c.json(result);
     } catch (err) {
+      // A corrupt snapshot is a recoverable bad-input condition, not a server
+      // fault — surface it as a 409 with the path, like the other read paths.
+      if (err instanceof SessionCorruptError) {
+        return c.json({ error: err.message, path: err.path, corrupt: true }, 409);
+      }
       const message = err instanceof Error ? err.message : String(err);
-      // "nothing to undo" / "missing snapshot" → 400, server faults → 500.
-      const status = /empty|nothing|ENOENT|not found/i.test(message) ? 400 : 500;
+      // "nothing to undo" / "snapshot not found" → 400, server faults → 500.
+      const status = /empty|nothing|not found/i.test(message) ? 400 : 500;
       return c.json({ error: message }, status);
     }
   });
@@ -360,9 +387,15 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
     const cached = durationCache.get(opId);
     if (cached !== undefined) return c.json({ durationSec: cached });
 
-    const session = await readSession();
-    const entry = session.entries.find((e) => e.id === opId);
-    if (!entry) return c.json({ error: `No op ${opId}` }, 404);
+    const resolved = await resolveOpEntry(opId);
+    if (resolved.kind === 'corrupt') {
+      return c.json(
+        { error: resolved.error.message, path: resolved.error.path, corrupt: true },
+        409,
+      );
+    }
+    if (resolved.kind === 'notfound') return c.json({ error: `No op ${opId}` }, 404);
+    const entry = resolved.entry;
 
     const path = playablePathOf(entry);
     if (!path || !existsSync(path)) {
@@ -468,9 +501,10 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
    */
   app.get('/api/output/:opId', async (c) => {
     const opId = c.req.param('opId');
-    const session = await readSession();
-    const entry = session.entries.find((e) => e.id === opId);
-    if (!entry) return c.text(`No op ${opId}`, 404);
+    const resolved = await resolveOpEntry(opId);
+    if (resolved.kind === 'corrupt') return c.text(resolved.error.message, 409);
+    if (resolved.kind === 'notfound') return c.text(`No op ${opId}`, 404);
+    const entry = resolved.entry;
 
     const path = playablePathOf(entry);
     if (!path) return c.text(`Op ${opId} has no playable output`, 404);
@@ -521,9 +555,10 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
     const opId = c.req.param('opId');
     const atSec = Number(c.req.query('atSec') ?? '0');
 
-    const session = await readSession();
-    const entry = session.entries.find((e) => e.id === opId);
-    if (!entry) return c.text(`No op ${opId}`, 404);
+    const resolved = await resolveOpEntry(opId);
+    if (resolved.kind === 'corrupt') return c.text(resolved.error.message, 409);
+    if (resolved.kind === 'notfound') return c.text(`No op ${opId}`, 404);
+    const entry = resolved.entry;
 
     const path = playablePathOf(entry);
     if (!path || !existsSync(path)) return c.text(`No preview-able output for op ${opId}`, 404);

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -123,6 +123,27 @@ describe('corruption recovery', () => {
     expect(result.totalOps).toBe(0);
     expect(result.entries).toEqual([]);
     expect(result.corrupt?.path).toBe(sessionPath());
+  });
+
+  it('snapshot writes atomically — no temp files left in the snapshots dir', async () => {
+    await appendOp({ tool: 'a', args: {}, result: {} });
+    await snapshot({ label: 'clean' });
+    const files = await readdir(join(workspace, 'snapshots'));
+    expect(files).toContain('clean.json');
+    expect(files.filter((f) => f.endsWith('.tmp'))).toHaveLength(0);
+  });
+
+  it('undo --snapshot surfaces a torn snapshot as SessionCorruptError, not a raw parse error', async () => {
+    await appendOp({ tool: 'a', args: {}, result: {} });
+    await snapshot({ label: 'torn' });
+    await writeFile(join(workspace, 'snapshots', 'torn.json'), '{ truncated');
+    await expect(undo({ snapshotLabel: 'torn' })).rejects.toBeInstanceOf(SessionCorruptError);
+  });
+
+  it('undo --snapshot gives a clear error for a missing snapshot', async () => {
+    await expect(undo({ snapshotLabel: 'does-not-exist' })).rejects.toThrow(
+      /Snapshot "does-not-exist" not found/,
+    );
   });
 });
 
