@@ -145,13 +145,16 @@ export { buildMediaMap } from './timeline/media-registry.js';
 export {
   applyOp,
   applyOps,
+  applyOpsTracked,
   audioTrack,
   type CompositionOp,
   CompositionOpError,
   type CompositionOpKind,
+  CompositionOpSchema,
   colorClip,
   invertOp,
   mediaClip,
+  type TrackedApply,
   textClip,
   videoTrack,
 } from './timeline/ops.js';
