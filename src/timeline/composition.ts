@@ -246,3 +246,22 @@ export function findClip(
   }
   return null;
 }
+
+/** Every clip live at timeline time `atSec`, across all tracks, with its offset
+ *  into the clip. Half-open `[startSec, clipEndSec)` so a clip that ends exactly
+ *  where the next begins hands `atSec` to the later clip (abutting clips don't
+ *  both claim the boundary). Pure read — the "what is at T" query. */
+export function clipsAtTime(
+  comp: Composition,
+  atSec: number,
+): Array<{ track: Track; clip: Clip; localOffsetSec: number }> {
+  const hits: Array<{ track: Track; clip: Clip; localOffsetSec: number }> = [];
+  for (const track of comp.tracks) {
+    for (const clip of track.clips) {
+      if (atSec >= clip.startSec && atSec < clipEndSec(clip)) {
+        hits.push({ track, clip, localOffsetSec: atSec - clip.startSec });
+      }
+    }
+  }
+  return hits;
+}
