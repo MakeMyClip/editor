@@ -1,10 +1,13 @@
+import { z } from 'zod';
 import {
   type Clip,
+  ClipSchema,
   type ColorClip,
   ColorClipSchema,
   type Composition,
   CompositionSchema,
   type Effect,
+  EffectSchema,
   type MediaClip,
   MediaClipSchema,
   makeClipId,
@@ -48,6 +51,82 @@ export type CompositionOp =
   | { op: 'removeTransition'; trackId: string; afterClipId: string };
 
 export type CompositionOpKind = CompositionOp['op'];
+
+/**
+ * `Partial<Transform>` for `setTransform` — every field optional and WITHOUT a
+ * default. `TransformSchema.partial()` would still re-inflate omitted fields to
+ * their defaults, so a stored partial op like `{ scale: 2 }` would round-trip
+ * into a full transform and silently change what the op overwrites on redo.
+ */
+const PartialTransformSchema = z.object({
+  scale: z.number().positive().optional(),
+  x: z.number().optional(),
+  y: z.number().optional(),
+  rotationDeg: z.number().optional(),
+  opacity: z.number().min(0).max(1).optional(),
+});
+
+/**
+ * Runtime validator for a `CompositionOp`, used to validate ops read back from
+ * the persisted op-log. Kept structurally in lockstep with the hand-written
+ * `CompositionOp` union above; `tests/composition-op-schema.test.ts` parses an
+ * exhaustive sample of every op kind so the two cannot silently drift.
+ */
+export const CompositionOpSchema = z.discriminatedUnion('op', [
+  z.object({
+    op: z.literal('setCanvas'),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+    fps: z.number().positive().optional(),
+    background: z.string().optional(),
+  }),
+  z.object({
+    op: z.literal('addTrack'),
+    track: TrackSchema,
+    index: z.number().int().nonnegative().optional(),
+  }),
+  z.object({ op: z.literal('removeTrack'), trackId: z.string() }),
+  z.object({ op: z.literal('addClip'), trackId: z.string(), clip: ClipSchema }),
+  z.object({ op: z.literal('removeClip'), clipId: z.string() }),
+  z.object({
+    op: z.literal('moveClip'),
+    clipId: z.string(),
+    startSec: z.number().optional(),
+    toTrackId: z.string().optional(),
+  }),
+  z.object({
+    op: z.literal('setTrim'),
+    clipId: z.string(),
+    sourceInSec: z.number().optional(),
+    sourceOutSec: z.number().optional(),
+  }),
+  z.object({ op: z.literal('setDuration'), clipId: z.string(), durationSec: z.number() }),
+  z.object({
+    op: z.literal('splitClip'),
+    clipId: z.string(),
+    atSec: z.number(),
+    newClipId: z.string(),
+  }),
+  z.object({
+    op: z.literal('addEffect'),
+    clipId: z.string(),
+    effect: EffectSchema,
+    index: z.number().int().nonnegative().optional(),
+  }),
+  z.object({
+    op: z.literal('removeEffect'),
+    clipId: z.string(),
+    index: z.number().int().nonnegative(),
+  }),
+  z.object({
+    op: z.literal('setTransform'),
+    clipId: z.string(),
+    transform: PartialTransformSchema,
+  }),
+  z.object({ op: z.literal('clearTransform'), clipId: z.string() }),
+  z.object({ op: z.literal('addTransition'), trackId: z.string(), transition: TransitionSchema }),
+  z.object({ op: z.literal('removeTransition'), trackId: z.string(), afterClipId: z.string() }),
+]);
 
 /** Thrown when an op references a missing entity or violates a clip invariant. */
 export class CompositionOpError extends Error {
@@ -430,6 +509,34 @@ export function invertOp(comp: Composition, op: CompositionOp): CompositionOp[] 
       throw new CompositionOpError(`Cannot invert unknown op: ${JSON.stringify(_exhaustive)}`);
     }
   }
+}
+
+export interface TrackedApply {
+  doc: Composition;
+  /** The ops that, applied to `doc`, undo the WHOLE batch (each op's inverse,
+   *  concatenated in reverse order). */
+  inverse: CompositionOp[];
+}
+
+/**
+ * Apply a batch of ops, threading state so each op's inverse is captured at the
+ * exact pre-state it saw, and return the resulting doc plus a single inverse
+ * op-list that undoes the entire batch. This is the unit the op-log records per
+ * mutation: forward = the batch, inverse = what this returns.
+ */
+export function applyOpsTracked(comp: Composition, ops: CompositionOp[]): TrackedApply {
+  let doc = comp;
+  const perOpInverses: CompositionOp[][] = [];
+  for (const op of ops) {
+    perOpInverses.push(invertOp(doc, op));
+    doc = applyOp(doc, op);
+  }
+  const inverse: CompositionOp[] = [];
+  for (let i = perOpInverses.length - 1; i >= 0; i--) {
+    const inv = perOpInverses[i];
+    if (inv) inverse.push(...inv);
+  }
+  return { doc, inverse };
 }
 
 // ─── internals ───────────────────────────────────────────────────────────────
