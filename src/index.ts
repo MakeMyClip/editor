@@ -150,6 +150,7 @@ export {
   CompositionOpError,
   type CompositionOpKind,
   colorClip,
+  invertOp,
   mediaClip,
   textClip,
   videoTrack,
