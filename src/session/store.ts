@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { type FileHandle, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { createRevisionedStore } from '../storage/revisioned-store.js';
 import { ensureWorkspace, getWorkspace } from '../workspace.js';
 import { type Session, type SessionEntry, SessionSchema } from './types.js';
 
@@ -70,24 +71,23 @@ function freshEmpty(): Session {
   return { version: 1, rev: 0, entries: [] };
 }
 
-// ─── In-process single-writer serialization ──────────────────────────────────
+// ─── Shared revisioned-store core (in-process serialization + CAS) ───────────
 //
-// Every mutation runs through this promise chain, so two concurrent callers in
-// the SAME process (the embedded chat agent and a UI request both calling
-// `appendOp`) can never interleave their read-modify-write and lose an entry.
-// Reads are intentionally NOT serialized: atomic writes mean a reader always
-// sees a complete file, so reads stay lock-free.
-let writeChain: Promise<unknown> = Promise.resolve();
-
-function runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-  const run = writeChain.then(fn, fn);
-  // Keep the chain alive regardless of whether `fn` resolved or rejected.
-  writeChain = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
-}
+// The session log and the CompositionDoc share this machinery (see
+// `storage/revisioned-store.ts`) so the two stores can't drift. Every mutation
+// runs through a serialized chain, so two concurrent callers in the SAME process
+// (the embedded chat agent and a UI request both calling `appendOp`) can never
+// interleave their read-modify-write and lose an entry. Reads are intentionally
+// NOT serialized: atomic writes mean a reader always sees a complete file.
+const sessionStore = createRevisionedStore<Session>({
+  read: readSession,
+  write: writeSession,
+  getRev: (session) => session.rev,
+  withRev: (session, rev) => ({ ...session, rev }),
+  readRevTolerant,
+  maxAttempts: MAX_MUTATE_ATTEMPTS,
+  onConflict: (expectedRev, actualRev) => new SessionConflictError(expectedRev, actualRev),
+});
 
 export async function readSession(): Promise<Session> {
   await ensureWorkspace();
@@ -211,19 +211,8 @@ async function fsyncDir(dir: string): Promise<void> {
  * win undetected. A real cross-process lock is deferred until multi-process
  * editing is on the roadmap (the shipping surface is single-process).
  */
-export async function writeSessionIfUnchanged(
-  session: Session,
-  expectedRev: number,
-): Promise<Session> {
-  return runExclusive(async () => {
-    const actualRev = await readDiskRev();
-    if (actualRev !== expectedRev) {
-      throw new SessionConflictError(expectedRev, actualRev);
-    }
-    const next: Session = { ...session, rev: expectedRev + 1 };
-    await writeSession(next);
-    return next;
-  });
+export function writeSessionIfUnchanged(session: Session, expectedRev: number): Promise<Session> {
+  return sessionStore.writeIfUnchanged(session, expectedRev);
 }
 
 /**
@@ -247,37 +236,14 @@ export async function writeSessionIfUnchanged(
 export async function mutateSession<T>(
   mutator: (session: Session) => T,
 ): Promise<{ result: T; session: Session }> {
-  return runExclusive(async () => {
-    for (let attempt = 1; attempt <= MAX_MUTATE_ATTEMPTS; attempt++) {
-      const current = await readSession();
-      const baseRev = current.rev;
-      const working: Session = { version: 1, rev: baseRev, entries: [...current.entries] };
-
-      const result = mutator(working);
-
-      // Re-read the on-disk rev immediately before committing. In-process the
-      // chain guarantees it's unchanged; a mismatch means another process wrote.
-      const diskRev = await readDiskRev();
-      if (diskRev !== baseRev) {
-        if (attempt === MAX_MUTATE_ATTEMPTS) {
-          throw new SessionConflictError(baseRev, diskRev);
-        }
-        continue;
-      }
-
-      working.rev = baseRev + 1;
-      await writeSession(working);
-      return { result, session: working };
-    }
-    // Unreachable: the loop either returns or throws on the final attempt.
-    throw new SessionConflictError(-1, -1);
+  const { result, state } = await sessionStore.mutate((current) => {
+    // A private, mutable copy: the mutator appends to `entries` (or throws to
+    // abort) without aliasing the freshly-read state's backing array.
+    const working: Session = { version: 1, rev: current.rev, entries: [...current.entries] };
+    const value = mutator(working);
+    return { next: working, result: value };
   });
-}
-
-/** Read just the revision counter; a missing file reads as rev 0. Corrupt files
- *  still surface via `readSession`. */
-async function readDiskRev(): Promise<number> {
-  return (await readSession()).rev;
+  return { result, session: state };
 }
 
 /**
@@ -288,13 +254,8 @@ async function readDiskRev(): Promise<number> {
  * through `mutateSession` (whose first act is a strict `readSession`). `rev`
  * advances past the last good revision when one is readable, else restarts at 1.
  */
-export async function overwriteSession(entries: SessionEntry[]): Promise<Session> {
-  return runExclusive(async () => {
-    const baseRev = await readRevTolerant();
-    const next: Session = { version: 1, rev: baseRev + 1, entries: [...entries] };
-    await writeSession(next);
-    return next;
-  });
+export function overwriteSession(entries: SessionEntry[]): Promise<Session> {
+  return sessionStore.overwrite({ version: 1, rev: 0, entries: [...entries] });
 }
 
 /** On-disk rev, treating a corrupt file as rev 0 (a deliberate overwrite is

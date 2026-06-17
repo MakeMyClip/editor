@@ -79,6 +79,13 @@ export {
   SessionSchema,
 } from './session/types.js';
 export {
+  createRevisionedStore,
+  RevisionConflictError,
+  type Revisioned,
+  type RevisionedStore,
+  type RevisionedStoreConfig,
+} from './storage/revisioned-store.js';
+export {
   type CompileContext,
   CompileError,
   compileTimeline,
@@ -124,12 +131,15 @@ export {
   TransitionSchema,
 } from './timeline/composition.js';
 export {
+  CompositionConflictError,
   CompositionCorruptError,
   compositionPath,
   mutateComposition,
+  overwriteComposition,
   readComposition,
   resetComposition,
   writeComposition,
+  writeCompositionIfUnchanged,
 } from './timeline/document-store.js';
 export { buildMediaMap } from './timeline/media-registry.js';
 export {
