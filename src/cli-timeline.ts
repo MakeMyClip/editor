@@ -7,7 +7,14 @@ import {
   emptyComposition,
   makeClipId,
 } from './timeline/composition.js';
-import { mutateComposition, readComposition, resetComposition } from './timeline/document-store.js';
+import {
+  mutateComposition,
+  readComposition,
+  readDocOpLog,
+  redoDocOp,
+  resetComposition,
+  undoLastDocOp,
+} from './timeline/document-store.js';
 import { buildMediaMap } from './timeline/media-registry.js';
 import type { CompositionOp } from './timeline/ops.js';
 import { colorClip, mediaClip, textClip, videoTrack } from './timeline/ops.js';
@@ -27,6 +34,9 @@ const TIMELINE_HELP = `clip timeline — build and export a non-destructive comp
   clip timeline split <clipId> <atSec>
   clip timeline remove <clipId>
   clip timeline show
+  clip timeline undo
+  clip timeline redo
+  clip timeline log
   clip timeline export [<output>]
 `;
 
@@ -237,6 +247,42 @@ export async function runTimeline(args: string[]): Promise<void> {
         canvas: { width: comp.width, height: comp.height, fps: comp.fps },
         tracks: comp.tracks.map((t) => ({ id: t.id, kind: t.kind, clips: t.clips.length })),
         composition: comp,
+      });
+      return;
+    }
+
+    case 'undo': {
+      const { undone, doc, label } = await undoLastDocOp();
+      out(
+        undone
+          ? { undone: true, label, rev: doc.rev }
+          : { undone: false, message: 'Nothing to undo.' },
+      );
+      return;
+    }
+
+    case 'redo': {
+      const { redone, doc, label } = await redoDocOp();
+      out(
+        redone
+          ? { redone: true, label, rev: doc.rev }
+          : { redone: false, message: 'Nothing to redo.' },
+      );
+      return;
+    }
+
+    case 'log': {
+      const log = await readDocOpLog();
+      out({
+        rev: log.rev,
+        cursor: log.cursor,
+        canUndo: log.cursor > 0,
+        canRedo: log.cursor < log.entries.length,
+        entries: log.entries.map((e, i) => ({
+          id: e.id,
+          label: e.label,
+          state: i < log.cursor ? 'applied' : 'undone',
+        })),
       });
       return;
     }
