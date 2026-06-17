@@ -133,11 +133,15 @@ export {
 export {
   CompositionConflictError,
   CompositionCorruptError,
+  compositionOpsPath,
   compositionPath,
   mutateComposition,
   overwriteComposition,
   readComposition,
+  readDocOpLog,
+  redoDocOp,
   resetComposition,
+  undoLastDocOp,
   writeComposition,
   writeCompositionIfUnchanged,
 } from './timeline/document-store.js';
