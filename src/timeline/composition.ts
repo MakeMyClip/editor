@@ -176,6 +176,14 @@ export type Track = z.infer<typeof TrackSchema>;
 
 export const CompositionSchema = z.object({
   version: z.literal(COMPOSITION_VERSION),
+  /**
+   * Monotonic revision counter, bumped on every successful write — the
+   * compare-and-swap token for optimistic concurrency when the agent and the
+   * `clip ui` co-edit this document (mirrors `Session.rev`). Distinct from
+   * `version` (the format pin). Optional with a `0` default so documents written
+   * before this field existed — and hand-authored fixtures — still parse.
+   */
+  rev: z.number().int().nonnegative().default(0),
   width: z.number().int().positive().default(1920),
   height: z.number().int().positive().default(1080),
   fps: z.number().positive().default(30),
