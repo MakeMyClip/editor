@@ -1,7 +1,7 @@
 /**
- * Subset of ffmpeg's `xfade` transition kinds. Chosen to match the common
- * iMovie / CapCut palette without overwhelming the agent with 40+ obscure
- * options. Each one maps 1:1 to an `xfade` `transition=<name>` value.
+ * Subset of ffmpeg's `xfade` transition kinds. Chosen to cover the common
+ * consumer-editor transition palette without overwhelming the agent with 40+
+ * obscure options. Each one maps 1:1 to an `xfade` `transition=<name>` value.
  */
 export type TransitionKind =
   | 'fade'

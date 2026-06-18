@@ -1,10 +1,13 @@
+import { z } from 'zod';
 import {
   type Clip,
+  ClipSchema,
   type ColorClip,
   ColorClipSchema,
   type Composition,
   CompositionSchema,
   type Effect,
+  EffectSchema,
   type MediaClip,
   MediaClipSchema,
   makeClipId,
@@ -32,7 +35,7 @@ import type { MediaId } from './schema.js';
  */
 export type CompositionOp =
   | { op: 'setCanvas'; width?: number; height?: number; fps?: number; background?: string }
-  | { op: 'addTrack'; track: Track }
+  | { op: 'addTrack'; track: Track; index?: number }
   | { op: 'removeTrack'; trackId: string }
   | { op: 'addClip'; trackId: string; clip: Clip }
   | { op: 'removeClip'; clipId: string }
@@ -43,10 +46,87 @@ export type CompositionOp =
   | { op: 'addEffect'; clipId: string; effect: Effect; index?: number }
   | { op: 'removeEffect'; clipId: string; index: number }
   | { op: 'setTransform'; clipId: string; transform: Partial<Transform> }
+  | { op: 'clearTransform'; clipId: string }
   | { op: 'addTransition'; trackId: string; transition: Transition }
   | { op: 'removeTransition'; trackId: string; afterClipId: string };
 
 export type CompositionOpKind = CompositionOp['op'];
+
+/**
+ * `Partial<Transform>` for `setTransform` — every field optional and WITHOUT a
+ * default. `TransformSchema.partial()` would still re-inflate omitted fields to
+ * their defaults, so a stored partial op like `{ scale: 2 }` would round-trip
+ * into a full transform and silently change what the op overwrites on redo.
+ */
+const PartialTransformSchema = z.object({
+  scale: z.number().positive().optional(),
+  x: z.number().optional(),
+  y: z.number().optional(),
+  rotationDeg: z.number().optional(),
+  opacity: z.number().min(0).max(1).optional(),
+});
+
+/**
+ * Runtime validator for a `CompositionOp`, used to validate ops read back from
+ * the persisted op-log. Kept structurally in lockstep with the hand-written
+ * `CompositionOp` union above; `tests/composition-op-schema.test.ts` parses an
+ * exhaustive sample of every op kind so the two cannot silently drift.
+ */
+export const CompositionOpSchema = z.discriminatedUnion('op', [
+  z.object({
+    op: z.literal('setCanvas'),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+    fps: z.number().positive().optional(),
+    background: z.string().optional(),
+  }),
+  z.object({
+    op: z.literal('addTrack'),
+    track: TrackSchema,
+    index: z.number().int().nonnegative().optional(),
+  }),
+  z.object({ op: z.literal('removeTrack'), trackId: z.string() }),
+  z.object({ op: z.literal('addClip'), trackId: z.string(), clip: ClipSchema }),
+  z.object({ op: z.literal('removeClip'), clipId: z.string() }),
+  z.object({
+    op: z.literal('moveClip'),
+    clipId: z.string(),
+    startSec: z.number().optional(),
+    toTrackId: z.string().optional(),
+  }),
+  z.object({
+    op: z.literal('setTrim'),
+    clipId: z.string(),
+    sourceInSec: z.number().optional(),
+    sourceOutSec: z.number().optional(),
+  }),
+  z.object({ op: z.literal('setDuration'), clipId: z.string(), durationSec: z.number() }),
+  z.object({
+    op: z.literal('splitClip'),
+    clipId: z.string(),
+    atSec: z.number(),
+    newClipId: z.string(),
+  }),
+  z.object({
+    op: z.literal('addEffect'),
+    clipId: z.string(),
+    effect: EffectSchema,
+    index: z.number().int().nonnegative().optional(),
+  }),
+  z.object({
+    op: z.literal('removeEffect'),
+    clipId: z.string(),
+    index: z.number().int().nonnegative(),
+  }),
+  z.object({
+    op: z.literal('setTransform'),
+    clipId: z.string(),
+    transform: PartialTransformSchema,
+  }),
+  z.object({ op: z.literal('clearTransform'), clipId: z.string() }),
+  z.object({ op: z.literal('addTransition'), trackId: z.string(), transition: TransitionSchema }),
+  z.object({ op: z.literal('removeTransition'), trackId: z.string(), afterClipId: z.string() }),
+]);
 
 /** Thrown when an op references a missing entity or violates a clip invariant. */
 export class CompositionOpError extends Error {
@@ -101,7 +181,14 @@ export function applyOp(comp: Composition, op: CompositionOp): Composition {
       if (draft.tracks.some((t) => t.id === op.track.id)) {
         throw new CompositionOpError(`Track "${op.track.id}" already exists.`);
       }
-      draft.tracks.push(TrackSchema.parse(op.track));
+      const track = TrackSchema.parse(op.track);
+      if (op.index === undefined) {
+        draft.tracks.push(track);
+      } else {
+        // Clamp into range and insert at z-order position (used by undo to
+        // restore a removed track at its original index).
+        draft.tracks.splice(Math.max(0, Math.min(op.index, draft.tracks.length)), 0, track);
+      }
       break;
     }
     case 'removeTrack': {
@@ -199,6 +286,12 @@ export function applyOp(comp: Composition, op: CompositionOp): Composition {
       clip.transform = { ...base, ...op.transform };
       break;
     }
+    case 'clearTransform': {
+      const { clip } = locateClip(draft, op.clipId);
+      // Back to "no transform" (the inverse of a setTransform that created one).
+      delete clip.transform;
+      break;
+    }
     case 'addTransition': {
       const track = requireTrack(draft, op.trackId);
       if (!track.clips.some((c) => c.id === op.transition.afterClipId)) {
@@ -223,12 +316,227 @@ export function applyOp(comp: Composition, op: CompositionOp): Composition {
     }
   }
 
+  canonicalizeTracks(draft);
   return CompositionSchema.parse(draft);
+}
+
+/**
+ * Put every track into a canonical array order — clips by (startSec, then id),
+ * transitions by afterClipId — so two documents with identical CONTENT always
+ * compare deep-equal regardless of the op history that built them. Array order is
+ * otherwise semantically irrelevant: the export compiler keys transitions by
+ * afterClipId and rejects overlapping (equal-start) clips, so nothing downstream
+ * depends on it. Canonicalizing here is what makes the op-log reversible — undo
+ * (apply an op's inverse) lands back on a byte-identical document instead of one
+ * that merely has the same clips in a different array slot.
+ */
+function canonicalizeTracks(comp: Composition): void {
+  const byString = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+  for (const track of comp.tracks) {
+    track.clips.sort((a, b) => a.startSec - b.startSec || byString(a.id, b.id));
+    track.transitions.sort((a, b) => byString(a.afterClipId, b.afterClipId));
+  }
 }
 
 /** Fold a sequence of ops left-to-right. */
 export function applyOps(comp: Composition, ops: CompositionOp[]): Composition {
   return ops.reduce(applyOp, comp);
+}
+
+/**
+ * Compute the inverse of `op` against the PRE-state `comp`: the op(s) that,
+ * applied to the post-op document, restore `comp` exactly. Pure — it only reads
+ * `comp` (capturing whatever the op overwrites or drops) and returns new ops; it
+ * never mutates. This is what makes the doc op-log reversible: a writer records
+ * `invertOp(current, op)` alongside the op, and undo replays the inverse.
+ *
+ * Assumes `op` is applicable to `comp` (the caller applies it immediately after).
+ * It locates the entities it must capture and throws `CompositionOpError` if they
+ * are missing — the same failure `applyOp` would raise. For ops `applyOp` would
+ * reject on a *value* check (e.g. a degenerate trim), the inverse is harmless and
+ * simply discarded when `applyOp` throws.
+ */
+export function invertOp(comp: Composition, op: CompositionOp): CompositionOp[] {
+  switch (op.op) {
+    case 'setCanvas':
+      // Restore only the fields this op actually overwrote.
+      return [
+        {
+          op: 'setCanvas',
+          ...(op.width !== undefined ? { width: comp.width } : {}),
+          ...(op.height !== undefined ? { height: comp.height } : {}),
+          ...(op.fps !== undefined ? { fps: comp.fps } : {}),
+          ...(op.background !== undefined ? { background: comp.background } : {}),
+        },
+      ];
+    case 'addTrack':
+      return [{ op: 'removeTrack', trackId: op.track.id }];
+    case 'removeTrack': {
+      const index = comp.tracks.findIndex((t) => t.id === op.trackId);
+      const track = comp.tracks[index];
+      if (!track) throw new CompositionOpError(`No track "${op.trackId}" to invert removal of.`);
+      // Re-insert the whole track (clips + transitions) at its original z-index.
+      return [{ op: 'addTrack', track: structuredClone(track), index }];
+    }
+    case 'addClip':
+      return [{ op: 'removeClip', clipId: op.clip.id }];
+    case 'removeClip': {
+      const { track, clip } = locateClip(comp, op.clipId);
+      const inverse: CompositionOp[] = [
+        { op: 'addClip', trackId: track.id, clip: structuredClone(clip) },
+      ];
+      // removeClip also drops the transition that followed the clip — restore it.
+      for (const t of track.transitions) {
+        if (t.afterClipId === op.clipId) {
+          inverse.push({ op: 'addTransition', trackId: track.id, transition: structuredClone(t) });
+        }
+      }
+      return inverse;
+    }
+    case 'moveClip': {
+      const { track, clip } = locateClip(comp, op.clipId);
+      const inverse: CompositionOp[] = [
+        { op: 'moveClip', clipId: op.clipId, startSec: clip.startSec, toTrackId: track.id },
+      ];
+      // A cross-track move drops any transition that followed the clip on the
+      // source track; re-add it after the clip is back.
+      if (op.toTrackId !== undefined && op.toTrackId !== track.id) {
+        for (const t of track.transitions) {
+          if (t.afterClipId === op.clipId) {
+            inverse.push({
+              op: 'addTransition',
+              trackId: track.id,
+              transition: structuredClone(t),
+            });
+          }
+        }
+      }
+      return inverse;
+    }
+    case 'setTrim': {
+      const { clip } = locateClip(comp, op.clipId);
+      if (clip.kind !== 'media') return []; // applyOp will reject; nothing to invert.
+      return [
+        {
+          op: 'setTrim',
+          clipId: op.clipId,
+          sourceInSec: clip.sourceInSec,
+          sourceOutSec: clip.sourceOutSec,
+        },
+      ];
+    }
+    case 'setDuration': {
+      const { clip } = locateClip(comp, op.clipId);
+      if (clip.kind === 'media') return []; // applyOp will reject.
+      return [{ op: 'setDuration', clipId: op.clipId, durationSec: clip.durationSec }];
+    }
+    case 'splitClip': {
+      const { track, clip } = locateClip(comp, op.clipId);
+      const inverse: CompositionOp[] = [];
+      // On split, the transition after the original clip migrates to the new
+      // second half. Re-home it to the original, then remove the second half
+      // (which drops the migrated copy), then restore the original's extent.
+      const moved = track.transitions.find((t) => t.afterClipId === op.clipId);
+      if (moved) {
+        inverse.push({
+          op: 'addTransition',
+          trackId: track.id,
+          transition: structuredClone(moved),
+        });
+      }
+      inverse.push({ op: 'removeClip', clipId: op.newClipId });
+      if (clip.kind === 'media') {
+        inverse.push({
+          op: 'setTrim',
+          clipId: op.clipId,
+          sourceInSec: clip.sourceInSec,
+          sourceOutSec: clip.sourceOutSec,
+        });
+      } else {
+        inverse.push({ op: 'setDuration', clipId: op.clipId, durationSec: clip.durationSec });
+      }
+      return inverse;
+    }
+    case 'addEffect': {
+      const { clip } = locateClip(comp, op.clipId);
+      const at =
+        op.index === undefined
+          ? clip.effects.length
+          : Math.max(0, Math.min(op.index, clip.effects.length));
+      return [{ op: 'removeEffect', clipId: op.clipId, index: at }];
+    }
+    case 'removeEffect': {
+      const { clip } = locateClip(comp, op.clipId);
+      const effect = clip.effects[op.index];
+      if (!effect) return []; // out of range — applyOp will reject.
+      return [
+        { op: 'addEffect', clipId: op.clipId, effect: structuredClone(effect), index: op.index },
+      ];
+    }
+    case 'setTransform': {
+      const { clip } = locateClip(comp, op.clipId);
+      if (clip.transform === undefined) return [{ op: 'clearTransform', clipId: op.clipId }];
+      return [
+        { op: 'setTransform', clipId: op.clipId, transform: structuredClone(clip.transform) },
+      ];
+    }
+    case 'clearTransform': {
+      const { clip } = locateClip(comp, op.clipId);
+      if (clip.transform === undefined) return []; // already clear — no-op.
+      return [
+        { op: 'setTransform', clipId: op.clipId, transform: structuredClone(clip.transform) },
+      ];
+    }
+    case 'addTransition': {
+      const track = requireTrack(comp, op.trackId);
+      const prior = track.transitions.find((t) => t.afterClipId === op.transition.afterClipId);
+      // addTransition replaces any same-anchor transition: restore the prior one
+      // if there was one, otherwise just remove what we added.
+      if (prior)
+        return [{ op: 'addTransition', trackId: op.trackId, transition: structuredClone(prior) }];
+      return [
+        { op: 'removeTransition', trackId: op.trackId, afterClipId: op.transition.afterClipId },
+      ];
+    }
+    case 'removeTransition': {
+      const track = requireTrack(comp, op.trackId);
+      const removed = track.transitions.find((t) => t.afterClipId === op.afterClipId);
+      if (!removed) return []; // removed nothing — no-op.
+      return [{ op: 'addTransition', trackId: op.trackId, transition: structuredClone(removed) }];
+    }
+    default: {
+      const _exhaustive: never = op;
+      throw new CompositionOpError(`Cannot invert unknown op: ${JSON.stringify(_exhaustive)}`);
+    }
+  }
+}
+
+export interface TrackedApply {
+  doc: Composition;
+  /** The ops that, applied to `doc`, undo the WHOLE batch (each op's inverse,
+   *  concatenated in reverse order). */
+  inverse: CompositionOp[];
+}
+
+/**
+ * Apply a batch of ops, threading state so each op's inverse is captured at the
+ * exact pre-state it saw, and return the resulting doc plus a single inverse
+ * op-list that undoes the entire batch. This is the unit the op-log records per
+ * mutation: forward = the batch, inverse = what this returns.
+ */
+export function applyOpsTracked(comp: Composition, ops: CompositionOp[]): TrackedApply {
+  let doc = comp;
+  const perOpInverses: CompositionOp[][] = [];
+  for (const op of ops) {
+    perOpInverses.push(invertOp(doc, op));
+    doc = applyOp(doc, op);
+  }
+  const inverse: CompositionOp[] = [];
+  for (let i = perOpInverses.length - 1; i >= 0; i--) {
+    const inv = perOpInverses[i];
+    if (inv) inverse.push(...inv);
+  }
+  return { doc, inverse };
 }
 
 // ─── internals ───────────────────────────────────────────────────────────────

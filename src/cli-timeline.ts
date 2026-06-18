@@ -1,17 +1,28 @@
+import { resolve } from 'node:path';
 import { appendOp } from './session/store.js';
-import { compileTimeline } from './timeline/compile.js';
+import { buildFrameAtPlan, CompileError, compileTimeline } from './timeline/compile.js';
 import {
+  type Clip,
   type Composition,
+  clipDuration,
   clipEndSec,
+  clipsAtTime,
   compositionDuration,
   emptyComposition,
   makeClipId,
 } from './timeline/composition.js';
-import { mutateComposition, readComposition, resetComposition } from './timeline/document-store.js';
+import {
+  mutateComposition,
+  readComposition,
+  readDocOpLog,
+  redoDocOp,
+  resetComposition,
+  undoLastDocOp,
+} from './timeline/document-store.js';
 import { buildMediaMap } from './timeline/media-registry.js';
-import type { CompositionOp } from './timeline/ops.js';
-import { colorClip, mediaClip, textClip, videoTrack } from './timeline/ops.js';
+import { colorClip, mediaClip, textClip } from './timeline/ops.js';
 import { runPlan } from './timeline/run-plan.js';
+import { DEFAULT_VERB_TRACK as DEFAULT_TRACK, ensureTrack, trackEnd } from './timeline/verbs.js';
 import { ingest } from './tools/ingest.js';
 import { getWorkspace, newOutputPath, resolveInput } from './workspace.js';
 
@@ -27,6 +38,11 @@ const TIMELINE_HELP = `clip timeline — build and export a non-destructive comp
   clip timeline split <clipId> <atSec>
   clip timeline remove <clipId>
   clip timeline show
+  clip timeline at <atSec>
+  clip timeline frame <atSec> [<output>]
+  clip timeline undo
+  clip timeline redo
+  clip timeline log
   clip timeline export [<output>]
 `;
 
@@ -61,20 +77,35 @@ function num(value: string | undefined, fallback: number): number {
   return n;
 }
 
-const DEFAULT_TRACK = 'v0';
-
-/** Ops to create the named video track if it doesn't exist yet. */
-function ensureTrack(comp: Composition, trackId: string): CompositionOp[] {
-  return comp.tracks.some((t) => t.id === trackId)
-    ? []
-    : [{ op: 'addTrack', track: videoTrack({ id: trackId }) }];
+/** A short, human-readable label for a clip (for `show` / `at`). */
+function clipLabel(clip: Clip): string {
+  switch (clip.kind) {
+    case 'media':
+      return clip.mediaId;
+    case 'text':
+      return clip.text.length > 30 ? `${clip.text.slice(0, 30)}…` : clip.text;
+    case 'color':
+      return clip.color;
+  }
 }
 
-/** End time of the last clip on a track (0 if empty/missing) — the append point. */
-function trackEnd(comp: Composition, trackId: string): number {
-  const track = comp.tracks.find((t) => t.id === trackId);
-  if (!track) return 0;
-  return track.clips.reduce((end, c) => Math.max(end, clipEndSec(c)), 0);
+/** Dry-run the export compiler (pure — no FFmpeg runs) to report whether the
+ *  document can export and, if not, the first blocker. */
+function checkExportable(
+  comp: Composition,
+  media: Awaited<ReturnType<typeof buildMediaMap>>,
+): { exportable: boolean; blockers: string[] } {
+  try {
+    compileTimeline(comp, {
+      media,
+      dir: getWorkspace(),
+      output: resolve(getWorkspace(), '.probe.mp4'),
+    });
+    return { exportable: true, blockers: [] };
+  } catch (err) {
+    if (err instanceof CompileError) return { exportable: false, blockers: [err.message] };
+    throw err;
+  }
 }
 
 export async function runTimeline(args: string[]): Promise<void> {
@@ -232,11 +263,102 @@ export async function runTimeline(args: string[]): Promise<void> {
 
     case 'show': {
       const comp = await readComposition();
+      const { exportable, blockers } = checkExportable(comp, await buildMediaMap());
       out({
+        rev: comp.rev,
         durationSec: compositionDuration(comp),
         canvas: { width: comp.width, height: comp.height, fps: comp.fps },
-        tracks: comp.tracks.map((t) => ({ id: t.id, kind: t.kind, clips: t.clips.length })),
-        composition: comp,
+        exportable,
+        blockers,
+        tracks: comp.tracks.map((t) => ({
+          id: t.id,
+          kind: t.kind,
+          muted: t.muted,
+          clips: t.clips.map((c) => ({
+            id: c.id,
+            kind: c.kind,
+            startSec: c.startSec,
+            endSec: clipEndSec(c),
+            durationSec: clipDuration(c),
+            label: clipLabel(c),
+          })),
+          transitions: t.transitions.map((tr) => ({
+            afterClipId: tr.afterClipId,
+            kind: tr.kind,
+            durationSec: tr.durationSec,
+          })),
+        })),
+      });
+      return;
+    }
+
+    case 'at': {
+      const [at] = positional;
+      if (!at) throw new Error('Usage: clip timeline at <atSec>');
+      const atSec = num(at, 0);
+      const comp = await readComposition();
+      out({
+        atSec,
+        clips: clipsAtTime(comp, atSec).map((h) => ({
+          track: h.track.id,
+          clipId: h.clip.id,
+          kind: h.clip.kind,
+          localOffsetSec: h.localOffsetSec,
+          label: clipLabel(h.clip),
+        })),
+      });
+      return;
+    }
+
+    case 'frame': {
+      const [at, output] = positional;
+      if (!at) throw new Error('Usage: clip timeline frame <atSec> [<output>]');
+      const atSec = num(at, 0);
+      const comp = await readComposition();
+      const media = await buildMediaMap();
+      const finalOutput = output ? resolveInput(output) : newOutputPath('timeline-frame', 'jpg');
+      const plan = buildFrameAtPlan(
+        comp,
+        { media, dir: getWorkspace(), output: finalOutput },
+        atSec,
+      );
+      const result = await runPlan(plan);
+      out({ frame: result.output, atSec });
+      return;
+    }
+
+    case 'undo': {
+      const { undone, doc, label } = await undoLastDocOp();
+      out(
+        undone
+          ? { undone: true, label, rev: doc.rev }
+          : { undone: false, message: 'Nothing to undo.' },
+      );
+      return;
+    }
+
+    case 'redo': {
+      const { redone, doc, label } = await redoDocOp();
+      out(
+        redone
+          ? { redone: true, label, rev: doc.rev }
+          : { redone: false, message: 'Nothing to redo.' },
+      );
+      return;
+    }
+
+    case 'log': {
+      const log = await readDocOpLog();
+      out({
+        rev: log.rev,
+        cursor: log.cursor,
+        canUndo: log.cursor > 0,
+        canRedo: log.cursor < log.entries.length,
+        entries: log.entries.map((e, i) => ({
+          id: e.id,
+          label: e.label,
+          state: i < log.cursor ? 'applied' : 'undone',
+        })),
       });
       return;
     }

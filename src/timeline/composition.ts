@@ -176,6 +176,14 @@ export type Track = z.infer<typeof TrackSchema>;
 
 export const CompositionSchema = z.object({
   version: z.literal(COMPOSITION_VERSION),
+  /**
+   * Monotonic revision counter, bumped on every successful write — the
+   * compare-and-swap token for optimistic concurrency when the agent and the
+   * `clip ui` co-edit this document (mirrors `Session.rev`). Distinct from
+   * `version` (the format pin). Optional with a `0` default so documents written
+   * before this field existed — and hand-authored fixtures — still parse.
+   */
+  rev: z.number().int().nonnegative().default(0),
   width: z.number().int().positive().default(1920),
   height: z.number().int().positive().default(1080),
   fps: z.number().positive().default(30),
@@ -237,4 +245,23 @@ export function findClip(
     }
   }
   return null;
+}
+
+/** Every clip live at timeline time `atSec`, across all tracks, with its offset
+ *  into the clip. Half-open `[startSec, clipEndSec)` so a clip that ends exactly
+ *  where the next begins hands `atSec` to the later clip (abutting clips don't
+ *  both claim the boundary). Pure read — the "what is at T" query. */
+export function clipsAtTime(
+  comp: Composition,
+  atSec: number,
+): Array<{ track: Track; clip: Clip; localOffsetSec: number }> {
+  const hits: Array<{ track: Track; clip: Clip; localOffsetSec: number }> = [];
+  for (const track of comp.tracks) {
+    for (const clip of track.clips) {
+      if (atSec >= clip.startSec && atSec < clipEndSec(clip)) {
+        hits.push({ track, clip, localOffsetSec: atSec - clip.startSec });
+      }
+    }
+  }
+  return hits;
 }

@@ -79,6 +79,14 @@ export {
   SessionSchema,
 } from './session/types.js';
 export {
+  createRevisionedStore,
+  RevisionConflictError,
+  type Revisioned,
+  type RevisionedStore,
+  type RevisionedStoreConfig,
+} from './storage/revisioned-store.js';
+export {
+  buildFrameAtPlan,
   type CompileContext,
   CompileError,
   compileTimeline,
@@ -99,6 +107,7 @@ export {
   CompositionSchema,
   clipDuration,
   clipEndSec,
+  clipsAtTime,
   compositionDuration,
   type Effect,
   EffectSchema,
@@ -124,23 +133,35 @@ export {
   TransitionSchema,
 } from './timeline/composition.js';
 export {
+  applyVerbs,
+  CompositionConflictError,
   CompositionCorruptError,
+  compositionOpsPath,
   compositionPath,
   mutateComposition,
+  overwriteComposition,
   readComposition,
+  readDocOpLog,
+  redoDocOp,
   resetComposition,
+  undoLastDocOp,
   writeComposition,
+  writeCompositionIfUnchanged,
 } from './timeline/document-store.js';
 export { buildMediaMap } from './timeline/media-registry.js';
 export {
   applyOp,
   applyOps,
+  applyOpsTracked,
   audioTrack,
   type CompositionOp,
   CompositionOpError,
   type CompositionOpKind,
+  CompositionOpSchema,
   colorClip,
+  invertOp,
   mediaClip,
+  type TrackedApply,
   textClip,
   videoTrack,
 } from './timeline/ops.js';
@@ -156,6 +177,15 @@ export {
   TimecodeSchema,
   VideoStreamSchema,
 } from './timeline/schema.js';
+export {
+  type CompositionVerb,
+  type CompositionVerbKind,
+  CompositionVerbSchema,
+  DEFAULT_VERB_TRACK,
+  lowerVerb,
+  lowerVerbs,
+  type VerbContext,
+} from './timeline/verbs.js';
 export {
   AddAudioInput,
   type AddAudioInputType,
