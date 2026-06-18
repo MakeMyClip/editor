@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { ChatPanel } from './components/ChatPanel.js';
 import { DetailPane } from './components/DetailPane.js';
 import { DocTimeline } from './components/DocTimeline.js';
 import { AddCaptionsForm } from './components/forms/AddCaptionsForm.js';
@@ -32,7 +31,6 @@ export function App() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [safetyError, setSafetyError] = useState<string | null>(null);
-  const [chatOpen, setChatOpen] = useState(false);
 
   const selectedEntry =
     selectedId === null ? null : (session.entries.find((e) => e.id === selectedId) ?? null);
@@ -119,8 +117,6 @@ export function App() {
         snapshots={safety.snapshots}
         onRestore={(label) => void handleRestore(label)}
         safetyLoading={safety.loading}
-        chatOpen={chatOpen}
-        onToggleChat={() => setChatOpen((v) => !v)}
       />
       {safetyError ? <div className="safety-error-bar">{safetyError}</div> : null}
       <ImportZone onImported={handleImported} />
@@ -138,7 +134,7 @@ export function App() {
         }}
         onConcatSuccess={refresh}
       />
-      <main className={`main${chatOpen ? ' main-with-chat' : ''}`}>
+      <main className="main">
         <OpList
           entries={session.entries}
           selectedId={selectedId}
@@ -167,9 +163,6 @@ export function App() {
         ) : (
           <DetailPane entry={selectedEntry} />
         )}
-        {chatOpen ? (
-          <ChatPanel onAgentTurnComplete={refresh} onClose={() => setChatOpen(false)} />
-        ) : null}
       </main>
       <ToolPickerModal
         open={pickerOpen}
