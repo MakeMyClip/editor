@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface Exportable {
   exportable: boolean;
   blockers: string[];
 }
+
+type FrameState =
+  | { kind: 'loading' }
+  | { kind: 'ok'; url: string }
+  | { kind: 'error'; message: string };
 
 /**
  * The monitor: the COMPOSITED frame at the playhead, rendered server-side through
@@ -13,8 +18,9 @@ interface Exportable {
  */
 export function Viewer({ atSec, rev }: { atSec: number; rev: number }) {
   const [debouncedAt, setDebouncedAt] = useState(atSec);
-  const [erroredSrc, setErroredSrc] = useState<string | null>(null);
   const [status, setStatus] = useState<Exportable | null>(null);
+  const [frame, setFrame] = useState<FrameState>({ kind: 'loading' });
+  const liveUrl = useRef<string | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedAt(atSec), 140);
@@ -37,10 +43,41 @@ export function Viewer({ atSec, rev }: { atSec: number; rev: number }) {
     };
   }, [rev]);
 
+  // Fetch the composited frame as a blob (not via <img src>) so a superseded
+  // scrub is ABORTED instead of left rendering, and a transient 503 reads as a
+  // clean message rather than a broken image. The previous frame stays on screen
+  // until the next one decodes — no blank flash while FFmpeg works.
   const src = `/api/timeline/frame?at=${debouncedAt.toFixed(2)}&rev=${rev}`;
-  // The error is tied to the exact src that failed, so it clears itself the
-  // moment the playhead or rev produces a new src — no reset effect needed.
-  const frameError = erroredSrc === src;
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(src, { signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { error?: string } | null;
+          setFrame({ kind: 'error', message: body?.error ?? 'Could not render this frame.' });
+          return;
+        }
+        const url = URL.createObjectURL(await res.blob());
+        if (liveUrl.current) URL.revokeObjectURL(liveUrl.current);
+        liveUrl.current = url;
+        setFrame({ kind: 'ok', url });
+      })
+      .catch((err: unknown) => {
+        // A superseded scrub aborts in flight — ignore it; the next one wins.
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setFrame({ kind: 'error', message: 'Could not reach the renderer.' });
+      });
+    return () => controller.abort();
+  }, [src]);
+
+  // Release the last blob URL on unmount.
+  useEffect(
+    () => () => {
+      if (liveUrl.current) URL.revokeObjectURL(liveUrl.current);
+    },
+    [],
+  );
+
   const notRenderable = status !== null && !status.exportable;
 
   return (
@@ -48,16 +85,16 @@ export function Viewer({ atSec, rev }: { atSec: number; rev: number }) {
       <div className="viewer-stage">
         {notRenderable ? (
           <div className="viewer-msg">Not renderable yet — see the reason below.</div>
-        ) : frameError ? (
-          <div className="viewer-msg">No frame at this point.</div>
-        ) : (
+        ) : frame.kind === 'error' ? (
+          <div className="viewer-msg">{frame.message}</div>
+        ) : frame.kind === 'ok' ? (
           <img
-            key={src}
             className="viewer-frame"
-            src={src}
+            src={frame.url}
             alt={`Composited frame at ${debouncedAt.toFixed(2)} seconds`}
-            onError={() => setErroredSrc(src)}
           />
+        ) : (
+          <div className="viewer-msg">Rendering…</div>
         )}
       </div>
       <div className="viewer-bar">
