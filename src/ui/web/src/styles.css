@@ -228,6 +228,12 @@ body,
 }
 
 .modal {
+  /* Sit ABOVE the full-bleed .modal-backdrop-button (position:absolute; inset:0).
+     Without its own stacking position the static modal paints UNDER that
+     positioned sibling, so every click in the dialog hits the backdrop's
+     onClose instead of the tool buttons — the picker looks unclickable. */
+  position: relative;
+  z-index: 1;
   background: #fff;
   border-radius: 8px;
   width: 480px;
