@@ -19,6 +19,9 @@ import {
   applyVerbs,
   CompositionConflictError,
   readComposition,
+  readDocOpLog,
+  redoDocOp,
+  undoLastDocOp,
 } from '../timeline/document-store.js';
 import { buildMediaMap } from '../timeline/media-registry.js';
 import { CompositionOpError } from '../timeline/ops.js';
@@ -271,6 +274,27 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       if (err instanceof CompileError) return c.json({ error: err.message }, 422);
       throw err;
     }
+  });
+
+  /** POST /api/timeline/undo — undo the most recent document edit (op-log). */
+  app.post('/api/timeline/undo', async (c) => {
+    const { undone, label } = await undoLastDocOp();
+    return c.json({ undone, label: label ?? null });
+  });
+
+  /** POST /api/timeline/redo — redo the most recently undone document edit. */
+  app.post('/api/timeline/redo', async (c) => {
+    const { redone, label } = await redoDocOp();
+    return c.json({ redone, label: label ?? null });
+  });
+
+  /** GET /api/timeline/history — undo/redo availability for the doc op-log. */
+  app.get('/api/timeline/history', async (c) => {
+    const log = await readDocOpLog();
+    return c.json({
+      canUndo: log.cursor > 0,
+      canRedo: log.cursor < log.entries.length,
+    });
   });
 
   /**

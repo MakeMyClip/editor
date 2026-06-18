@@ -1314,3 +1314,18 @@ select.form-input {
 .stage-detail .detail {
   overflow: visible;
 }
+
+.doc-tl-histbtn {
+  padding: 0.3rem 0.55rem;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.doc-tl-histbtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.doc-tl-export {
+  margin-left: 0.25rem;
+}

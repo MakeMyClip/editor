@@ -70,6 +70,19 @@ export function App() {
     }
   }
 
+  async function handleTimelineHistory(direction: 'undo' | 'redo'): Promise<void> {
+    setVerbError(null);
+    try {
+      const res = await fetch(`/api/timeline/${direction}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await Promise.all([refreshTimeline(), refresh()]);
+    } catch (err) {
+      setSafetyError(
+        `Timeline ${direction} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   async function handleExport(): Promise<void> {
     setVerbBusy(true);
     setSafetyError(null);
@@ -229,6 +242,8 @@ export function App() {
         onScrub={setPlayheadSec}
         onExport={() => void handleExport()}
         exporting={verbBusy}
+        onUndo={() => void handleTimelineHistory('undo')}
+        onRedo={() => void handleTimelineHistory('redo')}
       />
       <ToolPickerModal
         open={pickerOpen}

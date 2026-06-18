@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { clipDuration, clipEndSec, clipLabel, compositionDuration } from '../lib/composition.js';
 import type { Clip, Composition } from '../types.js';
 
@@ -19,6 +20,8 @@ export function DocTimeline({
   onScrub,
   onExport,
   exporting,
+  onUndo,
+  onRedo,
 }: {
   composition: Composition;
   selectedClipId: string | null;
@@ -27,6 +30,8 @@ export function DocTimeline({
   onScrub: (sec: number) => void;
   onExport: () => void;
   exporting: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }) {
   const total = compositionDuration(composition);
   const spanSec = Math.max(total, MIN_SPAN_SEC);
@@ -34,6 +39,24 @@ export function DocTimeline({
   const ticks = Array.from({ length: Math.floor(spanSec) + 1 }, (_, i) => i);
   const hasClips = composition.tracks.some((t) => t.clips.length > 0);
   const playhead = Math.min(playheadSec, spanSec);
+
+  // Undo/redo availability tracks the doc op-log; refetch whenever the doc moves.
+  const [history, setHistory] = useState<{ canUndo: boolean; canRedo: boolean }>({
+    canUndo: false,
+    canRedo: false,
+  });
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/timeline/history')
+      .then((r) => r.json() as Promise<{ canUndo: boolean; canRedo: boolean }>)
+      .then((h) => {
+        if (alive) setHistory(h);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [composition.rev]);
 
   return (
     <section className="doc-timeline">
@@ -56,6 +79,24 @@ export function DocTimeline({
           />
         ) : null}
         <span className="doc-tl-playtime">▶ {playhead.toFixed(2)}s</span>
+        <button
+          type="button"
+          className="btn-secondary doc-tl-histbtn"
+          onClick={onUndo}
+          disabled={!history.canUndo}
+          title="Undo timeline edit"
+        >
+          ↶
+        </button>
+        <button
+          type="button"
+          className="btn-secondary doc-tl-histbtn"
+          onClick={onRedo}
+          disabled={!history.canRedo}
+          title="Redo timeline edit"
+        >
+          ↷
+        </button>
         <button
           type="button"
           className="btn-primary doc-tl-export"
