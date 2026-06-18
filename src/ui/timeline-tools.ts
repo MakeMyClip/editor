@@ -11,7 +11,7 @@ import {
 } from '../timeline/document-store.js';
 import { CompositionVerbSchema, DEFAULT_VERB_TRACK, type VerbContext } from '../timeline/verbs.js';
 import { ingest } from '../tools/ingest.js';
-import { resolveInput } from '../workspace.js';
+import { resolveInWorkspace } from '../workspace.js';
 
 /** A VerbContext wired to the real ingest tool — resolves the path, registers the
  *  media, and logs the ingest to the session so it shows up like a CLI ingest. */
@@ -19,7 +19,8 @@ export function makeVerbContext(): VerbContext {
   return {
     defaultTrack: DEFAULT_VERB_TRACK,
     ingest: async (path) => {
-      const resolved = resolveInput(path);
+      // Untrusted (agent/UI) input — confine to the workspace.
+      const resolved = resolveInWorkspace(path);
       const result = await ingest({ path: resolved });
       await appendOp({
         tool: 'ingest',
