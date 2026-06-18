@@ -205,6 +205,78 @@ describe('compileTimeline — fold (cuts & transitions)', () => {
     // 4 + 4 − 1 overlap = 7s
     expect(plan.durationSec).toBe(7);
   });
+
+  it('drops a per-clip fade on a transition boundary but keeps outer fades', () => {
+    const comp = oneTrack(
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 4, startSec: 0 }),
+      },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'b', mediaId: M2, sourceOutSec: 4, startSec: 4 }),
+      },
+      { op: 'addEffect', clipId: 'a', effect: { type: 'fadeIn', durationSec: 1 } },
+      { op: 'addEffect', clipId: 'a', effect: { type: 'fadeOut', durationSec: 1 } },
+      { op: 'addEffect', clipId: 'b', effect: { type: 'fadeIn', durationSec: 1 } },
+      { op: 'addEffect', clipId: 'b', effect: { type: 'fadeOut', durationSec: 1 } },
+      {
+        op: 'addTransition',
+        trackId: 'v0',
+        transition: { afterClipId: 'a', kind: 'dissolve', durationSec: 1 },
+      },
+    );
+    const plan = compileTimeline(comp, ctx());
+    const segA = plan.steps.find((s) => s.label === 'segment:a')?.args ?? [];
+    const fcA = segA[segA.indexOf('-filter_complex') + 1] ?? '';
+    const segB = plan.steps.find((s) => s.label === 'segment:b')?.args ?? [];
+    const fcB = segB[segB.indexOf('-filter_complex') + 1] ?? '';
+
+    // Clip a opens from black (leading fadeIn kept) but its trailing fadeOut is
+    // dropped — the dissolve already blends that cut.
+    expect(fcA).toContain('fade=t=in:st=0:d=1');
+    expect(fcA).not.toContain('fade=t=out');
+    expect(fcA).not.toContain('afade=t=out');
+    // Clip b's leading fadeIn is dropped (xfade owns it); its trailing fadeOut to
+    // black at the timeline end is kept.
+    expect(fcB).not.toContain('fade=t=in');
+    expect(fcB).not.toContain('afade=t=in');
+    expect(fcB).toContain('fade=t=out');
+    // The transition fold itself is unaffected.
+    expect(plan.steps.some((s) => s.label === 'fold:xfade:1')).toBe(true);
+  });
+
+  it('keeps the last clip fadeOut when a transition dangles on it (no following clip to xfade)', () => {
+    // A transition keyed to the LAST clip blends nothing (the fold only xfades a
+    // transition with a following clip — e.g. one left dangling after the next
+    // clip was removed). The fade-to-black must survive, not drop to a hard cut.
+    const comp = oneTrack(
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 4, startSec: 0 }),
+      },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'b', mediaId: M2, sourceOutSec: 4, startSec: 4 }),
+      },
+      { op: 'addEffect', clipId: 'b', effect: { type: 'fadeOut', durationSec: 1 } },
+      {
+        op: 'addTransition',
+        trackId: 'v0',
+        transition: { afterClipId: 'b', kind: 'dissolve', durationSec: 1 },
+      },
+    );
+    const plan = compileTimeline(comp, ctx());
+    const segB = plan.steps.find((s) => s.label === 'segment:b')?.args ?? [];
+    const fcB = segB[segB.indexOf('-filter_complex') + 1] ?? '';
+    expect(fcB).toContain('fade=t=out:st=3:d=1'); // preserved
+    // No xfade exists for a transition with nothing after it; the join is a cut.
+    expect(plan.steps.some((s) => s.label.startsWith('fold:xfade'))).toBe(false);
+  });
 });
 
 describe('compileTimeline — v1 guards (explicit, not silent-wrong)', () => {

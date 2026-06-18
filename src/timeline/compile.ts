@@ -30,10 +30,11 @@ import type { MediaId } from './schema.js';
  * per-clip transform, chromaKey (which needs a background layer), or timeline
  * gaps/overlaps — throw a clear `CompileError` rather than emitting a wrong graph.
  *
- * Known interaction (v1): a per-clip fadeOut/fadeIn placed on the SAME boundary
- * as a transition double-darkens, since the xfade already supplies the blend over
- * that window. Prefer one or the other on a given cut; fixing the overlap is a
- * follow-up.
+ * Transition boundaries own their blend: a per-clip fadeOut/fadeIn on the SAME
+ * cut as a transition is dropped during segment normalization (see the
+ * `FadeSuppression` plumbing), so the xfade's blend isn't stacked over a fade
+ * over the same window. Fades on outer boundaries (open from black, close to
+ * black) and on plain cuts are untouched.
  */
 
 export interface MediaInfo {
@@ -151,9 +152,22 @@ interface FilterChains {
   audio: string[];
 }
 
+/** Whether a clip's leading/trailing per-clip fade should be dropped because a
+ *  transition already owns the blend over that boundary (else they double-darken). */
+interface FadeSuppression {
+  in: boolean;
+  out: boolean;
+}
+
 /** Translate a clip's effect stack into video/audio filter fragments, applied
- *  after the geometry/source fragments. Order: color → speed → fades. */
-function effectFilters(clip: Clip, outDur: number): FilterChains {
+ *  after the geometry/source fragments. Order: color → speed → fades. A fade on a
+ *  boundary that carries a transition is skipped (`suppress`) so the xfade's blend
+ *  isn't stacked over a per-clip fade on the same window. */
+function effectFilters(
+  clip: Clip,
+  outDur: number,
+  suppress: FadeSuppression = { in: false, out: false },
+): FilterChains {
   const video: string[] = [];
   const audio: string[] = [];
 
@@ -181,11 +195,13 @@ function effectFilters(clip: Clip, outDur: number): FilterChains {
   for (const e of clip.effects) {
     // Clamp the fade to the clip so a fade longer than the clip still reaches
     // full black/silence within the available window instead of ramping partway.
-    if (e.type === 'fadeIn') {
+    // Skip the fade entirely when a transition owns this boundary (the xfade
+    // already blends that window — a per-clip fade on top double-darkens it).
+    if (e.type === 'fadeIn' && !suppress.in) {
       const d = Math.min(e.durationSec, outDur);
       video.push(`fade=t=in:st=0:d=${d}`);
       audio.push(`afade=t=in:st=0:d=${d}`);
-    } else if (e.type === 'fadeOut') {
+    } else if (e.type === 'fadeOut' && !suppress.out) {
       const d = Math.min(e.durationSec, outDur);
       const st = Math.max(0, outDur - d);
       video.push(`fade=t=out:st=${st}:d=${d}`);
@@ -231,12 +247,13 @@ function buildSegmentStep(
   clip: Clip,
   index: number,
   ctx: CompileContext,
+  fadeSuppress: FadeSuppression = { in: false, out: false },
 ): FfmpegStep {
   assertCompilable(clip);
   const outDur = outputDuration(clip);
   const { width, height, fps, background } = comp;
   const out = segPath(ctx.dir, index, clip.id);
-  const { video: fx, audio: afx } = effectFilters(clip, outDur);
+  const { video: fx, audio: afx } = effectFilters(clip, outDur, fadeSuppress);
   const textFiles: StepSideFile[] = [];
 
   const inputArgs: string[] = [];
@@ -496,9 +513,20 @@ export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegP
 
   const steps: FfmpegStep[] = [];
 
-  // 1. Normalize every clip to a segment.
+  // 1. Normalize every clip to a segment. Drop a per-clip fade on a boundary that
+  // a transition already blends: fadeOut when a transition follows this clip,
+  // fadeIn when one precedes it (the preceding clip has a transition after it).
+  // The fold (step 2) only xfades a transition that has a FOLLOWING clip, so a
+  // transition keyed to the last clip (e.g. left dangling after the next clip was
+  // removed) blends nothing — keep that clip's fadeOut rather than silently
+  // dropping a fade-to-black to a hard cut.
   const segments = clips.map((clip, i) => {
-    const step = buildSegmentStep(comp, clip, i, ctx);
+    const prevClip = clips[i - 1];
+    const fadeSuppress: FadeSuppression = {
+      in: prevClip ? transitionAfter.has(prevClip.id) : false,
+      out: i < clips.length - 1 && transitionAfter.has(clip.id),
+    };
+    const step = buildSegmentStep(comp, clip, i, ctx, fadeSuppress);
     steps.push(step);
     return { clip, output: step.output, durationSec: outputDuration(clip) };
   });

@@ -11,7 +11,7 @@ The open-source, local-first AI video editor — chat, CLI, or browser timeline.
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="./package.json"><img src="https://img.shields.io/badge/node-%E2%89%A524-brightgreen" alt="Node 24+"></a>
   <a href="https://www.npmjs.com/package/@makemyclip/editor"><img src="https://img.shields.io/npm/v/@makemyclip/editor.svg" alt="npm"></a>
-  <img src="https://img.shields.io/badge/tests-356%20passing-brightgreen" alt="Tests: 356 passing">
+  <img src="https://img.shields.io/badge/tests-539%20passing-brightgreen" alt="Tests: 539 passing">
   <img src="https://img.shields.io/badge/telemetry-none-brightgreen" alt="Telemetry: none">
 </p>
 
@@ -143,14 +143,14 @@ Legend: ✅ great fit · ⚠️ works but not the best · ❌ doesn't fit.
 </details>
 
 <details>
-<summary><b>Architecture</b> — three surfaces, one registry, one append-only op log</summary>
+<summary><b>Architecture</b> — three surfaces, one composition document, one append-only op log</summary>
 
 ```
-Claude Code  →  skill triggers  →  npx -y @makemyclip/editor <tool>
+Claude Code  →  skill triggers  →  npx -y @makemyclip/editor <tool | timeline …>
                                            │
-Browser UI   →  /api/tools/:name  →  TOOL_REGISTRY (19 tools)
+Browser UI   →  /api/tools/:name · /api/timeline/verbs  →  registry + verb layer
                                            │
-Chat panel   →  /api/chat  →  AI SDK + Anthropic + tool dispatch
+Chat panel   →  /api/chat  →  AI SDK + Anthropic + timeline verbs
                                            │
                                            ▼
                                   Tool handlers (TypeScript)
@@ -158,11 +158,27 @@ Chat panel   →  /api/chat  →  AI SDK + Anthropic + tool dispatch
                                            ▼
                                  FFmpeg subprocess (args as array, no shell)
                                            │
-                                           ▼
-                                 session.json (append-only op log)
+                   ┌───────────────────────┴───────────────────────┐
+                   ▼                                                 ▼
+        Composition document                              session.json
+        (non-destructive timeline,                        (append-only op log
+         op-log undo/redo)                                 of every tool call)
 ```
 
-The session is the source of truth: every editing operation appends one entry with `{ id, tool, args, result, timestamp }`. The CLI, browser UI, and chat panel all write through the same `appendOp()` path, so any combination of human + agent edits stays consistent.
+Two layers of state, by design. The **composition document** is the source of truth for assembled edits: a non-destructive, multi-track timeline that `clip timeline`, the browser UI, and the chat agent all mutate through one op-aware path, with a coupled op log that powers undo/redo. **`session.json`** is an append-only op log of every tool invocation — `{ id, tool, args, result, timestamp }` — written through the same `appendOp()` path by the single-file tools (`clip trim`, `/api/tools/:name`, …); it is the audit trail and recovery layer. Both layers are written through one serialized path, so any combination of human + agent edits stays consistent.
+
+**Build a composition end-to-end** (CLI shown; the browser UI and chat agent drive the same document):
+
+```bash
+clip timeline new                       # start an empty composition
+clip timeline add-media intro.mp4       # ingest + append a clip
+clip timeline add-media demo.mp4
+clip timeline transition <afterClipId> fade 0.5
+clip timeline show                      # inspect tracks, clips, timings
+clip timeline export final.mp4          # compile the document to a render
+```
+
+Every edit is undoable (`clip timeline undo` / `redo`, `clip timeline log`), and `clip timeline at <sec>` / `frame <sec>` give an agent read-only eyes on the document. Run `clip timeline --help` for the full subcommand list.
 
 - **Language:** TypeScript (Node 24+) and React 19 (browser UI)
 - **Timeline schema:** [Zod](https://zod.dev/) (shared with the [MakeMyClip.com](https://makemyclip.com) web app)
@@ -193,7 +209,7 @@ Only the chat panel inside `clip ui` needs `ANTHROPIC_API_KEY`. The CLI, the bro
 ### Capabilities & limits
 
 **Is it production-ready?**
-This release is feature-complete for local editing — 19 tools, 356 tests passing, browser UI shipped, chat panel shipped. The API surface is still pre-1.0 (tool schemas may change in minor ways before 1.0). Use it for real work; pin a version in CI.
+This release is feature-complete for local editing — 19 tools, 539 tests passing, browser UI shipped, chat panel shipped. The API surface is still pre-1.0 (tool schemas may change in minor ways before 1.0). Use it for real work; pin a version in CI.
 
 **What's the maximum video size or duration?**
 No hardcoded limit. FFmpeg streams the file rather than loading it into memory, and the browser UI streams uploads to disk — multi-GB recordings work fine. This release isn't tuned for projects with hundreds of clips or runtime above 30 minutes; for those, drive the CLI directly.

@@ -60,6 +60,11 @@ Specialty:
   clip stabilize <input> [<shakiness>] [<smoothing>] [<accuracy>] [<zoom>]
       Two-pass vidstab. Defaults: shakiness=5, smoothing=10, accuracy=9, zoom=5.
 
+Timeline (non-destructive composition — the source of truth for assembled edits):
+  clip timeline <subcommand>        Build and export a multi-clip composition with
+                                    undo/redo. new → add-media → … → export.
+  clip timeline --help              List the timeline subcommands.
+
 UI:
   clip ui                           Start the local browser UI on http://127.0.0.1:5573.
                                     Renders the session log; click an op to play its output.
