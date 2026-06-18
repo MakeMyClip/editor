@@ -27,7 +27,7 @@ import { ingest } from '../tools/ingest.js';
 import { preview } from '../tools/preview.js';
 import { snapshot } from '../tools/snapshot.js';
 import { undo } from '../tools/undo.js';
-import { ensureWorkspace, getWorkspace } from '../workspace.js';
+import { ensureWorkspace, getWorkspace, WorkspaceBoundaryError } from '../workspace.js';
 import { buildChatTools } from './chat-tools.js';
 import { buildTimelineTools, makeVerbContext, summarizeComposition } from './timeline-tools.js';
 import { isRegisteredTool, TOOL_REGISTRY } from './tool-registry.js';
@@ -151,6 +151,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       if (err instanceof ZodError) {
         return c.json({ error: 'Validation failed', issues: err.issues }, 400);
       }
+      if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
       const message = err instanceof Error ? err.message : String(err);
       return c.json({ error: message }, 500);
     }
@@ -188,6 +189,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       }
       // A lost write race is retriable (409); a stale/bad clip reference is a
       // client condition (422) — neither is a server fault.
+      if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
       if (err instanceof CompositionConflictError) return c.json({ error: err.message }, 409);
       if (err instanceof CompositionOpError) return c.json({ error: err.message }, 422);
       const message = err instanceof Error ? err.message : String(err);
