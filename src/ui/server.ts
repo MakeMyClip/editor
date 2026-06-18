@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, existsSync } from 'node:fs';
-import { mkdir, readdir, stat } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -14,18 +14,26 @@ import { ZodError, z } from 'zod';
 import { probe } from '../ffmpeg/probe.js';
 import { appendOp, readSession, SessionCorruptError, snapshotsDir } from '../session/store.js';
 import type { SessionEntry } from '../session/types.js';
+import { buildFrameAtPlan, CompileError, compileTimeline } from '../timeline/compile.js';
 import {
   applyVerbs,
   CompositionConflictError,
   readComposition,
 } from '../timeline/document-store.js';
+import { buildMediaMap } from '../timeline/media-registry.js';
 import { CompositionOpError } from '../timeline/ops.js';
+import { runPlan } from '../timeline/run-plan.js';
 import { CompositionVerbSchema } from '../timeline/verbs.js';
 import { ingest } from '../tools/ingest.js';
 import { preview } from '../tools/preview.js';
 import { snapshot } from '../tools/snapshot.js';
 import { undo } from '../tools/undo.js';
-import { ensureWorkspace, getWorkspace, WorkspaceBoundaryError } from '../workspace.js';
+import {
+  ensureWorkspace,
+  getWorkspace,
+  newOutputPath,
+  WorkspaceBoundaryError,
+} from '../workspace.js';
 import { makeVerbContext } from './timeline-tools.js';
 import { isRegisteredTool, TOOL_REGISTRY } from './tool-registry.js';
 
@@ -191,6 +199,77 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       if (err instanceof CompositionOpError) return c.json({ error: err.message }, 422);
       const message = err instanceof Error ? err.message : String(err);
       return c.json({ error: message }, 500);
+    }
+  });
+
+  /**
+   * GET /api/timeline/exportable — dry-run the export compiler (pure, no FFmpeg)
+   * to report whether the document can render and, if not, the blocking reasons.
+   * The viewer surfaces this so a not-yet-renderable doc reads as such, not broken.
+   */
+  app.get('/api/timeline/exportable', async (c) => {
+    const comp = await readComposition();
+    const media = await buildMediaMap();
+    try {
+      compileTimeline(comp, {
+        media,
+        dir: getWorkspace(),
+        output: resolve(getWorkspace(), '.probe.mp4'),
+      });
+      return c.json({ exportable: true, blockers: [] as string[] });
+    } catch (err) {
+      if (err instanceof CompileError)
+        return c.json({ exportable: false, blockers: [err.message] });
+      throw err;
+    }
+  });
+
+  /**
+   * GET /api/timeline/frame?at=<sec> — the composited frame at <sec>, rendered
+   * through the REAL export compiler (buildFrameAtPlan) so the preview can't
+   * diverge from the export. Returns image/jpeg; 422 with the reason when the doc
+   * can't render a frame there (gap, past the end, an unsupported clip).
+   */
+  app.get('/api/timeline/frame', async (c) => {
+    const atSec = Number(c.req.query('at') ?? '0');
+    if (Number.isNaN(atSec)) return c.json({ error: 'at must be a number' }, 400);
+    const output = newOutputPath('timeline-frame', 'jpg');
+    try {
+      const comp = await readComposition();
+      const media = await buildMediaMap();
+      const plan = buildFrameAtPlan(comp, { media, dir: getWorkspace(), output }, atSec);
+      const result = await runPlan(plan);
+      const jpeg = await readFile(result.output);
+      await unlink(result.output).catch(() => {}); // transient preview frame
+      return c.body(jpeg, 200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });
+    } catch (err) {
+      await unlink(output).catch(() => {});
+      if (err instanceof CompileError) return c.json({ error: err.message }, 422);
+      throw err;
+    }
+  });
+
+  /**
+   * POST /api/timeline/export — compile the whole document to a rendered file and
+   * log it to the session so it appears in Outputs and is playable. Returns the
+   * op id + output path.
+   */
+  app.post('/api/timeline/export', async (c) => {
+    const comp = await readComposition();
+    const media = await buildMediaMap();
+    const output = newOutputPath('timeline-export', 'mp4');
+    try {
+      const plan = compileTimeline(comp, { media, dir: getWorkspace(), output });
+      const result = await runPlan(plan);
+      const entry = await appendOp({
+        tool: 'timeline_export',
+        args: { rev: comp.rev },
+        result: { path: result.output, durationSec: plan.durationSec },
+      });
+      return c.json({ id: entry.id, output: result.output, durationSec: plan.durationSec });
+    } catch (err) {
+      if (err instanceof CompileError) return c.json({ error: err.message }, 422);
+      throw err;
     }
   });
 

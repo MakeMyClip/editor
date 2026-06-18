@@ -17,12 +17,16 @@ export function DocTimeline({
   onSelectClip,
   playheadSec,
   onScrub,
+  onExport,
+  exporting,
 }: {
   composition: Composition;
   selectedClipId: string | null;
   onSelectClip: (clipId: string | null) => void;
   playheadSec: number;
   onScrub: (sec: number) => void;
+  onExport: () => void;
+  exporting: boolean;
 }) {
   const total = compositionDuration(composition);
   const spanSec = Math.max(total, MIN_SPAN_SEC);
@@ -52,6 +56,14 @@ export function DocTimeline({
           />
         ) : null}
         <span className="doc-tl-playtime">▶ {playhead.toFixed(2)}s</span>
+        <button
+          type="button"
+          className="btn-primary doc-tl-export"
+          onClick={onExport}
+          disabled={exporting || !hasClips}
+        >
+          {exporting ? 'Exporting…' : 'Export ▸'}
+        </button>
       </div>
 
       {hasClips ? (

@@ -1234,3 +1234,83 @@ select.form-input {
   appearance: none;
   -webkit-appearance: none;
 }
+
+/* ─── Viewer (the monitor: composited frame at the playhead) ──────────── */
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.viewer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+}
+
+.viewer-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  min-height: 220px;
+  max-height: 44vh;
+  padding: 0.75rem;
+}
+
+.viewer-frame {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow);
+}
+
+.viewer-msg {
+  color: var(--text-3);
+  font-size: 0.9rem;
+}
+
+.viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 1rem;
+  background: var(--bg-1);
+}
+
+.viewer-time {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--playhead);
+}
+
+.viewer-ok {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--good);
+}
+
+.viewer-blocker {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--warn);
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-detail {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.stage-detail .detail {
+  overflow: visible;
+}

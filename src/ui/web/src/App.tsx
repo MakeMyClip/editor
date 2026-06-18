@@ -18,6 +18,7 @@ import { ImportZone } from './components/ImportZone.js';
 import { OpList } from './components/OpList.js';
 import { Timeline } from './components/Timeline.js';
 import { ToolPickerModal } from './components/ToolPickerModal.js';
+import { Viewer } from './components/Viewer.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useSession } from './hooks/useSession.js';
 import { useSessionSafety } from './hooks/useSessionSafety.js';
@@ -64,6 +65,26 @@ export function App() {
       await Promise.all([refreshTimeline(), refresh()]);
     } catch (err) {
       setVerbError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setVerbBusy(false);
+    }
+  }
+
+  async function handleExport(): Promise<void> {
+    setVerbBusy(true);
+    setSafetyError(null);
+    try {
+      const res = await fetch('/api/timeline/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const json = (await res.json()) as { id?: string; error?: string };
+      if (!res.ok || !json.id) throw new Error(json.error ?? `HTTP ${res.status}`);
+      await refresh(); // the export op now shows in Outputs
+      selectOp(json.id); // and plays in the inspector
+    } catch (err) {
+      setSafetyError(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setVerbBusy(false);
     }
@@ -163,37 +184,42 @@ export function App() {
       />
       <main className="main">
         <OpList entries={session.entries} selectedId={selectedId} onSelect={selectOp} />
-        {error ? (
-          <section className="detail">
-            <div className="placeholder">Could not load session: {error}</div>
-          </section>
-        ) : loading ? (
-          <section className="detail">
-            <div className="placeholder">Loading…</div>
-          </section>
-        ) : activeTool ? (
-          <section className="detail">
-            <ActiveForm
-              name={activeTool}
-              session={session}
-              onSuccess={handleFormSuccess}
-              onCancel={handleFormCancel}
-            />
-          </section>
-        ) : selected ? (
-          <ClipInspector
-            key={selected.clip.id}
-            clip={selected.clip}
-            playheadSec={playheadSec}
-            hasNext={nextClipOnTrack(selected.track, selected.clip) !== null}
-            busy={verbBusy}
-            error={verbError}
-            onApply={(verbs) => void handleApplyVerbs(verbs)}
-            onClose={() => setSelectedClipId(null)}
-          />
-        ) : (
-          <DetailPane entry={selectedEntry} />
-        )}
+        <div className="stage">
+          <Viewer atSec={playheadSec} rev={composition.rev} />
+          <div className="stage-detail">
+            {error ? (
+              <section className="detail">
+                <div className="placeholder">Could not load session: {error}</div>
+              </section>
+            ) : loading ? (
+              <section className="detail">
+                <div className="placeholder">Loading…</div>
+              </section>
+            ) : activeTool ? (
+              <section className="detail">
+                <ActiveForm
+                  name={activeTool}
+                  session={session}
+                  onSuccess={handleFormSuccess}
+                  onCancel={handleFormCancel}
+                />
+              </section>
+            ) : selected ? (
+              <ClipInspector
+                key={selected.clip.id}
+                clip={selected.clip}
+                playheadSec={playheadSec}
+                hasNext={nextClipOnTrack(selected.track, selected.clip) !== null}
+                busy={verbBusy}
+                error={verbError}
+                onApply={(verbs) => void handleApplyVerbs(verbs)}
+                onClose={() => setSelectedClipId(null)}
+              />
+            ) : (
+              <DetailPane entry={selectedEntry} />
+            )}
+          </div>
+        </div>
       </main>
       <DocTimeline
         composition={composition}
@@ -201,6 +227,8 @@ export function App() {
         onSelectClip={selectClip}
         playheadSec={playheadSec}
         onScrub={setPlayheadSec}
+        onExport={() => void handleExport()}
+        exporting={verbBusy}
       />
       <ToolPickerModal
         open={pickerOpen}
