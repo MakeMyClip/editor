@@ -23,7 +23,7 @@ import type { MediaId } from './schema.js';
  * Per-field `.describe()` text is surfaced to the model by the AI SDK, so the
  * verb schema doubles as the agent's tool documentation.
  */
-export const CompositionVerbSchema = z.discriminatedUnion('verb', [
+const EDITABLE_VERB_SCHEMAS = [
   z.object({
     verb: z.literal('add_media'),
     id: z
@@ -118,15 +118,32 @@ export const CompositionVerbSchema = z.discriminatedUnion('verb', [
     durationSec: z.number().positive().max(10).optional(),
     track: z.string().optional(),
   }),
-  z.object({
-    verb: z.literal('set_transform'),
-    clipId: z.string(),
-    scale: z.number().positive().optional(),
-    x: z.number().optional().describe('Horizontal center in [0,1].'),
-    y: z.number().optional().describe('Vertical center in [0,1].'),
-    rotationDeg: z.number().optional(),
-    opacity: z.number().min(0).max(1).optional(),
-  }),
+] as const;
+
+/**
+ * `set_transform` is split out from the editable set: the compiler rejects a
+ * non-identity transform (see `assertCompilable` in compile.ts), so surfaces that
+ * expose only renderable edits — the `clip ui` inspector and the MCP server — omit
+ * it. The CLI and the op layer still accept it.
+ */
+const TRANSFORM_VERB_SCHEMA = z.object({
+  verb: z.literal('set_transform'),
+  clipId: z.string(),
+  scale: z.number().positive().optional(),
+  x: z.number().optional().describe('Horizontal center in [0,1].'),
+  y: z.number().optional().describe('Vertical center in [0,1].'),
+  rotationDeg: z.number().optional(),
+  opacity: z.number().min(0).max(1).optional(),
+});
+
+/** Renderable editing verbs only — no `set_transform`. What the `clip ui` and the
+ *  MCP `timeline_edit` accept, so neither can author a doc the compiler refuses. */
+export const EditableVerbSchema = z.discriminatedUnion('verb', EDITABLE_VERB_SCHEMAS);
+
+/** The full verb vocabulary, including `set_transform` (accepted by the CLI/op layer). */
+export const CompositionVerbSchema = z.discriminatedUnion('verb', [
+  ...EDITABLE_VERB_SCHEMAS,
+  TRANSFORM_VERB_SCHEMA,
 ]);
 export type CompositionVerb = z.infer<typeof CompositionVerbSchema>;
 export type CompositionVerbKind = CompositionVerb['verb'];
