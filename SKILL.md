@@ -5,7 +5,6 @@ license: MIT
 compatibility: Requires Node 24+. FFmpeg is auto-downloaded via ffmpeg-static on first use; override with MAKEMYCLIP_FFMPEG_PATH.
 metadata:
   author: makemyclip
-  version: "0.0.1"
   homepage: https://github.com/MakeMyClip/editor
   runtime: node
   install: npx skills add MakeMyClip/editor
@@ -298,6 +297,21 @@ npx -y @makemyclip/editor stabilize <input> [<shakiness>] [<smoothing>] [<accura
 Two-pass `vidstab`: pass 1 (`vidstabdetect`) analyzes motion and writes a transforms file; pass 2 (`vidstabtransform`) warps each frame to follow a smoothed camera path. Defaults are sensible (5, 10, 9, 5) — bump `shakiness` for very erratic input, `smoothing` for a more cinematic feel, `zoom` to hide warp borders.
 
 Requires `vidstab`-enabled ffmpeg. The bundled `ffmpeg-static` includes it; the tool fails with a clear error otherwise.
+
+### Build a multi-clip composition — the timeline (implemented)
+
+The single-file tools above each produce a new output file. To assemble several clips into one edit — with non-destructive trims, transitions, and **undo/redo** — drive the **timeline**: a composition document that is the source of truth for the assembled edit. The CLI, the browser UI, and this skill all mutate the same document.
+
+```bash
+npx -y @makemyclip/editor timeline new                       # start an empty composition
+npx -y @makemyclip/editor timeline add-media intro.mp4       # ingest + append a clip
+npx -y @makemyclip/editor timeline add-media demo.mp4
+npx -y @makemyclip/editor timeline transition <afterClipId> fade 0.5
+npx -y @makemyclip/editor timeline show                      # read tracks, clips, timings
+npx -y @makemyclip/editor timeline export final.mp4          # compile the document to a render
+```
+
+Prefer the timeline over chaining single-file tools whenever the user is *assembling* a video (multiple clips, transitions, a final render): edits are non-destructive and reversible (`timeline undo` / `redo`, `timeline log`), and `timeline at <sec>` / `timeline frame <sec>` give you read-only eyes on the current document before you change it. Run `npx -y @makemyclip/editor timeline --help` for the full subcommand list.
 
 ### Open the local UI (implemented)
 

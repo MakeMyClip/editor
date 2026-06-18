@@ -9,7 +9,7 @@
 - **Backend:** FFmpeg (bundled via `ffmpeg-static`)
 - **Surfaces:** Claude Code skill · `clip` CLI · browser UI at `127.0.0.1:5573`
 - **AI integration:** Anthropic via Vercel AI SDK (optional; rest of editor works without API key)
-- **Tests:** 356 passing
+- **Tests:** 539 passing
 - **License:** MIT (code) + GPL (bundled FFmpeg binary, subprocess-isolated)
 
 ## How to install
