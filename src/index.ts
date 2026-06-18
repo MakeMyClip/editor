@@ -133,6 +133,7 @@ export {
   TransitionSchema,
 } from './timeline/composition.js';
 export {
+  applyVerbs,
   CompositionConflictError,
   CompositionCorruptError,
   compositionOpsPath,
@@ -176,6 +177,15 @@ export {
   TimecodeSchema,
   VideoStreamSchema,
 } from './timeline/schema.js';
+export {
+  type CompositionVerb,
+  type CompositionVerbKind,
+  CompositionVerbSchema,
+  DEFAULT_VERB_TRACK,
+  lowerVerb,
+  lowerVerbs,
+  type VerbContext,
+} from './timeline/verbs.js';
 export {
   AddAudioInput,
   type AddAudioInputType,

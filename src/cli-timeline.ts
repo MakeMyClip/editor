@@ -20,9 +20,9 @@ import {
   undoLastDocOp,
 } from './timeline/document-store.js';
 import { buildMediaMap } from './timeline/media-registry.js';
-import type { CompositionOp } from './timeline/ops.js';
-import { colorClip, mediaClip, textClip, videoTrack } from './timeline/ops.js';
+import { colorClip, mediaClip, textClip } from './timeline/ops.js';
 import { runPlan } from './timeline/run-plan.js';
+import { DEFAULT_VERB_TRACK as DEFAULT_TRACK, ensureTrack, trackEnd } from './timeline/verbs.js';
 import { ingest } from './tools/ingest.js';
 import { getWorkspace, newOutputPath, resolveInput } from './workspace.js';
 
@@ -106,22 +106,6 @@ function checkExportable(
     if (err instanceof CompileError) return { exportable: false, blockers: [err.message] };
     throw err;
   }
-}
-
-const DEFAULT_TRACK = 'v0';
-
-/** Ops to create the named video track if it doesn't exist yet. */
-function ensureTrack(comp: Composition, trackId: string): CompositionOp[] {
-  return comp.tracks.some((t) => t.id === trackId)
-    ? []
-    : [{ op: 'addTrack', track: videoTrack({ id: trackId }) }];
-}
-
-/** End time of the last clip on a track (0 if empty/missing) — the append point. */
-function trackEnd(comp: Composition, trackId: string): number {
-  const track = comp.tracks.find((t) => t.id === trackId);
-  if (!track) return 0;
-  return track.clips.reduce((end, c) => Math.max(end, clipEndSec(c)), 0);
 }
 
 export async function runTimeline(args: string[]): Promise<void> {

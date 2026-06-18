@@ -17,6 +17,7 @@ import {
   undo as undoLog,
 } from './doc-op-log.js';
 import { applyOps, applyOpsTracked, type CompositionOp } from './ops.js';
+import { type CompositionVerb, lowerVerbs, type VerbContext } from './verbs.js';
 
 const COMPOSITION_FILE = 'composition.json';
 const COMPOSITION_OPS_FILE = 'composition-ops.json';
@@ -212,9 +213,19 @@ async function commitDocAndLog<T>(
  * rev compare-and-swap via the shared revisioned store, so the agent and the UI
  * can co-edit without lost updates. An empty batch is a true no-op.
  */
-export async function mutateComposition(ops: CompositionOp[]): Promise<Composition> {
+export async function mutateComposition(
+  ops: CompositionOp[],
+  opts?: { expectedBaseRev?: number },
+): Promise<Composition> {
   if (ops.length === 0) return readComposition();
   const committed = await commitDocAndLog((current, log) => {
+    // Optimistic-concurrency guard for callers whose ops were lowered against a
+    // specific revision (e.g. `applyVerbs`, where a default append point is baked
+    // from a snapshot read): if the doc moved under us, reject so the caller can
+    // re-lower against the fresh state instead of committing stale positions.
+    if (opts?.expectedBaseRev !== undefined && current.rev !== opts.expectedBaseRev) {
+      throw new CompositionConflictError(opts.expectedBaseRev, current.rev);
+    }
     const { doc, inverse } = applyOpsTracked(current, ops);
     const entry: DocOpLogEntry = {
       id: makeDocOpId(),
@@ -225,6 +236,37 @@ export async function mutateComposition(ops: CompositionOp[]): Promise<Compositi
     return { doc, log: recordOps(log, entry), result: null };
   });
   return committed ? committed.doc : readComposition();
+}
+
+/**
+ * Lower a batch of editing VERBS to ops and apply them as ONE undoable edit — the
+ * op-aware mutation path the agent and `clip ui` share. Lowering (which ingests
+ * files and mints ids) runs outside the write lock; `mutateComposition` then
+ * validates, applies, and records the ops (so the edit lands in the undo stack).
+ * Returns the new document and the ops that were applied.
+ */
+export async function applyVerbs(
+  verbs: CompositionVerb[],
+  ctx: VerbContext,
+): Promise<{ doc: Composition; ops: CompositionOp[] }> {
+  // The default append point (`trackEnd`) is baked from the snapshot we lower
+  // against, so if another in-process writer commits between the read and the
+  // apply, re-lower against the fresh doc rather than land overlapping clips. A
+  // retry re-runs the impure lowering (it may re-`ingest`), which is acceptable
+  // on the rare conflict path.
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const current = await readComposition();
+    const ops = await lowerVerbs(current, verbs, ctx);
+    try {
+      const doc = await mutateComposition(ops, { expectedBaseRev: current.rev });
+      return { doc, ops };
+    } catch (err) {
+      if (err instanceof CompositionConflictError && attempt < 4) continue;
+      throw err;
+    }
+  }
+  // Unreachable: the final attempt either returns or throws.
+  throw new CompositionConflictError(-1, -1);
 }
 
 /** Undo the most recent recorded edit (apply its inverse), moving the op-log
