@@ -12,16 +12,24 @@ import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 
 import getPort from 'get-port';
 import { Hono } from 'hono';
 import open from 'open';
-import { ZodError } from 'zod';
+import { ZodError, z } from 'zod';
 import { probe } from '../ffmpeg/probe.js';
 import { appendOp, readSession, SessionCorruptError, snapshotsDir } from '../session/store.js';
 import type { SessionEntry } from '../session/types.js';
+import {
+  applyVerbs,
+  CompositionConflictError,
+  readComposition,
+} from '../timeline/document-store.js';
+import { CompositionOpError } from '../timeline/ops.js';
+import { CompositionVerbSchema } from '../timeline/verbs.js';
 import { ingest } from '../tools/ingest.js';
 import { preview } from '../tools/preview.js';
 import { snapshot } from '../tools/snapshot.js';
 import { undo } from '../tools/undo.js';
 import { ensureWorkspace, getWorkspace } from '../workspace.js';
 import { buildChatTools } from './chat-tools.js';
+import { buildTimelineTools, makeVerbContext, summarizeComposition } from './timeline-tools.js';
 import { isRegisteredTool, TOOL_REGISTRY } from './tool-registry.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -148,6 +156,45 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
     }
   });
 
+  // ─── Timeline document (op-aware, undoable) ───────────────────────
+
+  /** GET /api/timeline — the current composition document. */
+  app.get('/api/timeline', async (c) => {
+    return c.json({ document: await readComposition() });
+  });
+
+  /**
+   * POST /api/timeline/verbs — apply editing verbs to the document as ONE
+   * undoable change (the same op-aware path the agent and CLI use). Body:
+   * `{ verbs: CompositionVerb[] }`.
+   */
+  app.post('/api/timeline/verbs', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Body must be JSON' }, 400);
+    }
+    try {
+      const verbs = z
+        .array(CompositionVerbSchema)
+        .min(1)
+        .parse((body as { verbs?: unknown }).verbs);
+      const { doc, ops } = await applyVerbs(verbs, makeVerbContext());
+      return c.json({ applied: ops.length, document: doc });
+    } catch (err) {
+      if (err instanceof ZodError) {
+        return c.json({ error: 'Validation failed', issues: err.issues }, 400);
+      }
+      // A lost write race is retriable (409); a stale/bad clip reference is a
+      // client condition (422) — neither is a server fault.
+      if (err instanceof CompositionConflictError) return c.json({ error: err.message }, 409);
+      if (err instanceof CompositionOpError) return c.json({ error: err.message }, 422);
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 500);
+    }
+  });
+
   /**
    * Session safety endpoints. These intentionally live outside the
    * /api/tools/:name registry because snapshot/undo are meta-operations on
@@ -263,28 +310,34 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   }
 
   function buildSystemPrompt(): Promise<string> {
-    return readSession().then((session) => {
-      const workspace = getWorkspace();
-      const recent = session.entries.slice(-20).map(summarizeEntryForChat).join('\n');
-      const head =
-        session.entries.length > 20
-          ? `\n(showing last 20 of ${session.entries.length}; older ops exist)\n`
-          : '';
-      return [
-        'You are the assistant inside MakeMyClip Editor — an FFmpeg-backed video editor.',
-        'You run editing operations by calling tools. Each tool call produces a new output file and appends one entry to the session log; the UI picks it up automatically.',
-        '',
-        'Conventions:',
-        '- Refer to media by absolute file paths only — never relative.',
-        "- Chain ops by passing the previous op result's `path` as the next op's `input` (or `result.ref.path` for ingest).",
-        '- Prefer stream-copy ops (trim, split, concat) before re-encoding ops (transition, add_text, render) to keep results fast and lossless.',
-        '- When the user asks for something ambiguous, call `inspect`-style tools or read the session list to ground yourself before editing.',
-        '',
-        `Workspace: ${workspace}`,
-        `Session has ${session.entries.length} entries.${head}`,
-        recent ? `Recent ops:\n${recent}` : 'Session is empty.',
-      ].join('\n');
-    });
+    return Promise.all([readSession(), readComposition().catch(() => null)]).then(
+      ([session, comp]) => {
+        const workspace = getWorkspace();
+        const recent = session.entries.slice(-12).map(summarizeEntryForChat).join('\n');
+        return [
+          'You are the assistant inside MakeMyClip Editor — a local, FFmpeg-backed video editor.',
+          '',
+          'You build a video by editing a TIMELINE DOCUMENT: a non-destructive list of tracks and clips. Every edit is recorded and undoable.',
+          '',
+          'Primary tools — prefer these:',
+          '- `timeline_edit` — apply editing verbs (add_media, add_text, add_color, trim, move, split, remove, transition, set_transform) to the document. Batch related verbs into ONE call; they apply atomically as a single undoable change.',
+          '- `timeline_show` — read the current document (tracks, clips, timings). Call it to ground yourself BEFORE editing and to VERIFY AFTER an edit.',
+          '- `timeline_undo` / `timeline_redo` / `timeline_history` — move through the edit history.',
+          '',
+          'Workflow: timeline_show → timeline_edit → timeline_show to confirm. Refer to clips by their `id` (from timeline_show); refer to media by absolute or workspace-relative path.',
+          '',
+          'The legacy file-tools (chroma_key, stabilize, overlay, render, …) operate on standalone files, NOT the document. Use them only for operations the timeline engine does not cover yet — e.g. final render, chroma key, stabilization.',
+          '',
+          `Workspace: ${workspace}`,
+          comp
+            ? `Current document: ${JSON.stringify(summarizeComposition(comp))}`
+            : 'Current document: unreadable (corrupt?) — start over with `timeline_edit` after the user removes composition.json, or guide them to `clip timeline new`.',
+          recent ? `Recent file-tool ops:\n${recent}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
+      },
+    );
   }
 
   /**
@@ -351,7 +404,9 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       model: anthropic('claude-sonnet-4-6'),
       system,
       messages: modelMessages,
-      tools: buildChatTools(),
+      // Op-aware timeline tools first (the primary editing path); the legacy
+      // file-tools remain for operations the document engine doesn't cover yet.
+      tools: { ...buildTimelineTools(), ...buildChatTools() },
       // Up to 8 chained tool calls per turn — enough for "trim three clips
       // then concat" without runaway loops.
       stopWhen: stepCountIs(8),
