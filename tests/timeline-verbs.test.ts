@@ -184,4 +184,47 @@ describe('applyVerbs (op-aware + undoable)', () => {
     const doc = await mutateComposition([{ op: 'setCanvas', height: 720 }], { expectedBaseRev: 1 });
     expect(doc.rev).toBe(2);
   });
+
+  it('a burst of concurrent applyVerbs all land — none lost to the retry cap', async () => {
+    // All N writers read the same base rev (held at a barrier in `ingest` until
+    // every writer has lowered), then race the commit. Each conflicts on the
+    // stale expectedBaseRev and re-lowers, so writer k commits on attempt k —
+    // forcing up to N attempts. N=6 exceeds the old hardcoded cap of 4 (which
+    // dropped the 5th/6th with a CompositionConflictError) and stays within
+    // MAX_COMMIT_ATTEMPTS, so the fix must land all six.
+    const N = 6;
+    const DUR = 5;
+    await mutateComposition([{ op: 'addTrack', track: videoTrack({ id: 'v0' }) }]);
+
+    let arrived = 0;
+    let openGate!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    const barrierCtx: VerbContext = {
+      defaultTrack: 'v0',
+      ingest: async () => {
+        if (arrived < N) {
+          arrived++;
+          if (arrived === N) openGate();
+        }
+        await gate;
+        return { mediaId: M, durationSec: DUR };
+      },
+    };
+
+    const results = await Promise.all(
+      Array.from({ length: N }, () =>
+        applyVerbs([{ verb: 'add_media', path: '/a.mp4' }], barrierCtx),
+      ),
+    );
+    expect(results).toHaveLength(N);
+
+    const doc = await readComposition();
+    const starts = (doc.tracks[0]?.clips ?? []).map((c) => c.startSec).sort((a, b) => a - b);
+    // All six landed, abutting with no overlap or gap (proves no edit was lost).
+    expect(starts).toEqual([0, 1, 2, 3, 4, 5].map((i) => i * DUR));
+    // One undoable entry per landed edit, plus the seeding addTrack.
+    expect((await readDocOpLog()).entries).toHaveLength(N + 1);
+  });
 });

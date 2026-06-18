@@ -253,15 +253,17 @@ export async function applyVerbs(
   // against, so if another in-process writer commits between the read and the
   // apply, re-lower against the fresh doc rather than land overlapping clips. A
   // retry re-runs the impure lowering (it may re-`ingest`), which is acceptable
-  // on the rare conflict path.
-  for (let attempt = 1; attempt <= 4; attempt++) {
+  // on the rare conflict path. Retry to the same cap as the inner commit loop so
+  // a burst of N concurrent edits each re-lower and land instead of the (N-cap)
+  // tail silently losing to a `CompositionConflictError`.
+  for (let attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
     const current = await readComposition();
     const ops = await lowerVerbs(current, verbs, ctx);
     try {
       const doc = await mutateComposition(ops, { expectedBaseRev: current.rev });
       return { doc, ops };
     } catch (err) {
-      if (err instanceof CompositionConflictError && attempt < 4) continue;
+      if (err instanceof CompositionConflictError && attempt < MAX_COMMIT_ATTEMPTS) continue;
       throw err;
     }
   }
