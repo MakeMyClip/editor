@@ -1,9 +1,7 @@
-import { resolve } from 'node:path';
 import { appendOp } from './session/store.js';
-import { buildFrameAtPlan, CompileError, compileTimeline } from './timeline/compile.js';
+import { buildFrameAtPlan, checkExportable, compileTimeline } from './timeline/compile.js';
 import {
   type Clip,
-  type Composition,
   clipDuration,
   clipEndSec,
   clipsAtTime,
@@ -86,25 +84,6 @@ function clipLabel(clip: Clip): string {
       return clip.text.length > 30 ? `${clip.text.slice(0, 30)}…` : clip.text;
     case 'color':
       return clip.color;
-  }
-}
-
-/** Dry-run the export compiler (pure — no FFmpeg runs) to report whether the
- *  document can export and, if not, the first blocker. */
-function checkExportable(
-  comp: Composition,
-  media: Awaited<ReturnType<typeof buildMediaMap>>,
-): { exportable: boolean; blockers: string[] } {
-  try {
-    compileTimeline(comp, {
-      media,
-      dir: getWorkspace(),
-      output: resolve(getWorkspace(), '.probe.mp4'),
-    });
-    return { exportable: true, blockers: [] };
-  } catch (err) {
-    if (err instanceof CompileError) return { exportable: false, blockers: [err.message] };
-    throw err;
   }
 }
 
@@ -263,7 +242,7 @@ export async function runTimeline(args: string[]): Promise<void> {
 
     case 'show': {
       const comp = await readComposition();
-      const { exportable, blockers } = checkExportable(comp, await buildMediaMap());
+      const { exportable, blockers } = checkExportable(comp, await buildMediaMap(), getWorkspace());
       out({
         rev: comp.rev,
         durationSec: compositionDuration(comp),

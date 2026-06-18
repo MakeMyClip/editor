@@ -518,6 +518,26 @@ export function buildFrameAtPlan(
   return { steps: [segStep, frameStep], output: ctx.output, durationSec: 0 };
 }
 
+/**
+ * Dry-run the export compiler (pure — no FFmpeg runs) to report whether the
+ * document can render and, if not, the first blocking reason. Shared by the CLI
+ * `timeline show`, the `clip ui` exportable route, and the MCP `timeline_show`
+ * so every surface tells the agent the SAME thing about renderability.
+ */
+export function checkExportable(
+  comp: Composition,
+  media: Map<MediaId, MediaInfo>,
+  dir: string,
+): { exportable: boolean; blockers: string[] } {
+  try {
+    compileTimeline(comp, { media, dir, output: resolve(dir, '.probe.mp4') });
+    return { exportable: true, blockers: [] };
+  } catch (err) {
+    if (err instanceof CompileError) return { exportable: false, blockers: [err.message] };
+    throw err;
+  }
+}
+
 export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegPlan {
   const track = selectVideoTrack(comp);
   const clips = [...track.clips].sort((a, b) => a.startSec - b.startSec);

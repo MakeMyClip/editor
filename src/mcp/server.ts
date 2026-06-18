@@ -1,7 +1,11 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { CompileError, compileTimeline } from '../timeline/compile.js';
+import { CompileError, checkExportable, compileTimeline } from '../timeline/compile.js';
+import type { Composition } from '../timeline/composition.js';
 import {
   applyVerbs,
   readComposition,
@@ -10,16 +14,62 @@ import {
 } from '../timeline/document-store.js';
 import { buildMediaMap } from '../timeline/media-registry.js';
 import { runPlan } from '../timeline/run-plan.js';
-import { CompositionVerbSchema } from '../timeline/verbs.js';
-import { makeVerbContext, summarizeComposition } from '../ui/timeline-tools.js';
+import { EditableVerbSchema } from '../timeline/verbs.js';
+import {
+  type CompositionSummary,
+  makeVerbContext,
+  summarizeComposition,
+} from '../ui/timeline-tools.js';
 import { ensureWorkspace, getWorkspace, newOutputPath } from '../workspace.js';
 
 const MCP_NAME = 'makemyclip-editor';
-const MCP_VERSION = '0.3.0';
+
+/**
+ * Read the package's own version, walking up from this module so it resolves both
+ * from source (src/mcp/server.ts under vitest) and bundled (dist/cli.js at runtime)
+ * — the depth to package.json differs between the two, so a fixed relative path
+ * would break one of them.
+ */
+function resolvePackageVersion(): string {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 8; i++) {
+    const pkgPath = join(dir, 'package.json');
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
+          name?: string;
+          version?: string;
+        };
+        if (pkg.name === '@makemyclip/editor' && pkg.version) return pkg.version;
+      } catch {
+        // not our package.json (or unreadable) — keep walking up
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return '0.0.0';
+}
+
+const MCP_VERSION = resolvePackageVersion();
 
 /** Wrap any JSON-able value as an MCP text result. */
 function jsonResult(value: unknown): { content: { type: 'text'; text: string }[] } {
   return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+}
+
+/**
+ * The document summary plus whether it can render — the SAME renderability signal
+ * the CLI `timeline show` and the `clip ui` give, so the MCP agent isn't blind to
+ * a gap/blocker until it tries to export.
+ */
+async function describeComposition(
+  comp: Composition,
+): Promise<CompositionSummary & { exportable: boolean; blockers: string[] }> {
+  const media = await buildMediaMap();
+  const { exportable, blockers } = checkExportable(comp, media, getWorkspace());
+  return { ...summarizeComposition(comp), exportable, blockers };
 }
 
 /**
@@ -37,9 +87,9 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Show the timeline',
       description:
-        'Read the current timeline document — tracks, clips, and timings. Call this to ground yourself BEFORE editing and to VERIFY a change AFTER.',
+        'Read the current timeline document — tracks, clips, timings, and whether it can render (exportable + any blockers). Call this to ground yourself BEFORE editing and to VERIFY a change AFTER.',
     },
-    async () => jsonResult(summarizeComposition(await readComposition())),
+    async () => jsonResult(await describeComposition(await readComposition())),
   );
 
   server.registerTool(
@@ -47,12 +97,12 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Edit the timeline',
       description:
-        'Apply one or more editing verbs to the document as ONE undoable change. Verbs: add_media, add_text, add_color, trim, move, split, remove, transition. Batch related verbs into a single call. Media paths must be inside the workspace. Returns the updated document summary.',
-      inputSchema: { verbs: z.array(CompositionVerbSchema).min(1) },
+        'Apply one or more editing verbs to the document as ONE undoable change. Verbs: add_media, add_text, add_color, trim, move, split, remove, transition. Batch related verbs into a single call. Media paths must be inside the workspace. Returns the updated document summary, including whether it can now render.',
+      inputSchema: { verbs: z.array(EditableVerbSchema).min(1) },
     },
     async ({ verbs }) => {
       const { doc, ops } = await applyVerbs(verbs, makeVerbContext());
-      return jsonResult({ applied: ops.length, document: summarizeComposition(doc) });
+      return jsonResult({ applied: ops.length, document: await describeComposition(doc) });
     },
   );
 

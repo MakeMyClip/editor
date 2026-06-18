@@ -14,7 +14,12 @@ import { ZodError, z } from 'zod';
 import { probe } from '../ffmpeg/probe.js';
 import { appendOp, readSession, SessionCorruptError, snapshotsDir } from '../session/store.js';
 import type { SessionEntry } from '../session/types.js';
-import { buildFrameAtPlan, CompileError, compileTimeline } from '../timeline/compile.js';
+import {
+  buildFrameAtPlan,
+  CompileError,
+  checkExportable,
+  compileTimeline,
+} from '../timeline/compile.js';
 import {
   applyVerbs,
   CompositionConflictError,
@@ -213,18 +218,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   app.get('/api/timeline/exportable', async (c) => {
     const comp = await readComposition();
     const media = await buildMediaMap();
-    try {
-      compileTimeline(comp, {
-        media,
-        dir: getWorkspace(),
-        output: resolve(getWorkspace(), '.probe.mp4'),
-      });
-      return c.json({ exportable: true, blockers: [] as string[] });
-    } catch (err) {
-      if (err instanceof CompileError)
-        return c.json({ exportable: false, blockers: [err.message] });
-      throw err;
-    }
+    return c.json(checkExportable(comp, media, getWorkspace()));
   });
 
   /**

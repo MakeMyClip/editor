@@ -24,8 +24,19 @@ export function makeVerbContext(): VerbContext {
   };
 }
 
+export interface CompositionSummary {
+  rev: number;
+  durationSec: number;
+  canvas: { width: number; height: number; fps: number };
+  tracks: {
+    id: string;
+    kind: string;
+    clips: { id: string; kind: string; startSec: number; endSec: number }[];
+  }[];
+}
+
 /** Compact, agent-readable view of the document — the textual "eyes". */
-export function summarizeComposition(comp: Composition): unknown {
+export function summarizeComposition(comp: Composition): CompositionSummary {
   return {
     rev: comp.rev,
     durationSec: compositionDuration(comp),
