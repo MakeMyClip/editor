@@ -1,8 +1,12 @@
+import { resolve } from 'node:path';
 import { appendOp } from './session/store.js';
-import { compileTimeline } from './timeline/compile.js';
+import { buildFrameAtPlan, CompileError, compileTimeline } from './timeline/compile.js';
 import {
+  type Clip,
   type Composition,
+  clipDuration,
   clipEndSec,
+  clipsAtTime,
   compositionDuration,
   emptyComposition,
   makeClipId,
@@ -34,6 +38,8 @@ const TIMELINE_HELP = `clip timeline — build and export a non-destructive comp
   clip timeline split <clipId> <atSec>
   clip timeline remove <clipId>
   clip timeline show
+  clip timeline at <atSec>
+  clip timeline frame <atSec> [<output>]
   clip timeline undo
   clip timeline redo
   clip timeline log
@@ -69,6 +75,37 @@ function num(value: string | undefined, fallback: number): number {
   const n = Number(value);
   if (Number.isNaN(n)) throw new Error(`Expected a number, got "${value}".`);
   return n;
+}
+
+/** A short, human-readable label for a clip (for `show` / `at`). */
+function clipLabel(clip: Clip): string {
+  switch (clip.kind) {
+    case 'media':
+      return clip.mediaId;
+    case 'text':
+      return clip.text.length > 30 ? `${clip.text.slice(0, 30)}…` : clip.text;
+    case 'color':
+      return clip.color;
+  }
+}
+
+/** Dry-run the export compiler (pure — no FFmpeg runs) to report whether the
+ *  document can export and, if not, the first blocker. */
+function checkExportable(
+  comp: Composition,
+  media: Awaited<ReturnType<typeof buildMediaMap>>,
+): { exportable: boolean; blockers: string[] } {
+  try {
+    compileTimeline(comp, {
+      media,
+      dir: getWorkspace(),
+      output: resolve(getWorkspace(), '.probe.mp4'),
+    });
+    return { exportable: true, blockers: [] };
+  } catch (err) {
+    if (err instanceof CompileError) return { exportable: false, blockers: [err.message] };
+    throw err;
+  }
 }
 
 const DEFAULT_TRACK = 'v0';
@@ -242,12 +279,67 @@ export async function runTimeline(args: string[]): Promise<void> {
 
     case 'show': {
       const comp = await readComposition();
+      const { exportable, blockers } = checkExportable(comp, await buildMediaMap());
       out({
+        rev: comp.rev,
         durationSec: compositionDuration(comp),
         canvas: { width: comp.width, height: comp.height, fps: comp.fps },
-        tracks: comp.tracks.map((t) => ({ id: t.id, kind: t.kind, clips: t.clips.length })),
-        composition: comp,
+        exportable,
+        blockers,
+        tracks: comp.tracks.map((t) => ({
+          id: t.id,
+          kind: t.kind,
+          muted: t.muted,
+          clips: t.clips.map((c) => ({
+            id: c.id,
+            kind: c.kind,
+            startSec: c.startSec,
+            endSec: clipEndSec(c),
+            durationSec: clipDuration(c),
+            label: clipLabel(c),
+          })),
+          transitions: t.transitions.map((tr) => ({
+            afterClipId: tr.afterClipId,
+            kind: tr.kind,
+            durationSec: tr.durationSec,
+          })),
+        })),
       });
+      return;
+    }
+
+    case 'at': {
+      const [at] = positional;
+      if (!at) throw new Error('Usage: clip timeline at <atSec>');
+      const atSec = num(at, 0);
+      const comp = await readComposition();
+      out({
+        atSec,
+        clips: clipsAtTime(comp, atSec).map((h) => ({
+          track: h.track.id,
+          clipId: h.clip.id,
+          kind: h.clip.kind,
+          localOffsetSec: h.localOffsetSec,
+          label: clipLabel(h.clip),
+        })),
+      });
+      return;
+    }
+
+    case 'frame': {
+      const [at, output] = positional;
+      if (!at) throw new Error('Usage: clip timeline frame <atSec> [<output>]');
+      const atSec = num(at, 0);
+      const comp = await readComposition();
+      const media = await buildMediaMap();
+      const finalOutput = output ? resolveInput(output) : newOutputPath('timeline-frame', 'jpg');
+      const plan = buildFrameAtPlan(
+        comp,
+        { media, dir: getWorkspace(), output: finalOutput },
+        atSec,
+      );
+      const result = await runPlan(plan);
+      out({ frame: result.output, atSec });
       return;
     }
 

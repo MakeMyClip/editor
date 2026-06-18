@@ -86,6 +86,7 @@ export {
   type RevisionedStoreConfig,
 } from './storage/revisioned-store.js';
 export {
+  buildFrameAtPlan,
   type CompileContext,
   CompileError,
   compileTimeline,
@@ -106,6 +107,7 @@ export {
   CompositionSchema,
   clipDuration,
   clipEndSec,
+  clipsAtTime,
   compositionDuration,
   type Effect,
   EffectSchema,

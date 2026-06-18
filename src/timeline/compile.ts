@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { buildPreviewFrameArgs } from '../ffmpeg/args/preview.js';
 import { buildTransitionArgs } from '../ffmpeg/args/transition.js';
 import { quoteFilterArg } from '../ffmpeg/escape.js';
 import {
@@ -399,14 +400,13 @@ function buildHardCutArgs(a: string, b: string, output: string): string[] {
  *  sums of durations, so allow a hair of accumulated rounding. */
 const ABUT_EPSILON = 1e-4;
 
-export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegPlan {
-  const track = selectVideoTrack(comp);
-  const clips = [...track.clips].sort((a, b) => a.startSec - b.startSec);
-  const transitionAfter = new Map(track.transitions.map((t) => [t.afterClipId, t]));
-
-  // v1 renders a track as an abutting sequence. Reject gaps/overlaps with a clear
-  // error rather than silently collapsing them — the document is the source of
-  // truth, so export must not diverge from the timeline it describes.
+/**
+ * v1 renders a track as an abutting sequence. Reject gaps/overlaps with a clear
+ * error rather than silently collapsing them — the document is the source of
+ * truth, so neither export NOR the frame preview may diverge from the timeline it
+ * describes. `clips` must be pre-sorted by `startSec`.
+ */
+function assertAbutting(clips: Clip[]): void {
   for (let i = 1; i < clips.length; i++) {
     const prev = clips[i - 1];
     const cur = clips[i];
@@ -417,12 +417,82 @@ export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegP
       const kind = delta > 0 ? 'gap' : 'overlap';
       throw new CompileError(
         `Timeline ${kind} between "${prev.id}" (ends ${prevEnd.toFixed(3)}s) and "${cur.id}" ` +
-          `(starts ${cur.startSec}s): export needs clips to abut. ` +
+          `(starts ${cur.startSec}s): the timeline needs clips to abut. ` +
           `${kind === 'gap' ? 'Close the gap (or add a filler clip)' : 'Remove the overlap'} — ` +
-          `positioned gaps/overlaps are not supported in export yet.`,
+          `positioned gaps/overlaps are not supported yet.`,
       );
     }
   }
+}
+
+/**
+ * Render ONE frame at timeline time `atSec` — the agent's "eyes" on the doc.
+ * Goes through the REAL segment path (`buildSegmentStep`) so the preview can't
+ * diverge from what export would produce, then extracts a still from that
+ * normalized segment. Two steps: encode the active clip's segment, then grab the
+ * frame at the mapped offset. Runs the SAME abutting check as export, so it fails
+ * (rather than guessing a clip) on an unexportable doc; throws `CompileError` past
+ * the end, in a gap, or on an overlap, and inherits the v1 single-video-track /
+ * no-compositing guards.
+ *
+ * Known v1 limits (flag, don't fix here): a frame inside a transition window
+ * shows the underlying clip, not the xfade blend; `-ss` is keyframe-accurate
+ * (off by up to a GOP) — fine for a thumbnail; and a long clip re-encodes a whole
+ * segment to grab one frame.
+ */
+export function buildFrameAtPlan(
+  comp: Composition,
+  ctx: CompileContext,
+  atSec: number,
+): FfmpegPlan {
+  if (atSec < 0) throw new CompileError(`Frame time ${atSec}s is before the timeline start.`);
+  const track = selectVideoTrack(comp);
+  const clips = [...track.clips].sort((a, b) => a.startSec - b.startSec);
+  // Fail the way export does on an unexportable doc, so the preview tells the
+  // truth instead of silently picking one of several overlapping clips.
+  assertAbutting(clips);
+  const index = clips.findIndex((c) => atSec >= c.startSec && atSec < clipEndSec(c));
+  const clip = clips[index];
+  if (!clip) {
+    const last = clips[clips.length - 1];
+    const end = last ? clipEndSec(last) : 0;
+    throw new CompileError(
+      `No clip at ${atSec}s — the timeline runs to ${end.toFixed(3)}s and ${atSec}s is ` +
+        `${atSec >= end ? 'past the end' : 'in a gap'}.`,
+    );
+  }
+  assertCompilable(clip);
+
+  // Encode the clip's segment exactly as export would, then extract the frame.
+  const segStep = buildSegmentStep(comp, clip, index, ctx);
+
+  // Map doc-local time to the post-speed SEGMENT timebase. The ratio is 1 unless
+  // the clip carries a speed effect, which shortens the segment relative to the
+  // document extent — so a frame still lands on the source content the document
+  // places at `atSec`.
+  const clipDur = clipDuration(clip);
+  const outDur = outputDuration(clip);
+  const localDoc = atSec - clip.startSec;
+  const segTime = clipDur > 0 ? (localDoc * outDur) / clipDur : 0;
+  const lastFrame = Math.max(0, outDur - 1 / comp.fps);
+  const clamped = Math.max(0, Math.min(segTime, lastFrame));
+
+  const frameStep: FfmpegStep = {
+    label: `frame:${clip.id}@${atSec}`,
+    args: buildPreviewFrameArgs({ input: segStep.output, output: ctx.output, atSec: clamped }),
+    output: ctx.output,
+    textFiles: [],
+  };
+
+  return { steps: [segStep, frameStep], output: ctx.output, durationSec: 0 };
+}
+
+export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegPlan {
+  const track = selectVideoTrack(comp);
+  const clips = [...track.clips].sort((a, b) => a.startSec - b.startSec);
+  const transitionAfter = new Map(track.transitions.map((t) => [t.afterClipId, t]));
+
+  assertAbutting(clips);
 
   const steps: FfmpegStep[] = [];
 
