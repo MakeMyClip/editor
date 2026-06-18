@@ -120,11 +120,6 @@ export function App() {
       />
       {safetyError ? <div className="safety-error-bar">{safetyError}</div> : null}
       <ImportZone onImported={handleImported} />
-      <DocTimeline
-        composition={composition}
-        selectedClipId={selectedClipId}
-        onSelectClip={setSelectedClipId}
-      />
       <Timeline
         session={session}
         selectedOpId={selectedId}
@@ -164,6 +159,11 @@ export function App() {
           <DetailPane entry={selectedEntry} />
         )}
       </main>
+      <DocTimeline
+        composition={composition}
+        selectedClipId={selectedClipId}
+        onSelectClip={setSelectedClipId}
+      />
       <ToolPickerModal
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
