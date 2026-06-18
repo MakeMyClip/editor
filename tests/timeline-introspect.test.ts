@@ -79,6 +79,17 @@ describe('buildFrameAtPlan', () => {
     expect(frame?.args.at(-1)).toBe('/ws/frame.jpg');
   });
 
+  it('a tagged context gives the segment a collision-free path; untagged stays stable', () => {
+    const segOut = (tag?: string) =>
+      buildFrameAtPlan(oneClip(), { ...CTX('/ws/frame.jpg'), tag }, 3).steps[0]?.output;
+    // Untagged keeps the deterministic name export also uses.
+    expect(segOut()).toBe('/ws/tl-seg-0-c1.mp4');
+    // A tag is mixed in, so a preview can't overwrite/unlink an export's segment…
+    expect(segOut('frame-abc123')).toBe('/ws/tl-seg-frame-abc123-0-c1.mp4');
+    // …and two different preview requests never share a segment path.
+    expect(segOut('frame-aaa')).not.toBe(segOut('frame-bbb'));
+  });
+
   it('selects the second clip and offsets into it for a time in the second clip', () => {
     const doc = applyOps(oneClip(), [
       {
