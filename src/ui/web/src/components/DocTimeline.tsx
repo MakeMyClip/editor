@@ -47,7 +47,7 @@ export function DocTimeline({
   });
   useEffect(() => {
     let alive = true;
-    fetch('/api/timeline/history')
+    fetch(`/api/timeline/history?rev=${composition.rev}`)
       .then((r) => r.json() as Promise<{ canUndo: boolean; canRedo: boolean }>)
       .then((h) => {
         if (alive) setHistory(h);

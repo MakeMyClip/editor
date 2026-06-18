@@ -13,7 +13,7 @@ interface Exportable {
  */
 export function Viewer({ atSec, rev }: { atSec: number; rev: number }) {
   const [debouncedAt, setDebouncedAt] = useState(atSec);
-  const [frameError, setFrameError] = useState(false);
+  const [erroredSrc, setErroredSrc] = useState<string | null>(null);
   const [status, setStatus] = useState<Exportable | null>(null);
 
   useEffect(() => {
@@ -21,15 +21,10 @@ export function Viewer({ atSec, rev }: { atSec: number; rev: number }) {
     return () => clearTimeout(t);
   }, [atSec]);
 
-  // A new frame request — clear the stale error so the <img> renders again.
-  useEffect(() => {
-    setFrameError(false);
-  }, [debouncedAt, rev]);
-
-  // Re-check exportability whenever the document changes.
+  // Re-check exportability whenever the document changes (rev cache-busts).
   useEffect(() => {
     let alive = true;
-    fetch('/api/timeline/exportable')
+    fetch(`/api/timeline/exportable?rev=${rev}`)
       .then((r) => r.json() as Promise<Exportable>)
       .then((s) => {
         if (alive) setStatus(s);
@@ -43,6 +38,9 @@ export function Viewer({ atSec, rev }: { atSec: number; rev: number }) {
   }, [rev]);
 
   const src = `/api/timeline/frame?at=${debouncedAt.toFixed(2)}&rev=${rev}`;
+  // The error is tied to the exact src that failed, so it clears itself the
+  // moment the playhead or rev produces a new src — no reset effect needed.
+  const frameError = erroredSrc === src;
   const notRenderable = status !== null && !status.exportable;
 
   return (
@@ -58,7 +56,7 @@ export function Viewer({ atSec, rev }: { atSec: number; rev: number }) {
             className="viewer-frame"
             src={src}
             alt={`Composited frame at ${debouncedAt.toFixed(2)} seconds`}
-            onError={() => setFrameError(true)}
+            onError={() => setErroredSrc(src)}
           />
         )}
       </div>
