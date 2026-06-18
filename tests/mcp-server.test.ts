@@ -1,10 +1,13 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildMcpServer } from '../src/mcp/server.js';
+
+const pkg = createRequire(import.meta.url)('../package.json') as { version: string };
 
 let workspace: string;
 let saved: string | undefined;
@@ -60,6 +63,28 @@ describe('MCP server', () => {
     }
   });
 
+  it('advertises its package version in the handshake', async () => {
+    const { client, close } = await connect();
+    try {
+      expect(client.getServerVersion()?.version).toBe(pkg.version);
+    } finally {
+      await close();
+    }
+  });
+
+  it('reports renderability (exportable + blockers) in timeline_show', async () => {
+    const { client, close } = await connect();
+    try {
+      const show = payload(await client.callTool({ name: 'timeline_show', arguments: {} }));
+      // An empty doc isn't renderable, but show must still answer — never throw.
+      expect(show.exportable).toBe(false);
+      expect(Array.isArray(show.blockers)).toBe(true);
+      expect((show.blockers as string[]).length).toBeGreaterThan(0);
+    } finally {
+      await close();
+    }
+  });
+
   it('edits the document through verbs and is undoable — the same op-aware path', async () => {
     const { client, close } = await connect();
     try {
@@ -101,6 +126,19 @@ describe('MCP server', () => {
       const res = await client.callTool({
         name: 'timeline_edit',
         arguments: { verbs: [{ verb: 'not_a_verb' }] },
+      });
+      expect((res as { isError?: boolean }).isError).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it('rejects set_transform — the MCP exposes only renderable verbs', async () => {
+    const { client, close } = await connect();
+    try {
+      const res = await client.callTool({
+        name: 'timeline_edit',
+        arguments: { verbs: [{ verb: 'set_transform', clipId: 'c1', scale: 2 }] },
       });
       expect((res as { isError?: boolean }).isError).toBe(true);
     } finally {
