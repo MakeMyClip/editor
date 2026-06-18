@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -101,5 +101,44 @@ describe('every path-bearing registry tool is confined, not just ingest', () => 
     await expect(
       TOOL_REGISTRY.concat.fn({ inputs: [inside, '/etc/passwd'] }),
     ).rejects.toBeInstanceOf(WorkspaceBoundaryError);
+  });
+});
+
+describe('resolveInWorkspace follows symlinks (no in-workspace symlink escape)', () => {
+  it('rejects a path through an in-workspace symlink that points OUT of the tree', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'mmc-outside-'));
+    try {
+      await writeFile(join(outside, 'secret.txt'), 'secret');
+      await mkdir(join(workspace, 'imports'));
+      // imports/escape -> <outside>, so imports/escape/secret.txt is really outside.
+      await symlink(outside, join(workspace, 'imports', 'escape'));
+      expect(() => resolveInWorkspace('imports/escape/secret.txt')).toThrow(WorkspaceBoundaryError);
+      // the symlinked directory itself resolves outside too
+      expect(() => resolveInWorkspace('imports/escape')).toThrow(WorkspaceBoundaryError);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('allows a path through an in-workspace symlink that stays inside the tree', async () => {
+    await mkdir(join(workspace, 'real'));
+    await symlink(join(workspace, 'real'), join(workspace, 'inside-link'));
+    // inside-link -> real (both in-workspace), so the read stays contained.
+    expect(resolveInWorkspace('inside-link/clip.mp4')).toBe(
+      resolve(workspace, 'inside-link/clip.mp4'),
+    );
+  });
+
+  it('rejects a DANGLING in-workspace symlink whose target is outside (created later)', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'mmc-outside-'));
+    try {
+      await mkdir(join(workspace, 'imports'));
+      // The symlink exists but its target does not yet — the link must still be
+      // followed to its out-of-tree destination, not treated as an in-ws leaf.
+      await symlink(join(outside, 'not-there-yet.txt'), join(workspace, 'imports', 'dangling'));
+      expect(() => resolveInWorkspace('imports/dangling')).toThrow(WorkspaceBoundaryError);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
