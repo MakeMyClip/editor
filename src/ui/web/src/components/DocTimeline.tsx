@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { clipDuration, clipEndSec, clipLabel, compositionDuration } from '../lib/composition.js';
 import type { Clip, Composition } from '../types.js';
 
@@ -7,23 +6,24 @@ const GUTTER = 128; // left lane-label column width (px)
 const MIN_SPAN_SEC = 6; // keep an empty/short timeline from collapsing
 
 /**
- * Read-first view of the CompositionDoc: a seconds ruler, one lane per track,
- * clips positioned by their document extent (startSec + clipDuration), transition
- * boundary markers, and a playhead scrubbed by an accessible range input. Editing
- * (verbs) and the composited-frame preview land in later increments; this is the
- * human window onto the doc the engine already maintains.
+ * Read view of the CompositionDoc: a seconds ruler, one lane per track, clips
+ * positioned by their document extent (startSec + clipDuration), transition
+ * boundary markers, and a playhead scrubbed by an accessible range input. The
+ * playhead is controlled by the parent so the clip inspector can split at it.
  */
 export function DocTimeline({
   composition,
   selectedClipId,
   onSelectClip,
+  playheadSec,
+  onScrub,
 }: {
   composition: Composition;
   selectedClipId: string | null;
   onSelectClip: (clipId: string | null) => void;
+  playheadSec: number;
+  onScrub: (sec: number) => void;
 }) {
-  const [playheadSec, setPlayheadSec] = useState(0);
-
   const total = compositionDuration(composition);
   const spanSec = Math.max(total, MIN_SPAN_SEC);
   const laneWidth = spanSec * PX_PER_SEC;
@@ -47,7 +47,7 @@ export function DocTimeline({
             max={spanSec}
             step={0.01}
             value={playhead}
-            onChange={(e) => setPlayheadSec(Number(e.target.value))}
+            onChange={(e) => onScrub(Number(e.target.value))}
             aria-label="Playhead position (seconds)"
           />
         ) : null}

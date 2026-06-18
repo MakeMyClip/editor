@@ -1,4 +1,4 @@
-import type { Clip, Composition } from '../types.js';
+import type { Clip, Composition, Track } from '../types.js';
 
 // Frontend mirror of the doc geometry helpers in src/timeline/composition.ts.
 // The timeline view positions clips by their DOCUMENT extent (startSec +
@@ -28,4 +28,23 @@ export function clipLabel(clip: Clip): string {
   if (clip.kind === 'media') return clip.mediaId;
   if (clip.kind === 'text') return `“${clip.text.slice(0, 20)}”`;
   return `color · ${clip.color}`;
+}
+
+/** Locate a clip by id, returning it plus the track it lives on. */
+export function findClip(comp: Composition, clipId: string): { clip: Clip; track: Track } | null {
+  for (const track of comp.tracks) {
+    const clip = track.clips.find((c) => c.id === clipId);
+    if (clip) return { clip, track };
+  }
+  return null;
+}
+
+/** The clip that starts immediately after `clip` on the same track (the one a
+ *  transition after `clip` would blend into), or null if it's the last clip. */
+export function nextClipOnTrack(track: Track, clip: Clip): Clip | null {
+  let next: Clip | null = null;
+  for (const c of track.clips) {
+    if (c.startSec > clip.startSec && (next === null || c.startSec < next.startSec)) next = c;
+  }
+  return next;
 }

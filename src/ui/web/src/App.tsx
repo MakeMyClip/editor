@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ClipInspector } from './components/ClipInspector.js';
 import { DetailPane } from './components/DetailPane.js';
 import { DocTimeline } from './components/DocTimeline.js';
 import { AddCaptionsForm } from './components/forms/AddCaptionsForm.js';
@@ -21,24 +22,58 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useSession } from './hooks/useSession.js';
 import { useSessionSafety } from './hooks/useSessionSafety.js';
 import { useTimeline } from './hooks/useTimeline.js';
+import { findClip, nextClipOnTrack } from './lib/composition.js';
+import { applyTimelineVerbs, type Verb } from './lib/verbs.js';
 
 export function App() {
   const { session, loading, error, refresh } = useSession();
-  const { composition } = useTimeline();
+  const { composition, refresh: refreshTimeline } = useTimeline();
   const safety = useSessionSafety();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [playheadSec, setPlayheadSec] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [safetyError, setSafetyError] = useState<string | null>(null);
+  const [verbBusy, setVerbBusy] = useState(false);
+  const [verbError, setVerbError] = useState<string | null>(null);
 
   const selectedEntry =
     selectedId === null ? null : (session.entries.find((e) => e.id === selectedId) ?? null);
+  const selected = selectedClipId === null ? null : findClip(composition, selectedClipId);
+
+  // Selecting an op and selecting a doc-clip are mutually exclusive — each owns
+  // the inspector pane, so picking one clears the other.
+  function selectOp(id: string) {
+    setSelectedId(id);
+    setSelectedClipId(null);
+    setActiveTool(null);
+  }
+  function selectClip(clipId: string | null) {
+    setSelectedClipId(clipId);
+    setSelectedId(null);
+    setActiveTool(null);
+    setVerbError(null);
+  }
+
+  async function handleApplyVerbs(verbs: Verb[]): Promise<void> {
+    setVerbBusy(true);
+    setVerbError(null);
+    try {
+      await applyTimelineVerbs(verbs);
+      await Promise.all([refreshTimeline(), refresh()]);
+    } catch (err) {
+      setVerbError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setVerbBusy(false);
+    }
+  }
 
   function handlePickTool(name: string) {
     setActiveTool(name);
     setPickerOpen(false);
     setSelectedId(null);
+    setSelectedClipId(null);
   }
 
   async function handleFormSuccess(): Promise<void> {
@@ -123,21 +158,11 @@ export function App() {
       <Timeline
         session={session}
         selectedOpId={selectedId}
-        onSelect={(id) => {
-          setSelectedId(id);
-          setActiveTool(null);
-        }}
+        onSelect={selectOp}
         onConcatSuccess={refresh}
       />
       <main className="main">
-        <OpList
-          entries={session.entries}
-          selectedId={selectedId}
-          onSelect={(id) => {
-            setSelectedId(id);
-            setActiveTool(null);
-          }}
-        />
+        <OpList entries={session.entries} selectedId={selectedId} onSelect={selectOp} />
         {error ? (
           <section className="detail">
             <div className="placeholder">Could not load session: {error}</div>
@@ -155,6 +180,17 @@ export function App() {
               onCancel={handleFormCancel}
             />
           </section>
+        ) : selected ? (
+          <ClipInspector
+            key={selected.clip.id}
+            clip={selected.clip}
+            playheadSec={playheadSec}
+            hasNext={nextClipOnTrack(selected.track, selected.clip) !== null}
+            busy={verbBusy}
+            error={verbError}
+            onApply={(verbs) => void handleApplyVerbs(verbs)}
+            onClose={() => setSelectedClipId(null)}
+          />
         ) : (
           <DetailPane entry={selectedEntry} />
         )}
@@ -162,7 +198,9 @@ export function App() {
       <DocTimeline
         composition={composition}
         selectedClipId={selectedClipId}
-        onSelectClip={setSelectedClipId}
+        onSelectClip={selectClip}
+        playheadSec={playheadSec}
+        onScrub={setPlayheadSec}
       />
       <ToolPickerModal
         open={pickerOpen}

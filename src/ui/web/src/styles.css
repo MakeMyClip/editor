@@ -1154,3 +1154,83 @@ body,
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ─── Clip inspector (edit a selected timeline clip via verbs) ────────── */
+
+.clip-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 420px;
+}
+
+.ci-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ci-head h2 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.05rem;
+}
+
+.ci-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+
+.ci-section-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-3);
+}
+
+.ci-section .form-field {
+  margin: 0;
+}
+
+.ci-section .form-hint {
+  margin: 0;
+}
+
+.ci-section .btn-primary,
+.ci-section .btn-secondary {
+  align-self: flex-start;
+}
+
+.ci-remove {
+  align-self: flex-start;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.42rem 0.9rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  color: #ffb4b2;
+  cursor: pointer;
+}
+
+.ci-remove:hover:not(:disabled) {
+  background: var(--danger);
+  color: #fff;
+}
+
+.ci-remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+select.form-input {
+  appearance: none;
+  -webkit-appearance: none;
+}
