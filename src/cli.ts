@@ -69,6 +69,11 @@ UI:
   clip ui                           Start the local browser UI on http://127.0.0.1:5573.
                                     Renders the session log; click an op to play its output.
 
+MCP (drive the editor from Claude Desktop / any MCP client — no API key):
+  clip mcp                          Start the MCP server over stdio. Add it to your
+                                    client's MCP config; it exposes the timeline tools
+                                    (show / edit / undo / redo / export).
+
 Session safety (these tools do not log themselves):
   clip snapshot [<label>]           Save the current session as a named snapshot.
   clip undo [<snapshotLabel>]       Pop the last op, or restore a named snapshot.
@@ -102,6 +107,14 @@ async function runAndLog<T>(
 
 async function main(argv: string[]): Promise<void> {
   const [command, ...args] = argv;
+
+  // The MCP server speaks its protocol over stdio — branch BEFORE any stdout
+  // (help/usage) so nothing pollutes the transport channel.
+  if (command === 'mcp') {
+    const { runMcpServer } = await import('./mcp/server.js');
+    await runMcpServer();
+    return;
+  }
 
   if (!command || command === '--help' || command === '-h' || command === 'help') {
     process.stdout.write(HELP);

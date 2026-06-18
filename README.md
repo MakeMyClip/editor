@@ -38,13 +38,26 @@ npm i -g @makemyclip/editor
 clip --help
 ```
 
-**As a browser UI** (visual timeline + chat panel):
+**As a browser UI** (dark visual timeline editor):
 
 ```bash
 clip ui   # opens http://127.0.0.1:5573
 ```
 
-The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The chat panel inside `clip ui` needs `ANTHROPIC_API_KEY`; everything else works offline.
+**As an MCP server** (drive it from Claude Desktop / Cursor / any MCP client — no API key, on your existing Claude):
+
+```jsonc
+// claude_desktop_config.json → "mcpServers"
+{
+  "makemyclip-editor": {
+    "command": "npx",
+    "args": ["-y", "@makemyclip/editor", "mcp"],
+    "env": { "MAKEMYCLIP_WORKSPACE": "/path/to/your/media" }
+  }
+}
+```
+
+The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The MCP server exposes the timeline tools (show / edit / undo / redo / export) over stdio; media stays confined to `MAKEMYCLIP_WORKSPACE`. Everything runs locally and offline — no API key.
 
 ---
 
