@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChatPanel } from './components/ChatPanel.js';
 import { DetailPane } from './components/DetailPane.js';
+import { DocTimeline } from './components/DocTimeline.js';
 import { AddCaptionsForm } from './components/forms/AddCaptionsForm.js';
 import { AddTextForm } from './components/forms/AddTextForm.js';
 import { AddTitleCardForm } from './components/forms/AddTitleCardForm.js';
@@ -20,11 +21,14 @@ import { ToolPickerModal } from './components/ToolPickerModal.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useSession } from './hooks/useSession.js';
 import { useSessionSafety } from './hooks/useSessionSafety.js';
+import { useTimeline } from './hooks/useTimeline.js';
 
 export function App() {
   const { session, loading, error, refresh } = useSession();
+  const { composition } = useTimeline();
   const safety = useSessionSafety();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [safetyError, setSafetyError] = useState<string | null>(null);
@@ -120,6 +124,11 @@ export function App() {
       />
       {safetyError ? <div className="safety-error-bar">{safetyError}</div> : null}
       <ImportZone onImported={handleImported} />
+      <DocTimeline
+        composition={composition}
+        selectedClipId={selectedClipId}
+        onSelectClip={setSelectedClipId}
+      />
       <Timeline
         session={session}
         selectedOpId={selectedId}

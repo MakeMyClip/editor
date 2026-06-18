@@ -16,8 +16,12 @@ body,
 }
 
 .app {
-  display: grid;
-  grid-template-rows: auto auto auto 1fr;
+  /* Flex column (not a fixed-row grid) so stacked strips — header, import,
+     timeline, the legacy outputs row, an optional error bar — each take their
+     content height and `main` flexes to fill, without the row count being
+     hard-coded. */
+  display: flex;
+  flex-direction: column;
   height: 100%;
 }
 
@@ -47,6 +51,8 @@ body,
   display: grid;
   grid-template-columns: 320px 1fr;
   overflow: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .main-with-chat {
@@ -767,6 +773,216 @@ body,
 .row-segment {
   grid-template-columns: 1.6rem 1fr auto 1fr auto;
   gap: 0.4rem;
+}
+
+/* ─── Doc timeline (the CompositionDoc, the source of truth) ──────────── */
+
+.doc-timeline {
+  background: #fff;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.doc-tl-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.5rem 1.25rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.doc-tl-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #555;
+}
+
+.doc-tl-meta {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.75rem;
+  color: #999;
+}
+
+.doc-tl-scrub {
+  margin-left: auto;
+  width: 220px;
+  accent-color: #d23030;
+}
+
+.doc-tl-playtime {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.75rem;
+  color: #d23030;
+  min-width: 4.5rem;
+  text-align: right;
+}
+
+.doc-tl-scroll {
+  overflow-x: auto;
+  padding: 0 1.25rem 0.75rem;
+}
+
+.doc-tl-inner {
+  position: relative;
+}
+
+.doc-tl-ruler-row,
+.doc-tl-lane {
+  display: flex;
+  align-items: stretch;
+}
+
+.doc-tl-gutter,
+.doc-tl-lane-label {
+  flex: 0 0 128px;
+  width: 128px;
+}
+
+.doc-tl-lane-label {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.1rem;
+  padding-right: 0.75rem;
+}
+
+.doc-tl-track-id {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.78rem;
+  color: #333;
+}
+
+.doc-tl-track-kind {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #aaa;
+}
+
+.doc-tl-ruler {
+  position: relative;
+  height: 22px;
+  border-bottom: 1px solid #eee;
+}
+
+.doc-tl-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid #ededed;
+}
+
+.doc-tl-tick-label {
+  position: absolute;
+  top: 4px;
+  left: 3px;
+  font-size: 0.62rem;
+  color: #b0b0b0;
+  font-variant-numeric: tabular-nums;
+}
+
+.doc-tl-clips {
+  position: relative;
+  height: 52px;
+  margin: 4px 0;
+  background: repeating-linear-gradient(90deg, #fafafa 0 89px, #f2f2f2 89px 90px);
+  border-radius: 4px;
+}
+
+.doc-tl-clip {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 0.5rem;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.doc-tl-clip-media {
+  background: #dbeafe;
+}
+.doc-tl-clip-text {
+  background: #ede9fe;
+}
+.doc-tl-clip-color {
+  background: #e5e7eb;
+}
+
+.doc-tl-clip.selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.4);
+}
+
+.doc-tl-clip-label {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #1a1a1a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-tl-clip-dur {
+  font-size: 0.62rem;
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+}
+
+.doc-tl-transition {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 0;
+  display: flex;
+  align-items: flex-start;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.doc-tl-transition-label {
+  font-size: 0.58rem;
+  color: #fff;
+  background: #f59e0b;
+  border-radius: 3px;
+  padding: 1px 4px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.doc-tl-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #d23030;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.doc-tl-playhead::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -4px;
+  border: 5px solid transparent;
+  border-top-color: #d23030;
+}
+
+.doc-tl-empty {
+  padding: 1.5rem 1.25rem;
+  color: #999;
+  font-size: 0.85rem;
 }
 
 .row-arrow {
