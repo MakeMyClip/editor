@@ -237,10 +237,13 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
     const atSec = Number(c.req.query('at') ?? '0');
     if (Number.isNaN(atSec)) return c.json({ error: 'at must be a number' }, 400);
     const output = newOutputPath('timeline-frame', 'jpg');
+    // Per-request tag so this preview's intermediate segments can't collide with
+    // a concurrent export's — both run unsynchronized `ffmpeg -y` in the workspace.
+    const tag = `frame-${randomBytes(4).toString('hex')}`;
     try {
       const comp = await readComposition();
       const media = await buildMediaMap();
-      const plan = buildFrameAtPlan(comp, { media, dir: getWorkspace(), output }, atSec);
+      const plan = buildFrameAtPlan(comp, { media, dir: getWorkspace(), output, tag }, atSec);
       const result = await runPlan(plan);
       const jpeg = await readFile(result.output);
       await unlink(result.output).catch(() => {}); // transient preview frame
@@ -248,7 +251,10 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
     } catch (err) {
       await unlink(output).catch(() => {});
       if (err instanceof CompileError) return c.json({ error: err.message }, 422);
-      throw err;
+      // Not a document problem — a transient render failure (e.g. an FFmpeg
+      // hiccup). Surface it as retryable instead of leaking a raw 500.
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 503);
     }
   });
 
@@ -272,7 +278,9 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       return c.json({ id: entry.id, output: result.output, durationSec: plan.durationSec });
     } catch (err) {
       if (err instanceof CompileError) return c.json({ error: err.message }, 422);
-      throw err;
+      // A render failure (not a bad document) — clean retryable error, not a raw 500.
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 503);
     }
   });
 
