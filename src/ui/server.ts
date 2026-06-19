@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, stat, unlink } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -11,7 +11,9 @@ import getPort from 'get-port';
 import { Hono } from 'hono';
 import open from 'open';
 import { ZodError, z } from 'zod';
+import { buildThumbnailArgs } from '../ffmpeg/args/preview.js';
 import { probe } from '../ffmpeg/probe.js';
+import { runFfmpeg } from '../ffmpeg/run.js';
 import { appendOp, readSession, SessionCorruptError, snapshotsDir } from '../session/store.js';
 import type { SessionEntry } from '../session/types.js';
 import {
@@ -31,6 +33,7 @@ import {
 import { buildMediaMap } from '../timeline/media-registry.js';
 import { CompositionOpError } from '../timeline/ops.js';
 import { runPlan } from '../timeline/run-plan.js';
+import type { MediaId } from '../timeline/schema.js';
 import { CompositionVerbSchema } from '../timeline/verbs.js';
 import { ingest } from '../tools/ingest.js';
 import { preview } from '../tools/preview.js';
@@ -249,6 +252,51 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       // hiccup). Surface it as retryable instead of leaking a raw 500.
       const message = err instanceof Error ? err.message : String(err);
       return c.json({ error: message }, 503);
+    }
+  });
+
+  /**
+   * GET /api/media/thumb?mediaId=&t=&h= — a single small still from a SOURCE media
+   * file (not the composited timeline), for the timeline filmstrip. Each thumb is
+   * keyed by (mediaId, t, h) and cached under the workspace, so the row of frames a
+   * clip shows is generated once and then served from disk. Cheap: one fast
+   * input-seek frame extract per cache miss.
+   */
+  app.get('/api/media/thumb', async (c) => {
+    const mediaId = c.req.query('mediaId') ?? '';
+    const t = Number(c.req.query('t') ?? '0');
+    const h = Math.min(Math.max(Math.round(Number(c.req.query('h') ?? '48')), 16), 240);
+    if (!mediaId || Number.isNaN(t) || t < 0)
+      return c.json({ error: 'mediaId and t≥0 required' }, 400);
+
+    const thumbsDir = resolve(getWorkspace(), '.thumbs');
+    const safeKey = `${mediaId}-${t.toFixed(2)}-${h}`.replace(/[^\w.-]/g, '_');
+    const out = resolve(thumbsDir, `${safeKey}.jpg`);
+
+    const serve = async () =>
+      c.body(await readFile(out), 200, {
+        'Content-Type': 'image/jpeg',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      });
+
+    // Cache hit — the file's existence means this mediaId was already validated.
+    if (existsSync(out)) return serve();
+
+    const info = (await buildMediaMap()).get(mediaId as MediaId);
+    if (!info) return c.json({ error: `Unknown media: ${mediaId}` }, 404);
+    try {
+      await mkdir(thumbsDir, { recursive: true });
+      // Generate to a unique temp path then atomically rename, so concurrent
+      // requests for the same thumb never serve a half-written file.
+      const tmp = resolve(thumbsDir, `${safeKey}.${randomBytes(4).toString('hex')}.tmp.jpg`);
+      await runFfmpeg(buildThumbnailArgs({ input: info.path, output: tmp, atSec: t, height: h }));
+      await rename(tmp, out);
+      return serve();
+    } catch (err) {
+      // A non-thumbnailable source (e.g. audio-only) or a transient FFmpeg failure
+      // — the clip just falls back to its gradient block. Clean error, not a 500.
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 422);
     }
   });
 
