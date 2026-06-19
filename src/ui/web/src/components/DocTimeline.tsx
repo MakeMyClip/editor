@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { clipDuration, clipEndSec, clipLabel, compositionDuration } from '../lib/composition.js';
-import type { Clip, Composition } from '../types.js';
+import type { Clip, Composition, MediaClip } from '../types.js';
 
 const PX_PER_SEC = 90;
 const GUTTER = 128; // left lane-label column width (px)
 const MIN_SPAN_SEC = 6; // keep an empty/short timeline from collapsing
+const THUMB_H = 48; // filmstrip thumbnail height (px) — the clip's inner height
+const TARGET_THUMB_W = 72; // desired filmstrip frame slot width (px)
+const MAX_THUMBS = 16; // cap thumbnails per clip to bound requests
 
 /**
  * Read view of the CompositionDoc: a seconds ruler, one lane per track, clips
@@ -189,8 +192,39 @@ function ClipBlock({
       onClick={() => onSelect(selected ? null : clip.id)}
       title={`${clipLabel(clip)} · ${clip.startSec.toFixed(2)}–${clipEndSec(clip).toFixed(2)}s`}
     >
+      {clip.kind === 'media' ? <Filmstrip clip={clip} width={width} /> : null}
       <span className="doc-tl-clip-label">{clipLabel(clip)}</span>
       <span className="doc-tl-clip-dur">{clipDuration(clip).toFixed(1)}s</span>
     </button>
+  );
+}
+
+/**
+ * A filmstrip: a row of source-frame thumbnails across the clip's trimmed window.
+ * Each frame is a cached `/api/media/thumb` still sampled at the middle of its
+ * slot; the clip's gradient shows underneath until they load.
+ */
+function Filmstrip({ clip, width }: { clip: MediaClip; width: number }) {
+  const n = Math.max(1, Math.min(MAX_THUMBS, Math.round(width / TARGET_THUMB_W)));
+  const { mediaId, sourceInSec, sourceOutSec } = clip;
+  const slotW = width / n;
+  return (
+    <span className="doc-tl-filmstrip" aria-hidden="true">
+      {Array.from({ length: n }, (_, i) => {
+        const t = sourceInSec + ((i + 0.5) / n) * (sourceOutSec - sourceInSec);
+        return (
+          <img
+            key={t}
+            className="doc-tl-thumb"
+            style={{ width: slotW }}
+            src={`/api/media/thumb?mediaId=${encodeURIComponent(mediaId)}&t=${t.toFixed(2)}&h=${THUMB_H}`}
+            alt=""
+            loading="lazy"
+            draggable={false}
+          />
+        );
+      })}
+      <span className="doc-tl-clip-scrim" />
+    </span>
   );
 }

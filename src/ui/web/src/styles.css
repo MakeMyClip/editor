@@ -1084,6 +1084,46 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
+/* Filmstrip: a row of source-frame thumbnails filling the media clip. The clip's
+   gradient shows underneath until the frames load. */
+.doc-tl-filmstrip {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.doc-tl-thumb {
+  height: 100%;
+  flex: 0 0 auto;
+  object-fit: cover;
+  object-position: center;
+  font-size: 0; /* suppress the alt/broken-image glyph before load */
+  border-right: 1px solid rgba(0, 0, 0, 0.22);
+}
+
+.doc-tl-clip-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.12) 0%,
+    rgba(0, 0, 0, 0) 36%,
+    rgba(0, 0, 0, 0.62) 100%
+  );
+}
+
+/* Keep the label/duration above the filmstrip + scrim, with a shadow for legibility. */
+.doc-tl-clip-label,
+.doc-tl-clip-dur {
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
 .doc-tl-transition {
   position: absolute;
   top: 4px;
