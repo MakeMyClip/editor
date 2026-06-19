@@ -938,13 +938,8 @@ body,
   color: var(--text-3);
 }
 
-.doc-tl-scrub {
-  margin-left: auto;
-  width: 220px;
-  accent-color: var(--playhead);
-}
-
 .doc-tl-playtime {
+  margin-left: auto;
   font-family: var(--mono);
   font-size: 0.74rem;
   color: var(--playhead);
@@ -1147,24 +1142,91 @@ body,
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
+/* A draggable playhead: a wide-enough transparent grab strip centered on the
+   time, with the visible 2px line + a grab knob drawn via pseudo-elements. */
 .doc-tl-playhead {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 2px;
-  background: var(--playhead);
-  pointer-events: none;
-  z-index: 2;
-  box-shadow: 0 0 6px rgba(255, 91, 91, 0.6);
+  width: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 4;
 }
 
 .doc-tl-playhead::before {
   content: "";
   position: absolute;
   top: 0;
-  left: -4px;
-  border: 5px solid transparent;
-  border-top-color: var(--playhead);
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--playhead);
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.55);
+}
+
+/* The classic playhead marker: a downward-pointing triangle at the top of the line. */
+.doc-tl-playhead::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 10px solid var(--playhead);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.4));
+}
+
+/* Transparent native range overlaying the ruler — the scrub surface (pointer +
+   keyboard). The visible playhead shows the position, so the thumb is hidden. */
+.doc-tl-rail {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: ew-resize;
+  z-index: 3;
+}
+
+.doc-tl-rail:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.doc-tl-rail::-webkit-slider-runnable-track {
+  background: transparent;
+}
+
+.doc-tl-rail::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.doc-tl-rail::-moz-range-track {
+  background: transparent;
+}
+
+.doc-tl-rail::-moz-range-thumb {
+  width: 1px;
+  height: 1px;
+  border: 0;
+  opacity: 0;
 }
 
 .doc-tl-empty {

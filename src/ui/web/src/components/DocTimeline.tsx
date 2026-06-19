@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { clipDuration, clipEndSec, clipLabel, compositionDuration } from '../lib/composition.js';
 import type { Clip, Composition, MediaClip } from '../types.js';
 
@@ -43,6 +43,18 @@ export function DocTimeline({
   const hasClips = composition.tracks.some((t) => t.clips.length > 0);
   const playhead = Math.min(playheadSec, spanSec);
 
+  const innerRef = useRef<HTMLDivElement | null>(null);
+
+  // Map a pointer's x to a timeline second, accounting for the lane gutter and the
+  // current horizontal scroll, so dragging the playhead or the ruler scrubs to
+  // exactly where the cursor is.
+  const scrubToClientX = (clientX: number) => {
+    const inner = innerRef.current;
+    if (!inner) return;
+    const x = clientX - inner.getBoundingClientRect().left - GUTTER;
+    onScrub(Math.min(Math.max(x / PX_PER_SEC, 0), spanSec));
+  };
+
   // Undo/redo availability tracks the doc op-log; refetch whenever the doc moves.
   const [history, setHistory] = useState<{ canUndo: boolean; canRedo: boolean }>({
     canUndo: false,
@@ -69,18 +81,6 @@ export function DocTimeline({
           {total.toFixed(2)}s · {composition.width}×{composition.height} · {composition.fps}fps ·
           rev {composition.rev}
         </span>
-        {hasClips ? (
-          <input
-            type="range"
-            className="doc-tl-scrub"
-            min={0}
-            max={spanSec}
-            step={0.01}
-            value={playhead}
-            onChange={(e) => onScrub(Number(e.target.value))}
-            aria-label="Playhead position (seconds)"
-          />
-        ) : null}
         <span className="doc-tl-playtime">▶ {playhead.toFixed(2)}s</span>
         <button
           type="button"
@@ -112,7 +112,7 @@ export function DocTimeline({
 
       {hasClips ? (
         <div className="doc-tl-scroll">
-          <div className="doc-tl-inner" style={{ width: GUTTER + laneWidth }}>
+          <div className="doc-tl-inner" ref={innerRef} style={{ width: GUTTER + laneWidth }}>
             <div className="doc-tl-ruler-row">
               <div className="doc-tl-gutter" />
               <div className="doc-tl-ruler" style={{ width: laneWidth }}>
@@ -121,6 +121,18 @@ export function DocTimeline({
                     <span className="doc-tl-tick-label">{t}s</span>
                   </div>
                 ))}
+                {/* Transparent native range over the ruler: click or drag to scrub,
+                    and arrow keys move the playhead — the accessible scrub control. */}
+                <input
+                  type="range"
+                  className="doc-tl-rail"
+                  min={0}
+                  max={spanSec}
+                  step={1 / composition.fps}
+                  value={playhead}
+                  onChange={(e) => onScrub(Number(e.target.value))}
+                  aria-label="Playhead position (seconds)"
+                />
               </div>
             </div>
 
@@ -157,9 +169,18 @@ export function DocTimeline({
               </div>
             ))}
 
+            {/* Pointer-only drag handle; the ruler range input is the accessible
+                scrub control, so this stays out of the a11y tree. */}
             <div
               className="doc-tl-playhead"
               style={{ left: GUTTER + playhead * PX_PER_SEC }}
+              onPointerDown={(e) => {
+                e.currentTarget.setPointerCapture(e.pointerId);
+                scrubToClientX(e.clientX);
+              }}
+              onPointerMove={(e) => {
+                if (e.currentTarget.hasPointerCapture(e.pointerId)) scrubToClientX(e.clientX);
+              }}
               aria-hidden="true"
             />
           </div>
