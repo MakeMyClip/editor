@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPreviewFrameArgs } from '../src/ffmpeg/args/preview.js';
+import { buildPreviewFrameArgs, buildThumbnailArgs } from '../src/ffmpeg/args/preview.js';
 import { PreviewInput } from '../src/tools/preview.js';
 
 describe('buildPreviewFrameArgs', () => {
@@ -50,6 +50,31 @@ describe('buildPreviewFrameArgs', () => {
     const args = buildPreviewFrameArgs({ input: 'a', output: 'b.jpg', atSec: 1 });
     const vframesIdx = args.indexOf('-vframes');
     expect(args[vframesIdx + 1]).toBe('1');
+  });
+});
+
+describe('buildThumbnailArgs', () => {
+  it('scales to the requested height (even width) with a single fast-seek frame', () => {
+    expect(buildThumbnailArgs({ input: 'in.mp4', output: 't.jpg', atSec: 2, height: 48 })).toEqual([
+      '-y',
+      '-ss',
+      '2',
+      '-i',
+      'in.mp4',
+      '-vframes',
+      '1',
+      '-vf',
+      'scale=-2:48',
+      '-q:v',
+      '4',
+      '-an',
+      't.jpg',
+    ]);
+  });
+
+  it('honors a different height', () => {
+    const args = buildThumbnailArgs({ input: 'a', output: 'b.jpg', atSec: 0, height: 96 });
+    expect(args[args.indexOf('-vf') + 1]).toBe('scale=-2:96');
   });
 });
 

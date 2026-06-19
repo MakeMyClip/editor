@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { ChatPanel } from './components/ChatPanel.js';
+import { ClipInspector } from './components/ClipInspector.js';
 import { DetailPane } from './components/DetailPane.js';
+import { DocTimeline } from './components/DocTimeline.js';
 import { AddCaptionsForm } from './components/forms/AddCaptionsForm.js';
 import { AddTextForm } from './components/forms/AddTextForm.js';
 import { AddTitleCardForm } from './components/forms/AddTitleCardForm.js';
@@ -17,26 +18,96 @@ import { ImportZone } from './components/ImportZone.js';
 import { OpList } from './components/OpList.js';
 import { Timeline } from './components/Timeline.js';
 import { ToolPickerModal } from './components/ToolPickerModal.js';
+import { Viewer } from './components/Viewer.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useSession } from './hooks/useSession.js';
 import { useSessionSafety } from './hooks/useSessionSafety.js';
+import { useTimeline } from './hooks/useTimeline.js';
+import { findClip, nextClipOnTrack } from './lib/composition.js';
+import { applyTimelineVerbs, type Verb } from './lib/verbs.js';
 
 export function App() {
   const { session, loading, error, refresh } = useSession();
+  const { composition, refresh: refreshTimeline } = useTimeline();
   const safety = useSessionSafety();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [playheadSec, setPlayheadSec] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [safetyError, setSafetyError] = useState<string | null>(null);
-  const [chatOpen, setChatOpen] = useState(false);
+  const [verbBusy, setVerbBusy] = useState(false);
+  const [verbError, setVerbError] = useState<string | null>(null);
 
   const selectedEntry =
     selectedId === null ? null : (session.entries.find((e) => e.id === selectedId) ?? null);
+  const selected = selectedClipId === null ? null : findClip(composition, selectedClipId);
+
+  // Selecting an op and selecting a doc-clip are mutually exclusive — each owns
+  // the inspector pane, so picking one clears the other.
+  function selectOp(id: string) {
+    setSelectedId(id);
+    setSelectedClipId(null);
+    setActiveTool(null);
+  }
+  function selectClip(clipId: string | null) {
+    setSelectedClipId(clipId);
+    setSelectedId(null);
+    setActiveTool(null);
+    setVerbError(null);
+  }
+
+  async function handleApplyVerbs(verbs: Verb[]): Promise<void> {
+    setVerbBusy(true);
+    setVerbError(null);
+    try {
+      await applyTimelineVerbs(verbs);
+      await Promise.all([refreshTimeline(), refresh()]);
+    } catch (err) {
+      setVerbError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setVerbBusy(false);
+    }
+  }
+
+  async function handleTimelineHistory(direction: 'undo' | 'redo'): Promise<void> {
+    setVerbError(null);
+    try {
+      const res = await fetch(`/api/timeline/${direction}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await Promise.all([refreshTimeline(), refresh()]);
+    } catch (err) {
+      setSafetyError(
+        `Timeline ${direction} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  async function handleExport(): Promise<void> {
+    setVerbBusy(true);
+    setSafetyError(null);
+    try {
+      const res = await fetch('/api/timeline/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const json = (await res.json()) as { id?: string; error?: string };
+      if (!res.ok || !json.id) throw new Error(json.error ?? `HTTP ${res.status}`);
+      await refresh(); // the export op now shows in Outputs
+      selectOp(json.id); // and plays in the inspector
+    } catch (err) {
+      setSafetyError(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setVerbBusy(false);
+    }
+  }
 
   function handlePickTool(name: string) {
     setActiveTool(name);
     setPickerOpen(false);
     setSelectedId(null);
+    setSelectedClipId(null);
   }
 
   async function handleFormSuccess(): Promise<void> {
@@ -115,53 +186,65 @@ export function App() {
         snapshots={safety.snapshots}
         onRestore={(label) => void handleRestore(label)}
         safetyLoading={safety.loading}
-        chatOpen={chatOpen}
-        onToggleChat={() => setChatOpen((v) => !v)}
       />
       {safetyError ? <div className="safety-error-bar">{safetyError}</div> : null}
       <ImportZone onImported={handleImported} />
       <Timeline
         session={session}
         selectedOpId={selectedId}
-        onSelect={(id) => {
-          setSelectedId(id);
-          setActiveTool(null);
-        }}
+        onSelect={selectOp}
         onConcatSuccess={refresh}
       />
-      <main className={`main${chatOpen ? ' main-with-chat' : ''}`}>
-        <OpList
-          entries={session.entries}
-          selectedId={selectedId}
-          onSelect={(id) => {
-            setSelectedId(id);
-            setActiveTool(null);
-          }}
-        />
-        {error ? (
-          <section className="detail">
-            <div className="placeholder">Could not load session: {error}</div>
-          </section>
-        ) : loading ? (
-          <section className="detail">
-            <div className="placeholder">Loading…</div>
-          </section>
-        ) : activeTool ? (
-          <section className="detail">
-            <ActiveForm
-              name={activeTool}
-              session={session}
-              onSuccess={handleFormSuccess}
-              onCancel={handleFormCancel}
-            />
-          </section>
-        ) : (
-          <DetailPane entry={selectedEntry} />
-        )}
-        {chatOpen ? (
-          <ChatPanel onAgentTurnComplete={refresh} onClose={() => setChatOpen(false)} />
-        ) : null}
+      <main className="main">
+        <OpList entries={session.entries} selectedId={selectedId} onSelect={selectOp} />
+        <div className="stage">
+          <Viewer atSec={playheadSec} rev={composition.rev} />
+          <div className="stage-detail">
+            {error ? (
+              <section className="detail">
+                <div className="placeholder">Could not load session: {error}</div>
+              </section>
+            ) : loading ? (
+              <section className="detail">
+                <div className="placeholder">Loading…</div>
+              </section>
+            ) : activeTool ? (
+              <section className="detail">
+                <ActiveForm
+                  name={activeTool}
+                  session={session}
+                  onSuccess={handleFormSuccess}
+                  onCancel={handleFormCancel}
+                />
+              </section>
+            ) : selected ? (
+              <ClipInspector
+                key={selected.clip.id}
+                clip={selected.clip}
+                playheadSec={playheadSec}
+                hasNext={nextClipOnTrack(selected.track, selected.clip) !== null}
+                busy={verbBusy}
+                error={verbError}
+                onApply={(verbs) => void handleApplyVerbs(verbs)}
+                onClose={() => setSelectedClipId(null)}
+              />
+            ) : (
+              <DetailPane entry={selectedEntry} />
+            )}
+          </div>
+        </div>
       </main>
+      <DocTimeline
+        composition={composition}
+        selectedClipId={selectedClipId}
+        onSelectClip={selectClip}
+        playheadSec={playheadSec}
+        onScrub={setPlayheadSec}
+        onExport={() => void handleExport()}
+        exporting={verbBusy}
+        onUndo={() => void handleTimelineHistory('undo')}
+        onRedo={() => void handleTimelineHistory('redo')}
+      />
       <ToolPickerModal
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}

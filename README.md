@@ -11,7 +11,7 @@ The open-source, local-first AI video editor — chat, CLI, or browser timeline.
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="./package.json"><img src="https://img.shields.io/badge/node-%E2%89%A524-brightgreen" alt="Node 24+"></a>
   <a href="https://www.npmjs.com/package/@makemyclip/editor"><img src="https://img.shields.io/npm/v/@makemyclip/editor.svg" alt="npm"></a>
-  <img src="https://img.shields.io/badge/tests-539%20passing-brightgreen" alt="Tests: 539 passing">
+  <img src="https://img.shields.io/badge/tests-542%20passing-brightgreen" alt="Tests: 542 passing">
   <img src="https://img.shields.io/badge/telemetry-none-brightgreen" alt="Telemetry: none">
 </p>
 
@@ -38,19 +38,32 @@ npm i -g @makemyclip/editor
 clip --help
 ```
 
-**As a browser UI** (visual timeline + chat panel):
+**As a browser UI** (dark visual timeline editor):
 
 ```bash
 clip ui   # opens http://127.0.0.1:5573
 ```
 
-The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The chat panel inside `clip ui` needs `ANTHROPIC_API_KEY`; everything else works offline.
+**As an MCP server** (drive it from Claude Desktop / Cursor / any MCP client — no API key, on your existing Claude):
+
+```jsonc
+// claude_desktop_config.json → "mcpServers"
+{
+  "makemyclip-editor": {
+    "command": "npx",
+    "args": ["-y", "@makemyclip/editor", "mcp"],
+    "env": { "MAKEMYCLIP_WORKSPACE": "/path/to/your/media" }
+  }
+}
+```
+
+The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The MCP server exposes the timeline tools (show / edit / undo / redo / export) over stdio; media stays confined to `MAKEMYCLIP_WORKSPACE`. Everything runs locally and offline — no API key.
 
 ---
 
 ## One real example
 
-Five screen recordings → one polished product demo. Type this into Claude Code or the browser chat panel:
+Five screen recordings → one polished product demo. Type this into Claude Code (or Claude Desktop, via the MCP server):
 
 > *Import these five recordings. Trim each to the most interesting 8–12 seconds. Add black title cards saying "Demo 1: Inbox", "Demo 2: Search", "Demo 3: Compose", "Demo 4: Calendar", "Demo 5: Reports" between them. Concat in order. Render to 1080p mp4.*
 
@@ -72,7 +85,7 @@ Same registry, same session log, same output.
 
 ## What's in this release
 
-19 tools across 5 categories, three surfaces (Claude Code skill, CLI, browser UI), one shared op log.
+19 tools across 5 categories, four surfaces (Claude Code skill, CLI, browser UI, MCP server), one shared op log.
 
 | Category | Tools |
 |---|---|
@@ -84,7 +97,7 @@ Same registry, same session log, same output.
 
 Plus four meta-ops not in the registry: `snapshot`, `undo`, `inspect`, `delete`.
 
-The browser UI adds drag-drop import, a horizontal timeline, a render queue, a chat sidebar, snapshot/undo buttons, and keyboard shortcuts (⌘Z undo, ⌘S snapshot, ⌘⇧N new op, Esc cancel).
+The browser UI is a dark timeline editor: drag-drop import, a monitor (the composited frame at the playhead), an editable timeline (select a clip to trim / split / move / transition / remove), one-click export, timeline undo/redo, snapshot, and keyboard shortcuts.
 
 ---
 
@@ -143,14 +156,14 @@ Legend: ✅ great fit · ⚠️ works but not the best · ❌ doesn't fit.
 </details>
 
 <details>
-<summary><b>Architecture</b> — three surfaces, one composition document, one append-only op log</summary>
+<summary><b>Architecture</b> — four surfaces, one composition document, one append-only op log</summary>
 
 ```
 Claude Code  →  skill triggers  →  npx -y @makemyclip/editor <tool | timeline …>
                                            │
 Browser UI   →  /api/tools/:name · /api/timeline/verbs  →  registry + verb layer
                                            │
-Chat panel   →  /api/chat  →  AI SDK + Anthropic + timeline verbs
+Claude Desktop →  clip mcp (MCP server)  →  timeline verbs
                                            │
                                            ▼
                                   Tool handlers (TypeScript)
@@ -165,9 +178,9 @@ Chat panel   →  /api/chat  →  AI SDK + Anthropic + timeline verbs
          op-log undo/redo)                                 of every tool call)
 ```
 
-Two layers of state, by design. The **composition document** is the source of truth for assembled edits: a non-destructive, multi-track timeline that `clip timeline`, the browser UI, and the chat agent all mutate through one op-aware path, with a coupled op log that powers undo/redo. **`session.json`** is an append-only op log of every tool invocation — `{ id, tool, args, result, timestamp }` — written through the same `appendOp()` path by the single-file tools (`clip trim`, `/api/tools/:name`, …); it is the audit trail and recovery layer. Both layers are written through one serialized path, so any combination of human + agent edits stays consistent.
+Two layers of state, by design. The **composition document** is the source of truth for assembled edits: a non-destructive, multi-track timeline that `clip timeline`, the browser UI, and the agent (the Claude Code skill or the `clip mcp` server) all mutate through one op-aware path, with a coupled op log that powers undo/redo. **`session.json`** is an append-only op log of every tool invocation — `{ id, tool, args, result, timestamp }` — written through the same `appendOp()` path by the single-file tools (`clip trim`, `/api/tools/:name`, …); it is the audit trail and recovery layer. Both layers are written through one serialized path, so any combination of human + agent edits stays consistent.
 
-**Build a composition end-to-end** (CLI shown; the browser UI and chat agent drive the same document):
+**Build a composition end-to-end** (CLI shown; the browser UI and the agent — Claude Code or MCP — drive the same document):
 
 ```bash
 clip timeline new                       # start an empty composition
@@ -184,7 +197,7 @@ Every edit is undoable (`clip timeline undo` / `redo`, `clip timeline log`), and
 - **Timeline schema:** [Zod](https://zod.dev/) (shared with the [MakeMyClip.com](https://makemyclip.com) web app)
 - **Subprocess:** [execa](https://github.com/sindresorhus/execa) — args as an array, no shell injection
 - **FFmpeg:** bundled via `ffmpeg-static`, with `MAKEMYCLIP_FFMPEG_PATH` override or system-binary fallback
-- **AI SDK:** [Vercel AI SDK](https://ai-sdk.dev/) + `@ai-sdk/anthropic` (chat panel only)
+- **MCP:** [`@modelcontextprotocol/sdk`](https://modelcontextprotocol.io/) — the `clip mcp` server (Claude Desktop / any MCP client)
 - **UI:** Hono server + Vite + React, plain CSS
 
 </details>
@@ -201,15 +214,15 @@ No. MakeMyClip Editor bundles FFmpeg via `ffmpeg-static`, so installing the npm 
 macOS, Linux, and Windows — anywhere Node 24+ runs. The browser UI binds to `127.0.0.1` and needs no internet connection.
 
 **Can I use it without Claude Code?**
-Yes. The `clip` CLI and `clip ui` browser app are first-class surfaces. Claude Code is one of three entry points — the editor is agnostic to which agent (or human) drives it.
+Yes. The `clip` CLI and `clip ui` browser app are first-class surfaces, and `clip mcp` lets Claude Desktop (or any MCP client) drive it. Claude Code is one of several entry points — the editor is agnostic to which agent (or human) drives it.
 
 **Does it require an API key?**
-Only the chat panel inside `clip ui` needs `ANTHROPIC_API_KEY`. The CLI, the browser UI's visual editing, the Claude Code skill, and every editing tool work without any API key.
+No — nowhere. The CLI, the browser UI, the Claude Code skill, and the MCP server all run with no API key. Agent-driven editing uses whichever Claude you already run (Claude Code, or Claude Desktop via MCP); the editor itself never calls a model.
 
 ### Capabilities & limits
 
 **Is it production-ready?**
-This release is feature-complete for local editing — 19 tools, 539 tests passing, browser UI shipped, chat panel shipped. The API surface is still pre-1.0 (tool schemas may change in minor ways before 1.0). Use it for real work; pin a version in CI.
+This release is feature-complete for local editing — a dark timeline editor (view, edit, preview, export), 19 single-file tools, an MCP server, and 542 tests passing. The API surface is still pre-1.0 (tool schemas may change in minor ways before 1.0). Use it for real work; pin a version in CI.
 
 **What's the maximum video size or duration?**
 No hardcoded limit. FFmpeg streams the file rather than loading it into memory, and the browser UI streams uploads to disk — multi-GB recordings work fine. This release isn't tuned for projects with hundreds of clips or runtime above 30 minutes; for those, drive the CLI directly.
@@ -218,26 +231,23 @@ No hardcoded limit. FFmpeg streams the file rather than loading it into memory, 
 4K and vertical aspect ratios work out of the box — `render` takes a `maxWidth` and preserves the source aspect ratio. HDR pass-through works; deliberate HDR-to-SDR tone-mapping isn't a named tool yet.
 
 **Does it support MCP (Model Context Protocol)?**
-Not yet. The 19-tool registry is already MCP-shaped (`{ name, schema, fn }`), so adding the MCP transport is small when the demand surfaces — tracked for 1.0.
+Yes. `clip mcp` runs an MCP server over stdio exposing the timeline tools (show / edit / undo / redo / export). Add it to Claude Desktop or any MCP client to drive the editor on your own Claude — no API key. (See "Install in 30 seconds" for the config.)
 
 ### Privacy & data
 
 **Does it send my video files anywhere?**
-No. The editor makes zero network calls in its core. The optional chat panel sends conversation text (not video files) to Anthropic's API when enabled.
+No. The editor makes zero network calls — period. The agent runs in Claude Code or Claude Desktop, not inside the editor, so nothing leaves your machine.
 
 **Where does it store my files?**
-In a local workspace folder — `$TMPDIR/makemyclip-editor` by default; override with `MAKEMYCLIP_WORKSPACE`. The folder holds input files, output files, `session.json`, `chat.json`, and `snapshots/`. You can version-control the whole folder.
+In a local workspace folder — `$TMPDIR/makemyclip-editor` by default; override with `MAKEMYCLIP_WORKSPACE`. The folder holds input files, output files, `composition.json` (the timeline), `session.json` (the op log), and `snapshots/`. You can version-control the whole folder.
 
-**Is my chat history private?**
-Chat history is stored locally in `workspace/chat.json` — nothing leaves your machine except what you explicitly send. Each chat turn forwards your messages plus a summary of recent session ops to Anthropic's API; responses stream back.
+### Working with agents
 
-### AI integration
-
-**Can I use a different AI model (Gemini, OpenAI, local LLMs)?**
-The chat panel uses `claude-sonnet-4-6` via the [Vercel AI SDK](https://ai-sdk.dev/), which supports Gemini, OpenAI, Mistral, local Ollama, and others through provider imports. Swapping is one import + one config change in [`src/ui/server.ts`](src/ui/server.ts); a UI-level model picker is on the roadmap. The CLI is model-agnostic.
+**Which AI model does it use?**
+None — the editor embeds no model. The agent is whatever you already run: Claude Code, or Claude Desktop / Cursor via the MCP server. They call the editor's tools; the editor executes them deterministically with FFmpeg.
 
 **How does the agent know which tool to call?**
-Each of the 19 tools ships with a Zod input schema (parameter descriptions inline via `.describe()`) and a one-line tool description. The chat panel passes the full catalog to the model via the AI SDK's `tool()` interface; the model reads the descriptions, picks a tool, and fills in the arguments.
+Each tool and timeline verb ships with a Zod input schema (parameter docs inline via `.describe()`) and a one-line description. The Claude Code skill and the MCP server expose that catalog to the agent; it reads the descriptions, picks a tool, and fills in the arguments.
 
 **What if the agent makes a mistake?**
 Every edit appends to `session.json` and produces a new output file in the workspace; nothing is destructive. Press `⌘Z` to pop the last op; click Snapshot before risky operations to save a named restore point; the entire workspace is a folder you can `git init`.
@@ -260,7 +270,7 @@ FFmpeg is one binary with a complex CLI; MakeMyClip Editor is 19 named tools wit
 The editor (this repo) is MIT-licensed, free, local, and limited to deterministic FFmpeg operations. [MakeMyClip.com](https://makemyclip.com) is the separate hosted product where paid AI generation features will live. The two share the timeline schema, so projects move between them.
 
 **How do I add my own editing tool?**
-Add a file in `src/tools/<name>.ts` exporting a Zod input schema and a handler, register it in [`src/ui/tool-registry.ts`](src/ui/tool-registry.ts), and the tool becomes available in the CLI, the browser UI's tool picker, and the chat panel's agent. See [AGENTS.md](./AGENTS.md) for conventions.
+Add a file in `src/tools/<name>.ts` exporting a Zod input schema and a handler, register it in [`src/ui/tool-registry.ts`](src/ui/tool-registry.ts), and the tool becomes available in the CLI and the browser UI's tool picker. See [AGENTS.md](./AGENTS.md) for conventions.
 
 </details>
 
@@ -274,7 +284,7 @@ Add a file in `src/tools/<name>.ts` exporting a Zod input schema and a handler, 
 
 ## Roadmap
 
-- **Now** — feature-complete local editing: 19 tools, browser UI, chat panel, snapshot/undo
+- **Now** — feature-complete local editing: a dark timeline editor (view / edit / preview / export), 19 tools, MCP server, snapshot/undo
 - **Next** — model picker, SSE for live session updates, AI Elements / shadcn migration
 - **1.0** — frozen tool schemas, MCP transport, published Anthropic skill, docs site
 - **Beyond** — desktop app (Electron), cloud rendering via [MakeMyClip.com](https://makemyclip.com)
@@ -283,7 +293,7 @@ The full milestone log lives in PR descriptions on [GitHub](https://github.com/M
 
 ## Acknowledgments
 
-Built on the work of [FFmpeg](https://ffmpeg.org/), the [Vercel AI SDK](https://ai-sdk.dev/), [Anthropic Claude](https://www.anthropic.com/), [Zod](https://zod.dev/), [Hono](https://hono.dev/), [Vite](https://vite.dev/), and [React](https://react.dev/).
+Built on the work of [FFmpeg](https://ffmpeg.org/), the [Model Context Protocol](https://modelcontextprotocol.io/), [Anthropic Claude](https://www.anthropic.com/), [Zod](https://zod.dev/), [Hono](https://hono.dev/), [Vite](https://vite.dev/), and [React](https://react.dev/).
 
 ## Links
 

@@ -321,7 +321,7 @@ npx -y @makemyclip/editor ui
 
 Starts a tiny local server on `http://127.0.0.1:5573` and opens your browser. The UI renders the session log (every op the agent has run), shows result paths and timestamps, and lets the user click an op to play its output. Useful as a companion to the chat-driven workflow — the user can watch the session evolve in real time and check outputs without touching the terminal.
 
-Local-only. The UI includes drag-drop import, a horizontal timeline of every clip the session produced, a render queue, a chat sidebar that talks to the same agent, snapshot/undo, and keyboard shortcuts — so the user can take over visually whenever the agent goes off-script.
+Local-only. The UI is a dark timeline editor: drag-drop import, a monitor (the composited frame at the playhead), an editable timeline (select a clip to trim / split / move / transition / remove), one-click export, timeline undo/redo, and snapshot — so the user can take over visually whenever the agent goes off-script.
 
 ### Session safety — snapshot, undo, inspect, delete (implemented)
 

@@ -1,35 +1,51 @@
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { anthropic } from '@ai-sdk/anthropic';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 'ai';
 import getPort from 'get-port';
 import { Hono } from 'hono';
 import open from 'open';
 import { ZodError, z } from 'zod';
+import { buildThumbnailArgs } from '../ffmpeg/args/preview.js';
 import { probe } from '../ffmpeg/probe.js';
+import { runFfmpeg } from '../ffmpeg/run.js';
 import { appendOp, readSession, SessionCorruptError, snapshotsDir } from '../session/store.js';
 import type { SessionEntry } from '../session/types.js';
+import {
+  buildFrameAtPlan,
+  CompileError,
+  checkExportable,
+  compileTimeline,
+} from '../timeline/compile.js';
 import {
   applyVerbs,
   CompositionConflictError,
   readComposition,
+  readDocOpLog,
+  redoDocOp,
+  undoLastDocOp,
 } from '../timeline/document-store.js';
+import { buildMediaMap } from '../timeline/media-registry.js';
 import { CompositionOpError } from '../timeline/ops.js';
+import { runPlan } from '../timeline/run-plan.js';
+import type { MediaId } from '../timeline/schema.js';
 import { CompositionVerbSchema } from '../timeline/verbs.js';
 import { ingest } from '../tools/ingest.js';
 import { preview } from '../tools/preview.js';
 import { snapshot } from '../tools/snapshot.js';
 import { undo } from '../tools/undo.js';
-import { ensureWorkspace, getWorkspace, WorkspaceBoundaryError } from '../workspace.js';
-import { buildChatTools } from './chat-tools.js';
-import { buildTimelineTools, makeVerbContext, summarizeComposition } from './timeline-tools.js';
+import {
+  ensureWorkspace,
+  getWorkspace,
+  newOutputPath,
+  WorkspaceBoundaryError,
+} from '../workspace.js';
+import { makeVerbContext } from './timeline-tools.js';
 import { isRegisteredTool, TOOL_REGISTRY } from './tool-registry.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -198,6 +214,140 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   });
 
   /**
+   * GET /api/timeline/exportable — dry-run the export compiler (pure, no FFmpeg)
+   * to report whether the document can render and, if not, the blocking reasons.
+   * The viewer surfaces this so a not-yet-renderable doc reads as such, not broken.
+   */
+  app.get('/api/timeline/exportable', async (c) => {
+    const comp = await readComposition();
+    const media = await buildMediaMap();
+    return c.json(checkExportable(comp, media, getWorkspace()));
+  });
+
+  /**
+   * GET /api/timeline/frame?at=<sec> — the composited frame at <sec>, rendered
+   * through the REAL export compiler (buildFrameAtPlan) so the preview can't
+   * diverge from the export. Returns image/jpeg; 422 with the reason when the doc
+   * can't render a frame there (gap, past the end, an unsupported clip).
+   */
+  app.get('/api/timeline/frame', async (c) => {
+    const atSec = Number(c.req.query('at') ?? '0');
+    if (Number.isNaN(atSec)) return c.json({ error: 'at must be a number' }, 400);
+    const output = newOutputPath('timeline-frame', 'jpg');
+    // Per-request tag so this preview's intermediate segments can't collide with
+    // a concurrent export's — both run unsynchronized `ffmpeg -y` in the workspace.
+    const tag = `frame-${randomBytes(4).toString('hex')}`;
+    try {
+      const comp = await readComposition();
+      const media = await buildMediaMap();
+      const plan = buildFrameAtPlan(comp, { media, dir: getWorkspace(), output, tag }, atSec);
+      const result = await runPlan(plan);
+      const jpeg = await readFile(result.output);
+      await unlink(result.output).catch(() => {}); // transient preview frame
+      return c.body(jpeg, 200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });
+    } catch (err) {
+      await unlink(output).catch(() => {});
+      if (err instanceof CompileError) return c.json({ error: err.message }, 422);
+      // Not a document problem — a transient render failure (e.g. an FFmpeg
+      // hiccup). Surface it as retryable instead of leaking a raw 500.
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 503);
+    }
+  });
+
+  /**
+   * GET /api/media/thumb?mediaId=&t=&h= — a single small still from a SOURCE media
+   * file (not the composited timeline), for the timeline filmstrip. Each thumb is
+   * keyed by (mediaId, t, h) and cached under the workspace, so the row of frames a
+   * clip shows is generated once and then served from disk. Cheap: one fast
+   * input-seek frame extract per cache miss.
+   */
+  app.get('/api/media/thumb', async (c) => {
+    const mediaId = c.req.query('mediaId') ?? '';
+    const t = Number(c.req.query('t') ?? '0');
+    const h = Math.min(Math.max(Math.round(Number(c.req.query('h') ?? '48')), 16), 240);
+    if (!mediaId || Number.isNaN(t) || t < 0)
+      return c.json({ error: 'mediaId and t≥0 required' }, 400);
+
+    const thumbsDir = resolve(getWorkspace(), '.thumbs');
+    const safeKey = `${mediaId}-${t.toFixed(2)}-${h}`.replace(/[^\w.-]/g, '_');
+    const out = resolve(thumbsDir, `${safeKey}.jpg`);
+
+    const serve = async () =>
+      c.body(await readFile(out), 200, {
+        'Content-Type': 'image/jpeg',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      });
+
+    // Cache hit — the file's existence means this mediaId was already validated.
+    if (existsSync(out)) return serve();
+
+    const info = (await buildMediaMap()).get(mediaId as MediaId);
+    if (!info) return c.json({ error: `Unknown media: ${mediaId}` }, 404);
+    try {
+      await mkdir(thumbsDir, { recursive: true });
+      // Generate to a unique temp path then atomically rename, so concurrent
+      // requests for the same thumb never serve a half-written file.
+      const tmp = resolve(thumbsDir, `${safeKey}.${randomBytes(4).toString('hex')}.tmp.jpg`);
+      await runFfmpeg(buildThumbnailArgs({ input: info.path, output: tmp, atSec: t, height: h }));
+      await rename(tmp, out);
+      return serve();
+    } catch (err) {
+      // A non-thumbnailable source (e.g. audio-only) or a transient FFmpeg failure
+      // — the clip just falls back to its gradient block. Clean error, not a 500.
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 422);
+    }
+  });
+
+  /**
+   * POST /api/timeline/export — compile the whole document to a rendered file and
+   * log it to the session so it appears in Outputs and is playable. Returns the
+   * op id + output path.
+   */
+  app.post('/api/timeline/export', async (c) => {
+    const comp = await readComposition();
+    const media = await buildMediaMap();
+    const output = newOutputPath('timeline-export', 'mp4');
+    try {
+      const plan = compileTimeline(comp, { media, dir: getWorkspace(), output });
+      const result = await runPlan(plan);
+      const entry = await appendOp({
+        tool: 'timeline_export',
+        args: { rev: comp.rev },
+        result: { path: result.output, durationSec: plan.durationSec },
+      });
+      return c.json({ id: entry.id, output: result.output, durationSec: plan.durationSec });
+    } catch (err) {
+      if (err instanceof CompileError) return c.json({ error: err.message }, 422);
+      // A render failure (not a bad document) — clean retryable error, not a raw 500.
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 503);
+    }
+  });
+
+  /** POST /api/timeline/undo — undo the most recent document edit (op-log). */
+  app.post('/api/timeline/undo', async (c) => {
+    const { undone, label } = await undoLastDocOp();
+    return c.json({ undone, label: label ?? null });
+  });
+
+  /** POST /api/timeline/redo — redo the most recently undone document edit. */
+  app.post('/api/timeline/redo', async (c) => {
+    const { redone, label } = await redoDocOp();
+    return c.json({ redone, label: label ?? null });
+  });
+
+  /** GET /api/timeline/history — undo/redo availability for the doc op-log. */
+  app.get('/api/timeline/history', async (c) => {
+    const log = await readDocOpLog();
+    return c.json({
+      canUndo: log.cursor > 0,
+      canRedo: log.cursor < log.entries.length,
+    });
+  });
+
+  /**
    * Session safety endpoints. These intentionally live outside the
    * /api/tools/:name registry because snapshot/undo are meta-operations on
    * the session log itself — they shouldn't appear as ops *in* the log.
@@ -266,166 +416,6 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       .map((f) => f.replace(/\.json$/, ''))
       .sort();
     return c.json({ snapshots: labels });
-  });
-
-  // ─── Chat (Anthropic via AI SDK) ───────────────────────────────────
-
-  /**
-   * Path to the persisted chat history. We store one file per workspace so
-   * a project's chat moves with its session.json.
-   */
-  function chatPath(): string {
-    return resolve(getWorkspace(), 'chat.json');
-  }
-
-  async function readChatHistory(): Promise<UIMessage[]> {
-    try {
-      const raw = await readFile(chatPath(), 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed as UIMessage[];
-      return [];
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') return [];
-      // Corrupt history → start fresh; better than blocking chat outright.
-      return [];
-    }
-  }
-
-  async function writeChatHistory(messages: UIMessage[]): Promise<void> {
-    await ensureWorkspace();
-    await writeFile(chatPath(), `${JSON.stringify(messages, null, 2)}\n`);
-  }
-
-  function summarizeEntryForChat(e: {
-    id: string;
-    tool: string;
-    args: Record<string, unknown>;
-    result: Record<string, unknown>;
-  }): string {
-    const path =
-      typeof e.result.path === 'string'
-        ? e.result.path
-        : typeof (e.result.ref as { path?: unknown })?.path === 'string'
-          ? (e.result.ref as { path: string }).path
-          : '(no playable path)';
-    return `- ${e.id} ${e.tool} → ${path}`;
-  }
-
-  function buildSystemPrompt(): Promise<string> {
-    return Promise.all([readSession(), readComposition().catch(() => null)]).then(
-      ([session, comp]) => {
-        const workspace = getWorkspace();
-        const recent = session.entries.slice(-12).map(summarizeEntryForChat).join('\n');
-        return [
-          'You are the assistant inside MakeMyClip Editor — a local, FFmpeg-backed video editor.',
-          '',
-          'You build a video by editing a TIMELINE DOCUMENT: a non-destructive list of tracks and clips. Every edit is recorded and undoable.',
-          '',
-          'Primary tools — prefer these:',
-          '- `timeline_edit` — apply editing verbs (add_media, add_text, add_color, trim, move, split, remove, transition, set_transform) to the document. Batch related verbs into ONE call; they apply atomically as a single undoable change.',
-          '- `timeline_show` — read the current document (tracks, clips, timings). Call it to ground yourself BEFORE editing and to VERIFY AFTER an edit.',
-          '- `timeline_undo` / `timeline_redo` / `timeline_history` — move through the edit history.',
-          '',
-          'Workflow: timeline_show → timeline_edit → timeline_show to confirm. Refer to clips by their `id` (from timeline_show); refer to media by absolute or workspace-relative path.',
-          '',
-          'The legacy file-tools (chroma_key, stabilize, overlay, render, …) operate on standalone files, NOT the document. Use them only for operations the timeline engine does not cover yet — e.g. final render, chroma key, stabilization.',
-          '',
-          `Workspace: ${workspace}`,
-          comp
-            ? `Current document: ${JSON.stringify(summarizeComposition(comp))}`
-            : 'Current document: unreadable (corrupt?) — start over with `timeline_edit` after the user removes composition.json, or guide them to `clip timeline new`.',
-          recent ? `Recent file-tool ops:\n${recent}` : '',
-        ]
-          .filter(Boolean)
-          .join('\n');
-      },
-    );
-  }
-
-  /**
-   * GET /api/chat — persisted history (UIMessage[]). Returns empty array
-   * for a fresh workspace.
-   */
-  app.get('/api/chat', async (c) => {
-    const messages = await readChatHistory();
-    return c.json({ messages });
-  });
-
-  /**
-   * DELETE /api/chat — clear history.
-   */
-  app.delete('/api/chat', async (c) => {
-    await writeChatHistory([]);
-    return c.json({ messages: [] });
-  });
-
-  /**
-   * POST /api/chat — `useChat` transport target. Body is `{ messages:
-   * UIMessage[] }`. Returns a UI message stream the @ai-sdk/react hook
-   * consumes. Each agent turn can fire several tool calls (multi-step)
-   * up to `stopWhen` — tools mutate session.json, the UI's session poll
-   * picks them up.
-   */
-  app.post('/api/chat', async (c) => {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      return c.json(
-        {
-          error: 'ANTHROPIC_API_KEY is not set. Add it to your environment and restart `clip ui`.',
-        },
-        400,
-      );
-    }
-    let body: { messages?: UIMessage[] };
-    try {
-      body = (await c.req.json()) as { messages?: UIMessage[] };
-    } catch {
-      return c.json({ error: 'Body must be JSON with a `messages` array.' }, 400);
-    }
-    const messages = Array.isArray(body.messages) ? body.messages : [];
-
-    let system: string;
-    try {
-      // buildSystemPrompt reads the session; a corrupt file used to brick every
-      // chat turn with a raw 500. Degrade to an actionable message instead.
-      system = await buildSystemPrompt();
-    } catch (err) {
-      if (err instanceof SessionCorruptError) {
-        return c.json(
-          {
-            error: `Session file is corrupt: ${err.path}. Recover with \`clip undo <snapshotLabel>\` or remove it, then retry.`,
-          },
-          409,
-        );
-      }
-      throw err;
-    }
-    const modelMessages = await convertToModelMessages(messages);
-    const result = streamText({
-      // Sonnet 4.6 is the sweet spot for tool-use latency / cost; the user
-      // can swap models later via env / a settings panel.
-      model: anthropic('claude-sonnet-4-6'),
-      system,
-      messages: modelMessages,
-      // Op-aware timeline tools first (the primary editing path); the legacy
-      // file-tools remain for operations the document engine doesn't cover yet.
-      tools: { ...buildTimelineTools(), ...buildChatTools() },
-      // Up to 8 chained tool calls per turn — enough for "trim three clips
-      // then concat" without runaway loops.
-      stopWhen: stepCountIs(8),
-    });
-
-    return result.toUIMessageStreamResponse({
-      // Persist the full updated conversation when the stream finishes so
-      // a page reload restores the chat.
-      onFinish: async ({ messages: finalMessages }) => {
-        try {
-          await writeChatHistory(finalMessages);
-        } catch (err) {
-          // Don't block the response on persistence — log it server-side.
-          console.warn('Could not persist chat history:', err);
-        }
-      },
-    });
   });
 
   // ─── Duration probe (Timeline scrub slider) ───────────────────────

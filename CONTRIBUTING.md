@@ -73,6 +73,7 @@ Optional but recommended:
 - `timeline`: Timeline schema and helpers
 - `ffmpeg`: FFmpeg arg builders, escaping, subprocess
 - `cli`: `clip` CLI entry
+- `mcp`: MCP server (`clip mcp`) for Claude Desktop / any MCP client
 - `preview`: HTML preview generator
 - `schema`: Zod schemas shared with MakeMyClip.com
 - `skill`: SKILL.md and skill-registry integration

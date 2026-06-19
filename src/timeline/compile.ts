@@ -49,6 +49,14 @@ export interface CompileContext {
   dir: string;
   /** Final output file path. */
   output: string;
+  /**
+   * Optional token mixed into intermediate (segment / text / fold) filenames.
+   * Those names are otherwise deterministic (`tl-seg-<index>-<clip>`), so a
+   * preview render and a concurrent export would write and `-y`-overwrite the
+   * SAME files and unlink each other's. A per-request tag (the `clip ui` sets
+   * one per frame request) gives the preview its own collision-free paths.
+   */
+  tag?: string;
 }
 
 /** A side file (concat list / drawtext text) the runner must write before
@@ -233,8 +241,14 @@ const SEG_PREFIX = 'tl-seg';
 const FOLD_PREFIX = 'tl-fold';
 const TEXT_PREFIX = 'tl-text';
 
-function segPath(dir: string, index: number, clipId: string): string {
-  return resolve(dir, `${SEG_PREFIX}-${index}-${clipId}.mp4`);
+/** A disambiguating infix for intermediate filenames — `<tag>-` when a tag is
+ *  set (a preview's collision-free paths), empty otherwise (export's stable ones). */
+function tagInfix(tag: string | undefined): string {
+  return tag ? `${tag}-` : '';
+}
+
+function segPath(dir: string, index: number, clipId: string, tag?: string): string {
+  return resolve(dir, `${SEG_PREFIX}-${tagInfix(tag)}${index}-${clipId}.mp4`);
 }
 
 /**
@@ -252,7 +266,7 @@ function buildSegmentStep(
   assertCompilable(clip);
   const outDur = outputDuration(clip);
   const { width, height, fps, background } = comp;
-  const out = segPath(ctx.dir, index, clip.id);
+  const out = segPath(ctx.dir, index, clip.id, ctx.tag);
   const { video: fx, audio: afx } = effectFilters(clip, outDur, fadeSuppress);
   const textFiles: StepSideFile[] = [];
 
@@ -309,7 +323,7 @@ function buildSegmentStep(
     );
     videoSource = '[0:v]';
     audioSource = '1:a';
-    const textfile = resolve(ctx.dir, `${TEXT_PREFIX}-${index}-${clip.id}.txt`);
+    const textfile = resolve(ctx.dir, `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}.txt`);
     textFiles.push({ path: textfile, content: clip.text });
     fx.unshift(drawtextFilter(textfile, clip.style));
   }
@@ -504,6 +518,26 @@ export function buildFrameAtPlan(
   return { steps: [segStep, frameStep], output: ctx.output, durationSec: 0 };
 }
 
+/**
+ * Dry-run the export compiler (pure — no FFmpeg runs) to report whether the
+ * document can render and, if not, the first blocking reason. Shared by the CLI
+ * `timeline show`, the `clip ui` exportable route, and the MCP `timeline_show`
+ * so every surface tells the agent the SAME thing about renderability.
+ */
+export function checkExportable(
+  comp: Composition,
+  media: Map<MediaId, MediaInfo>,
+  dir: string,
+): { exportable: boolean; blockers: string[] } {
+  try {
+    compileTimeline(comp, { media, dir, output: resolve(dir, '.probe.mp4') });
+    return { exportable: true, blockers: [] };
+  } catch (err) {
+    if (err instanceof CompileError) return { exportable: false, blockers: [err.message] };
+    throw err;
+  }
+}
+
 export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegPlan {
   const track = selectVideoTrack(comp);
   const clips = [...track.clips].sort((a, b) => a.startSec - b.startSec);
@@ -550,7 +584,9 @@ export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegP
     const prevClip = segments[i - 1]?.clip;
     const transition = prevClip ? transitionAfter.get(prevClip.id) : undefined;
     const isLast = i === segments.length - 1;
-    const out = isLast ? ctx.output : resolve(ctx.dir, `${FOLD_PREFIX}-${i}.mp4`);
+    const out = isLast
+      ? ctx.output
+      : resolve(ctx.dir, `${FOLD_PREFIX}-${tagInfix(ctx.tag)}${i}.mp4`);
 
     if (transition) {
       // A transition must fit inside BOTH sides: the accumulated A (offset ≥ 0)

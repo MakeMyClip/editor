@@ -8,8 +8,6 @@ export function Header({
   snapshots,
   onRestore,
   safetyLoading,
-  chatOpen,
-  onToggleChat,
 }: {
   totalOps: number;
   onNewOp: () => void;
@@ -18,8 +16,6 @@ export function Header({
   snapshots: string[];
   onRestore: (label: string) => void;
   safetyLoading: boolean;
-  chatOpen: boolean;
-  onToggleChat: () => void;
 }) {
   const [workspace, setWorkspace] = useState<string>('');
   const [snapsOpen, setSnapsOpen] = useState(false);
@@ -91,15 +87,6 @@ export function Header({
             ) : null}
           </div>
         ) : null}
-        <button
-          type="button"
-          className={`btn-secondary header-btn-secondary${chatOpen ? ' active' : ''}`}
-          onClick={onToggleChat}
-          title="Toggle chat with the agent"
-          aria-pressed={chatOpen}
-        >
-          💬 Chat
-        </button>
         <button type="button" className="btn-primary header-btn" onClick={onNewOp}>
           + New op
         </button>

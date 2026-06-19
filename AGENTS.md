@@ -115,4 +115,4 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md). Summary:
 - Branch: `<type>/<short-kebab-description>` — e.g. `feat/zoom-pan-tool`. **No `claude/*` or other agent-prefixed branches.**
 - Commit: Conventional Commits — `<type>(<scope>): <description>`.
 - Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`.
-- Scopes for this project: `tools`, `timeline`, `ffmpeg`, `cli`, `preview`, `schema`, `skill`, `deps`, `docs`, `ci`.
+- Scopes for this project: `tools`, `timeline`, `ffmpeg`, `cli`, `mcp`, `preview`, `schema`, `skill`, `deps`, `docs`, `ci`.

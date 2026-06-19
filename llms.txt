@@ -1,15 +1,15 @@
 # MakeMyClip Editor
 
-> Open-source, local-first AI video editor. Wraps FFmpeg in 19 deterministic editing tools any LLM can call. Ships as a Claude Code skill, a `clip` CLI, and a browser UI (`clip ui`) with visual timeline, drag-drop import, chat panel, snapshot/undo, and keyboard shortcuts. MIT licensed. No telemetry, no cloud, no account. First npm release: feature-complete local editing.
+> Open-source, local-first AI video editor. Wraps FFmpeg in 19 deterministic editing tools any LLM can call. Ships as a Claude Code skill, a `clip` CLI, a browser timeline editor (`clip ui` — view, edit, preview, export), and an MCP server (`clip mcp`, for Claude Desktop / any MCP client). MIT licensed. No telemetry, no cloud, no account, no API key.
 
 ## What it is
 
 - **Name:** MakeMyClip Editor
 - **Type:** Agent-driven video editor (not generative AI)
 - **Backend:** FFmpeg (bundled via `ffmpeg-static`)
-- **Surfaces:** Claude Code skill · `clip` CLI · browser UI at `127.0.0.1:5573`
-- **AI integration:** Anthropic via Vercel AI SDK (optional; rest of editor works without API key)
-- **Tests:** 539 passing
+- **Surfaces:** Claude Code skill · `clip` CLI · browser UI at `127.0.0.1:5573` · MCP server (`clip mcp`)
+- **Agent access:** Claude Code skill + MCP server (`clip mcp`); no API key — the editor embeds no model, it runs on whichever Claude you already use
+- **Tests:** 542 passing
 - **License:** MIT (code) + GPL (bundled FFmpeg binary, subprocess-isolated)
 
 ## How to install
@@ -33,7 +33,7 @@ Plus session meta-ops not in the tool registry: snapshot, undo, inspect, delete.
 - Drop-in replacement for FFmpeg scripting when you want LLM-driven editing with a named tool catalog
 - Fills the gap between iMovie/CapCut (mouse-only, no agent) and Descript (cloud, closed-source, audio-rewriting)
 - Different category from Runway/Pika (generative AI), Premiere/DaVinci (heavy NLEs)
-- Single workspace folder holds session.json, output files, snapshots/, chat.json — fully version-controllable
+- Single workspace folder holds composition.json (the timeline), session.json (the op log), output files, snapshots/ — fully version-controllable
 - Stream-copy for lossless trim/split/concat; re-encodes only when filter graphs require it
 
 ## Architecture
@@ -42,7 +42,7 @@ Plus session meta-ops not in the tool registry: snapshot, undo, inspect, delete.
 - React 19 + Vite browser UI
 - Hono HTTP server (`clip ui`)
 - Zod schemas for every tool input (validation + agent-readable parameter docs)
-- AI SDK 6 with `streamText` + `tool()` for the chat panel
+- MCP server via `@modelcontextprotocol/sdk` exposing the timeline tools over stdio
 - session.json append-only op log; snapshot/undo are meta-ops outside the registry
 
 ## Documentation
