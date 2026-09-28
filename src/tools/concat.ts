@@ -3,7 +3,7 @@ import { unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { buildConcatArgs } from '../ffmpeg/args/concat.js';
-import { quoteFilterArg } from '../ffmpeg/escape.js';
+import { quoteConcatPath } from '../ffmpeg/escape.js';
 import { runFfmpeg } from '../ffmpeg/run.js';
 import { ensureWorkspace, getWorkspace, newOutputPath, resolveInput } from '../workspace.js';
 
@@ -28,7 +28,7 @@ export interface ConcatResult {
  * trailing newline) and small mistakes show up only at ffmpeg-runtime.
  */
 export function buildConcatListContent(absolutePaths: string[]): string {
-  return `${absolutePaths.map((path) => `file ${quoteFilterArg(path)}`).join('\n')}\n`;
+  return `${absolutePaths.map((path) => `file ${quoteConcatPath(path)}`).join('\n')}\n`;
 }
 
 export async function concat(input: ConcatInputType): Promise<ConcatResult> {

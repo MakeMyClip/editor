@@ -38,12 +38,20 @@ describe('buildConcatListContent', () => {
 
   it('escapes single quotes in paths', () => {
     const content = buildConcatListContent(["/tmp/it's a file.mp4"]);
-    expect(content).toBe("file '/tmp/it\\'s a file.mp4'\n");
+    expect(content).toBe("file '/tmp/it'\\''s a file.mp4'\n");
   });
 
-  it('escapes backslashes in paths', () => {
+  it('keeps backslashes literal inside a quoted concat path', () => {
     const content = buildConcatListContent(['C:\\videos\\clip.mp4']);
-    expect(content).toBe("file 'C:\\\\videos\\\\clip.mp4'\n");
+    expect(content).toBe("file 'C:\\videos\\clip.mp4'\n");
+  });
+
+  it.each([
+    'line\nbreak.mp4',
+    'carriage\rreturn.mp4',
+    'nul\0byte.mp4',
+  ])('rejects a path that cannot be represented as one list line: %s', (path) => {
+    expect(() => buildConcatListContent([path])).toThrow(/line breaks or NUL/);
   });
 
   it('handles unicode paths', () => {
