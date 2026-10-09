@@ -14,10 +14,12 @@ editor/
 │   ├── tools/        # one file per tool (trim, zoom_pan, add_text, …)
 │   ├── timeline/     # Zod schema + helpers for the timeline JSON
 │   ├── ffmpeg/       # safe FFmpeg arg builders + subprocess runner
-│   ├── preview/      # HTML preview generator
-│   └── cli.ts        # `clip` CLI entry — the single execution surface
+│   ├── mcp/          # `clip mcp` server: timeline tools over stdio for MCP clients
+│   ├── ui/           # `clip ui` browser editor: Hono server + Vite web app
+│   ├── session/      # session.json op log of tool invocations (audit + undo)
+│   ├── storage/      # revisioned JSON store with serialized, CAS-checked writes
+│   └── cli.ts        # `clip` CLI entry
 ├── tests/
-├── examples/
 ├── SKILL.md          # Claude Code skill: triggers + shell-out instructions
 ├── AGENTS.md
 ├── CONTRIBUTING.md
@@ -25,7 +27,7 @@ editor/
 └── package.json
 ```
 
-MCP server is intentionally out of scope for the current polish phase — the skill+CLI path covers the primary audience (Claude Code) with one-command setup. MCP will return when the state engine and resources actually justify the surface.
+The MCP server (`src/mcp/server.ts`, started with `clip mcp`) exposes the timeline tools over stdio to Claude Desktop and other MCP clients, alongside the skill + CLI path.
 
 ## Stack
 
@@ -34,7 +36,6 @@ MCP server is intentionally out of scope for the current polish phase — the sk
 - **Validation:** `zod` (timeline schema is shared with MakeMyClip.com)
 - **Subprocess:** `execa` — args always as an array, never shell-string
 - **FFmpeg:** `ffmpeg-static` (bundled) with fallback to `$MAKEMYCLIP_FFMPEG_PATH` or system binary
-- **Image ops:** `sharp` (frame thumbnails, simple CV)
 - **Tests:** `vitest`
 - **Lint/format:** `@biomejs/biome` (single Rust binary, replaces eslint + prettier)
 
@@ -106,7 +107,6 @@ Rules:
 - `pnpm lint` runs `biome check`.
 - Run all three before committing.
 - For tool handlers: write a unit test that asserts the built FFmpeg arg array, not the rendered output (deterministic, fast, no FFmpeg needed in CI).
-- Integration tests against real FFmpeg live in `tests/integration/` and run on CI only.
 
 ## Branch & commit rules
 
