@@ -8,26 +8,24 @@ describe('quoteFilterArg', () => {
     expect(quoteFilterArg('hello')).toBe("'hello'");
   });
 
-  it('escapes internal single quotes', () => {
-    expect(quoteFilterArg("don't")).toBe("'don\\'t'");
+  it('preserves a quote through both parser layers', () => {
+    expect(quoteFilterArg("don't")).toBe(String.raw`'don\'\''t'`);
   });
 
-  it('escapes backslashes', () => {
-    expect(quoteFilterArg('a\\b')).toBe("'a\\\\b'");
+  it('preserves backslashes through both parser layers', () => {
+    expect(quoteFilterArg(String.raw`a\b`)).toBe(String.raw`'a\\b'`);
   });
 
-  it('escapes backslash before single quote (backslash escaped first)', () => {
-    // Input "\\'" (literal backslash then single quote) should become "\\\\\\'"
-    // — the backslash doubles to \\, and the quote becomes \'.
-    expect(quoteFilterArg("\\'")).toBe("'\\\\\\''");
+  it('preserves a backslash immediately before a quote', () => {
+    expect(quoteFilterArg(String.raw`\'`)).toBe(String.raw`'\\\'\'''`);
   });
 
   it('handles empty string', () => {
     expect(quoteFilterArg('')).toBe("''");
   });
 
-  it('leaves colons, commas, brackets alone (single-quoting handles them)', () => {
-    expect(quoteFilterArg('a:b,c[d];e')).toBe("'a:b,c[d];e'");
+  it('protects option colons as well as filtergraph delimiters', () => {
+    expect(quoteFilterArg('a:b,c[d];e')).toBe(String.raw`'a\:b,c[d];e'`);
   });
 
   it('handles unicode without modification', () => {
@@ -38,17 +36,14 @@ describe('quoteFilterArg', () => {
     expect(quoteFilterArg('/tmp/text-abc.txt')).toBe("'/tmp/text-abc.txt'");
   });
 
-  it('handles macOS /var/folders paths', () => {
-    const p = '/var/folders/dn/vk2rnbvx7k98/T/makemyclip-editor/add-text-123.txt';
-    expect(quoteFilterArg(p)).toBe(`'${p}'`);
+  it('keeps Windows drive colons and punctuation inside the filename', () => {
+    expect(quoteFilterArg(String.raw`C:\Users\Agent's work, [draft];\notes.txt`)).toBe(
+      String.raw`'C\:\\Users\\Agent\'\''s work, [draft];\\notes.txt'`,
+    );
   });
 
-  it('round-trips through a simulated parser', () => {
-    const original = "tricky: 'value' with\\backslash and: more, stuff";
-    const quoted = quoteFilterArg(original);
-    // Simulate ffmpeg: strip outer quotes, unescape \' then \\ in that order
-    const unquoted = quoted.slice(1, -1).replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-    expect(unquoted).toBe(original);
+  it('preserves leading and trailing whitespace', () => {
+    expect(quoteFilterArg(' spaced name ')).toBe("' spaced name '");
   });
 });
 
