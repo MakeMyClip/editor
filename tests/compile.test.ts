@@ -3,6 +3,7 @@ import { type CompileContext, CompileError, compileTimeline } from '../src/timel
 import { emptyComposition } from '../src/timeline/composition.js';
 import { applyOps, colorClip, mediaClip, textClip, videoTrack } from '../src/timeline/ops.js';
 import type { MediaId } from '../src/timeline/schema.js';
+import { parseFilter } from './ffmpeg-parse.js';
 
 const M1 = 'm_aaaaaaaaaaaa' as MediaId;
 const M2 = 'm_bbbbbbbbbbbb' as MediaId;
@@ -116,8 +117,9 @@ describe('compileTimeline — generated clips', () => {
     expect(step?.textFiles).toHaveLength(1);
     expect(step?.textFiles[0]?.content).toBe("It's a title: colons & commas");
     const fc = step?.args[step.args.indexOf('-filter_complex') + 1] ?? '';
-    expect(fc).toContain('drawtext=');
-    expect(fc).toContain(`textfile='${step?.textFiles[0]?.path}'`);
+    const drawtext = parseFilter(fc.slice(fc.indexOf('drawtext=')));
+    expect(drawtext.name).toBe('drawtext');
+    expect(drawtext.options.textfile).toBe(step?.textFiles[0]?.path);
     // The raw text must NOT be inlined in the filter graph.
     expect(fc).not.toContain('a title: colons');
   });

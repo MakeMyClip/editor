@@ -3,7 +3,7 @@ import { unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { buildAddTextArgs, type NamedPosition } from '../ffmpeg/args/add-text.js';
-import { runFfmpeg } from '../ffmpeg/run.js';
+import { requireDrawtext, runFfmpeg } from '../ffmpeg/run.js';
 import { ensureWorkspace, getWorkspace, newOutputPath, resolveInput } from '../workspace.js';
 
 const NAMED_POSITIONS = [
@@ -58,6 +58,7 @@ export interface AddTextResult {
 
 export async function addText(rawInput: AddTextInputType): Promise<AddTextResult> {
   const input = AddTextInput.parse(rawInput);
+  await requireDrawtext();
 
   await ensureWorkspace();
   const workspace = getWorkspace();

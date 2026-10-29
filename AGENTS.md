@@ -113,6 +113,7 @@ Rules:
 - `pnpm lint` runs `biome check`.
 - Run all three before committing. CI also runs `pnpm build` (tsup + the Vite UI build).
 - For tool handlers: write a unit test that asserts the built FFmpeg arg array, not the rendered output (deterministic, fast, no FFmpeg needed in CI).
+- Integration tests against real FFmpeg live in `tests/integration/` and run on CI only (they skip unless `CI=true`).
 
 ## Branch & commit rules
 

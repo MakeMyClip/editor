@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { quoteFilterArg } from '../ffmpeg/escape.js';
 import { probe } from '../ffmpeg/probe.js';
-import { runFfmpeg } from '../ffmpeg/run.js';
+import { requireDrawtext, runFfmpeg } from '../ffmpeg/run.js';
 import { ensureWorkspace, getWorkspace, newOutputPath, resolveInput } from '../workspace.js';
 import { concat } from './concat.js';
 
@@ -30,6 +30,7 @@ export interface AddTitleCardResult {
 
 export async function addTitleCard(rawInput: AddTitleCardInputType): Promise<AddTitleCardResult> {
   const input = AddTitleCardInput.parse(rawInput);
+  await requireDrawtext();
 
   await ensureWorkspace();
   const workspace = getWorkspace();

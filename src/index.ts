@@ -53,7 +53,7 @@ export {
   probe,
   type VideoStream,
 } from './ffmpeg/probe.js';
-export { runFfmpeg } from './ffmpeg/run.js';
+export { MissingFilterError, runFfmpeg } from './ffmpeg/run.js';
 export {
   appendOp,
   atomicWriteFile,
