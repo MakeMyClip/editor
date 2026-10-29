@@ -1,5 +1,5 @@
 import { unlink, writeFile } from 'node:fs/promises';
-import { runFfmpeg } from '../ffmpeg/run.js';
+import { requireDrawtext, runFfmpeg } from '../ffmpeg/run.js';
 import type { FfmpegPlan } from './compile.js';
 
 export interface RunPlanResult {
@@ -16,6 +16,8 @@ export interface RunPlanResult {
  */
 export async function runPlan(plan: FfmpegPlan): Promise<RunPlanResult> {
   const start = Date.now();
+  // Only text segments carry text files; check before the first step renders.
+  if (plan.steps.some((step) => step.textFiles.length > 0)) await requireDrawtext();
   const cleanup: string[] = [];
   try {
     for (const step of plan.steps) {
