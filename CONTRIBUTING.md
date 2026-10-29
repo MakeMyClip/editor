@@ -74,7 +74,7 @@ Optional but recommended:
 - `ffmpeg`: FFmpeg arg builders, escaping, subprocess
 - `cli`: `clip` CLI entry
 - `mcp`: MCP server (`clip mcp`) for Claude Desktop / any MCP client
-- `preview`: HTML preview generator
+- `ui`: `clip ui` browser editor (`src/ui/`)
 - `schema`: Zod schemas shared with MakeMyClip.com
 - `skill`: SKILL.md and skill-registry integration
 - `deps`: Dependencies and packages
@@ -98,7 +98,7 @@ feat(tools): add zoom_pan tool with region focus
 fix(ffmpeg): escape special chars in drawtext input
 docs(skill): document SKILL.md frontmatter fields
 refactor(timeline): split schema into clip and track modules
-perf(preview): cache thumbnail generation by hash
+perf(ui): cache thumbnail generation by hash
 chore(deps): update execa to 9.x
 test(tools): cover trim edge cases at timeline boundaries
 style: align imports and remove trailing whitespace
@@ -140,28 +140,28 @@ See [AGENTS.md](./AGENTS.md#code-style) for the full style guide. Quick summary:
 
 - **Never** pass user input to FFmpeg via shell strings. Args are always `string[]`.
 - **Never** read/write files outside the workspace sandbox without explicit user consent.
-- **No network calls** in the OSS core — generation features live in a separate package.
+- **No network calls** in the OSS core — generation features will live in a separate package.
 
-### MCP tools
+### Tools
 
 - One tool per file under `src/tools/`
 - `description` is agent-facing — write it for an LLM reader, not a human
-- Handlers return `{ path, timeline }` — never raw FFmpeg output
+- Handlers return a typed result (`{ path, ... }` for tools that write a file) — never raw FFmpeg output
 - Handlers must be idempotent given the same workspace state
 
 ### Timeline
 
-- The timeline JSON (Zod-validated) is the source of truth
-- Tools mutate the timeline; rendering reads from it
-- Schema lives in `src/timeline/schema.ts` and is exported for the web app
+- The timeline document (a Zod-validated composition) is the source of truth for assembled edits
+- Edits mutate the composition; export compiles it to FFmpeg. The single-file tools still render straight from their args
+- Schemas live in `src/timeline/composition.ts` and `src/timeline/schema.ts` and are exported from the package (`src/index.ts`)
 
 ## Testing
 
 - Run `pnpm lint` before committing
 - Run `pnpm type-check` to ensure types pass
 - Run `pnpm test` to execute the unit test suite
+- CI also runs `pnpm build` (bundle + UI build)
 - Tool unit tests assert built FFmpeg arg arrays (no FFmpeg needed)
-- Integration tests live in `tests/integration/` and run on CI
 
 ## Pull Request Process
 
