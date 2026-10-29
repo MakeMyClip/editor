@@ -1,11 +1,12 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { buildAddTextArgs } from '../../src/ffmpeg/args/add-text.js';
 import { buildConcatArgs } from '../../src/ffmpeg/args/concat.js';
 import { quoteFilterArg } from '../../src/ffmpeg/escape.js';
-import { runFfmpeg } from '../../src/ffmpeg/run.js';
+import { listFilters, MissingFilterError, runFfmpeg } from '../../src/ffmpeg/run.js';
+import { addText } from '../../src/tools/add-text.js';
 import { buildConcatListContent } from '../../src/tools/concat.js';
 
 // The unit tests read escaped output back through a port of FFmpeg's parser;
@@ -22,14 +23,10 @@ const NAMES = [
   String.raw`back\slash'quote`,
 ];
 
-// `movie` ships in every FFmpeg build; drawtext needs libfreetype, which the
-// Linux ffmpeg-static binary leaves out, so it only runs where it exists.
+// `movie` ships in every FFmpeg build; drawtext needs libfreetype and
+// libharfbuzz, and the Linux ffmpeg-static binary has no harfbuzz, so it only
+// runs where it exists.
 const filters = IS_CI ? await listFilters() : new Set<string>();
-
-async function listFilters(): Promise<Set<string>> {
-  const { stdout } = await runFfmpeg(['-hide_banner', '-filters']);
-  return new Set([...stdout.matchAll(/^ \S{3} (\S+)\s+\S+->\S+/gm)].map((m) => m[1] as string));
-}
 
 async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), 'makemyclip-escape-'));
@@ -55,6 +52,10 @@ async function writeClip(path: string): Promise<void> {
 }
 
 describe.skipIf(!IS_CI)('path escaping against real FFmpeg', () => {
+  it('lists the filters this FFmpeg was built with', () => {
+    expect(filters.has('movie')).toBe(true);
+  });
+
   it.each(NAMES)('the movie filter opens %j', async (name) => {
     await withTempDir(async (dir) => {
       const clip = join(dir, name);
@@ -81,6 +82,14 @@ describe.skipIf(!IS_CI)('path escaping against real FFmpeg', () => {
         })[4] as string;
         await runFfmpeg([...QUIET, ...SOURCE, '-vf', filter, '-frames:v', '1', '-f', 'null', '-']);
       });
+    });
+  });
+
+  describe.skipIf(filters.has('drawtext'))('without drawtext', () => {
+    it('add_text stops with MissingFilterError', async () => {
+      await expect(
+        addText({ input: 'unused.mp4', text: 'Hi', startSec: 0, endSec: 1 }),
+      ).rejects.toThrow(MissingFilterError);
     });
   });
 
