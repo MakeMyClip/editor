@@ -39,7 +39,7 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@10.34.9",
+  "packageManager": "pnpm@12.16.1",
   "scripts": {
     "build": "tsup && pnpm build:ui",
     "build:ui": "vite build --config src/ui/web/vite.config.ts",
@@ -83,12 +83,5 @@
     "typescript": "^6.0.3",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@biomejs/biome",
-      "esbuild",
-      "ffmpeg-static"
-    ]
   }
 }
