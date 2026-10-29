@@ -162,6 +162,7 @@ See [AGENTS.md](./AGENTS.md#code-style) for the full style guide. Quick summary:
 - Run `pnpm test` to execute the unit test suite
 - CI also runs `pnpm build` (bundle + UI build)
 - Tool unit tests assert built FFmpeg arg arrays (no FFmpeg needed)
+- Integration tests against real FFmpeg live in `tests/integration/` and run on CI only
 
 ## Pull Request Process
 
