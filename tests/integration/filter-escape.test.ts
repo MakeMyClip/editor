@@ -1,4 +1,4 @@
-import { mkdtemp, rmdir, unlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'vitest';
@@ -7,16 +7,30 @@ import { buildConcatArgs } from '../../src/ffmpeg/args/concat.js';
 import { runFfmpeg } from '../../src/ffmpeg/run.js';
 import { buildConcatListContent } from '../../src/tools/concat.js';
 
-// The real parser catches errors that a string-unescaping simulation misses.
-describe.skipIf(process.env.CI !== 'true')('filter option escaping with FFmpeg', () => {
+// The unit tests read escaped output back through a port of FFmpeg's parser;
+// these run the real one. FFmpeg fails with "No such file" if a path comes out
+// of either parse step changed.
+const SOURCE = ['-f', 'lavfi', '-i', 'color=c=black:s=96x64:r=10:d=0.2'];
+
+async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'makemyclip-escape-'));
+  try {
+    await run(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+describe.skipIf(process.env.CI !== 'true')('path escaping against real FFmpeg', () => {
   it.each([
-    'plain note.txt',
+    'plain.txt',
     "O'Brien, [notes]; v1.txt",
-    process.platform === 'win32' ? 'drive path.txt' : 'drive:path.txt',
-  ])('reads the exact textfile %s', async (name) => {
-    const dir = await mkdtemp(join(tmpdir(), 'makemyclip-escape-'));
-    const textfile = join(dir, name);
-    try {
+    process.platform === 'win32' ? 'no colon on windows.txt' : 'drive:path.txt',
+    'trailing space.txt ',
+    String.raw`back\slash'quote.txt`,
+  ])('drawtext reads textfile %j', async (name) => {
+    await withTempDir(async (dir) => {
+      const textfile = join(dir, name);
       await writeFile(textfile, 'Visible text', 'utf8');
       const filter = buildAddTextArgs({
         input: 'unused',
@@ -27,16 +41,12 @@ describe.skipIf(process.env.CI !== 'true')('filter option escaping with FFmpeg',
         endSec: 1,
         fontSize: 16,
         box: false,
-      })[4];
-      if (!filter) throw new Error('Missing drawtext filter');
+      })[4] as string;
       await runFfmpeg([
         '-hide_banner',
         '-loglevel',
         'error',
-        '-f',
-        'lavfi',
-        '-i',
-        'color=c=black:s=96x64:r=10:d=0.2',
+        ...SOURCE,
         '-vf',
         filter,
         '-frames:v',
@@ -45,39 +55,26 @@ describe.skipIf(process.env.CI !== 'true')('filter option escaping with FFmpeg',
         'null',
         '-',
       ]);
-    } finally {
-      await unlink(textfile);
-      await rmdir(dir);
-    }
+    });
   });
 
-  it('uses concat-list quoting without filter-option escapes', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'makemyclip-escape-'));
-    const input = join(dir, "O'Brien, [clip];.mp4");
-    const listFile = join(dir, 'list.txt');
-    const output = join(dir, 'joined.mp4');
-    try {
+  it('the concat demuxer reads a list with quotes, commas and brackets in the name', async () => {
+    await withTempDir(async (dir) => {
+      const clip = join(dir, "O'Brien, [clip]; take 2.mp4");
+      const listFile = join(dir, 'list.txt');
       await runFfmpeg([
         '-hide_banner',
         '-loglevel',
         'error',
-        '-f',
-        'lavfi',
-        '-i',
-        'color=c=black:s=96x64:r=10:d=0.2',
+        ...SOURCE,
         '-c:v',
         'libx264',
         '-pix_fmt',
         'yuv420p',
-        input,
+        clip,
       ]);
-      await writeFile(listFile, buildConcatListContent([input, input]), 'utf8');
-      await runFfmpeg(buildConcatArgs({ listFile, output }));
-    } finally {
-      for (const file of [input, listFile, output]) {
-        await unlink(file).catch(() => undefined);
-      }
-      await rmdir(dir);
-    }
+      await writeFile(listFile, buildConcatListContent([clip, clip]), 'utf8');
+      await runFfmpeg(buildConcatArgs({ listFile, output: join(dir, 'joined.mp4') }));
+    });
   });
 });

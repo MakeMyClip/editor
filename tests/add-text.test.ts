@@ -2,48 +2,54 @@ import { describe, expect, it } from 'vitest';
 import { buildAddTextArgs, type NamedPosition } from '../src/ffmpeg/args/add-text.js';
 import { quoteFilterArg } from '../src/ffmpeg/escape.js';
 import { AddTextInput } from '../src/tools/add-text.js';
+import { parseFilter } from './ffmpeg-parse.js';
 
 describe('quoteFilterArg', () => {
-  it('wraps simple strings in single quotes', () => {
+  it('leaves plain values readable', () => {
     expect(quoteFilterArg('hello')).toBe("'hello'");
-  });
-
-  it('preserves a quote through both parser layers', () => {
-    expect(quoteFilterArg("don't")).toBe(String.raw`'don\'\''t'`);
-  });
-
-  it('preserves backslashes through both parser layers', () => {
-    expect(quoteFilterArg(String.raw`a\b`)).toBe(String.raw`'a\\b'`);
-  });
-
-  it('preserves a backslash immediately before a quote', () => {
-    expect(quoteFilterArg(String.raw`\'`)).toBe(String.raw`'\\\'\'''`);
-  });
-
-  it('handles empty string', () => {
+    expect(quoteFilterArg('/tmp/text-abc.txt')).toBe("'/tmp/text-abc.txt'");
+    expect(quoteFilterArg('between(t,1,2)')).toBe("'between(t,1,2)'");
     expect(quoteFilterArg('')).toBe("''");
   });
 
-  it('protects option colons as well as filtergraph delimiters', () => {
-    expect(quoteFilterArg('a:b,c[d];e')).toBe(String.raw`'a\:b,c[d];e'`);
-  });
-
-  it('handles unicode without modification', () => {
-    expect(quoteFilterArg('héllo 世界 🎬')).toBe("'héllo 世界 🎬'");
-  });
-
-  it('handles typical workspace paths', () => {
-    expect(quoteFilterArg('/tmp/text-abc.txt')).toBe("'/tmp/text-abc.txt'");
-  });
-
-  it('keeps Windows drive colons and punctuation inside the filename', () => {
-    expect(quoteFilterArg(String.raw`C:\Users\Agent's work, [draft];\notes.txt`)).toBe(
-      String.raw`'C\:\\Users\\Agent\'\''s work, [draft];\\notes.txt'`,
+  it('escapes a Windows drive path for the option parser inside graph quotes', () => {
+    expect(quoteFilterArg(String.raw`C:\Users\it's.txt`)).toBe(
+      String.raw`'C\:\\Users\\it\'\''s.txt'`,
     );
   });
 
-  it('preserves leading and trailing whitespace', () => {
-    expect(quoteFilterArg(' spaced name ')).toBe("' spaced name '");
+  // Each value is read back through FFmpeg's two parse steps (graph, then
+  // option) and must come out unchanged, with nothing left over and no extra
+  // options: an early stop or a stray key would mean the value leaked out.
+  it.each([
+    'hello',
+    '',
+    ' ',
+    ' spaced name ',
+    '\tleading tab',
+    "don't",
+    "'",
+    "''",
+    ':',
+    '\\',
+    String.raw`a\b`,
+    String.raw`\'`,
+    String.raw`trailing\\`,
+    String.raw`C:\Users\Agent's work, [draft];\notes.txt`,
+    String.raw`\\server\share\clip.txt`,
+    'a,b;c[d]e',
+    "x',drawtext=text=pwned",
+    'x:fontcolor=red',
+    '%{pts}',
+    'line\nbreak',
+    'héllo 世界 🎬',
+  ])('round-trips %j through both FFmpeg parse steps', (value) => {
+    const parsed = parseFilter(`drawtext=textfile=${quoteFilterArg(value)}:fontcolor='white'`);
+    expect(parsed).toEqual({
+      name: 'drawtext',
+      options: { textfile: value, fontcolor: 'white' },
+      rest: '',
+    });
   });
 });
 
