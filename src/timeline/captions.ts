@@ -249,7 +249,10 @@ export function groupCaptions(words: ClipWord[], endSec: number, maxWords: numbe
   return cues;
 }
 
-const NO_SPACE_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+// Script_Extensions, not Script: shared marks such as the prolonged sound mark
+// ー are Common by script but belong to kana.
+const NO_SPACE_SCRIPT =
+  /[\p{Script_Extensions=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}]/u;
 const CLOSING_PUNCTUATION = /^[,.!?;:%)\]}。，、！？：；）」』]/u;
 
 /** Join words with spaces, except between Chinese/Japanese characters (written

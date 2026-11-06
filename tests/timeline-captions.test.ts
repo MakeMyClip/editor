@@ -108,6 +108,7 @@ describe('joinWords', () => {
     expect(joinWords(['Привет', 'мир'])).toBe('Привет мир');
     expect(joinWords(['你', '好', '世界', '。'])).toBe('你好世界。');
     expect(joinWords(['こんにちは', '世界'])).toBe('こんにちは世界');
+    expect(joinWords(['コー', 'ヒー'])).toBe('コーヒー');
     expect(joinWords(['Hello', ',', 'world', '!'])).toBe('Hello, world!');
   });
 });
