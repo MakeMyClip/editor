@@ -169,7 +169,13 @@ function selectLayers(comp: Composition): { track: Track; overlays: TextClip[] }
           'Put the text on a track above it.',
       );
     }
-    for (const clip of overlay.clips) {
+    if (overlay.transitions.length > 0) {
+      throw new CompileError(
+        `Text track "${overlay.id}" has transitions, which export can't draw over video yet. Remove them.`,
+      );
+    }
+    // Lower tracks first, so a higher track's text is drawn over theirs.
+    for (const clip of [...overlay.clips].sort((a, b) => a.startSec - b.startSec)) {
       if (clip.kind !== 'text') continue;
       assertCompilable(clip);
       if (clip.effects.length > 0) {
@@ -189,7 +195,7 @@ function selectLayers(comp: Composition): { track: Track; overlays: TextClip[] }
         '(after cutting a captioned clip, make the captions again).',
     );
   }
-  return { track, overlays: clips.sort((a, b) => a.startSec - b.startSec) };
+  return { track, overlays: clips };
 }
 
 function assertCompilable(clip: Clip): void {

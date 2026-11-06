@@ -528,6 +528,27 @@ describe('compileTimeline — text over the picture (captions)', () => {
     expect(() => compileTimeline(captioned([faded]), ctx())).toThrow(/has effects/);
   });
 
+  it('draws a higher track over a lower one, whatever their start times', () => {
+    const comp = applyOps(captioned([caption('low', 'caption', 2, 1)]), [
+      { op: 'addTrack', track: videoTrack({ id: 'titles' }) },
+      { op: 'addClip', trackId: 'titles', clip: caption('high', 'title', 0, 3) },
+    ]);
+    const plan = compileTimeline(comp, ctx({ fontFor: () => undefined }));
+    const order = plan.steps[0]?.textFiles.map((f) => f.content);
+    expect(order).toEqual(['caption', 'title']);
+  });
+
+  it('rejects transitions on a text track instead of dropping them', () => {
+    const comp = applyOps(captioned([caption('c1', 'a', 0, 1), caption('c2', 'b', 1, 1)]), [
+      {
+        op: 'addTransition',
+        trackId: 'captions',
+        transition: { afterClipId: 'c1', kind: 'fade', durationSec: 0.5 },
+      },
+    ]);
+    expect(() => compileTimeline(comp, ctx())).toThrow(/has transitions/);
+  });
+
   it('still treats a lone text track as the picture (a title sequence)', () => {
     const comp = oneTrack({ op: 'addClip', trackId: 'v0', clip: caption('t', 'Title', 0, 2) });
     const plan = compileTimeline(comp, ctx({ fontFor: () => undefined }));
