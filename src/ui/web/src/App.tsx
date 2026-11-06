@@ -248,6 +248,8 @@ export function App() {
         exporting={verbBusy}
         onUndo={() => void handleTimelineHistory('undo')}
         onRedo={() => void handleTimelineHistory('redo')}
+        onApply={handleApplyVerbs}
+        verbError={verbError}
       />
       <ToolPickerModal
         open={pickerOpen}
