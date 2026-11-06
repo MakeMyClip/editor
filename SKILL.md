@@ -317,6 +317,8 @@ To cut the pauses out of a talking clip already on the timeline, use `timeline s
 
 After cutting, run `timeline check` before exporting: it lists every hard cut whose audio is loud right at the join (usually a clipped word or a click) and writes a contact sheet (`--sheet out.jpg`) with the outgoing clip's last frame and the incoming clip's first for each cut. Open the sheet to see the jumps. A flagged cut is a reason to trim or move that boundary, not a verdict.
 
+To read what's said in a clip, run `timeline transcribe <clipId>`: it returns the clip's words with their timeline times, so you can find a sentence before cutting around it. Transcription is optional and runs a local whisper.cpp; if it isn't set up, the command says how (install whisper.cpp, download a model, set `MAKEMYCLIP_WHISPER_MODEL`). The first run per source file takes a while; later runs reuse the stored transcript. Whisper tends to leave out filler words like "um", so don't rely on the transcript to find them.
+
 ### Open the local UI (implemented)
 
 ```bash

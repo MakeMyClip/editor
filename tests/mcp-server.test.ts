@@ -57,6 +57,7 @@ describe('MCP server', () => {
         'timeline_export',
         'timeline_redo',
         'timeline_show',
+        'timeline_transcript',
         'timeline_undo',
       ]);
     } finally {
