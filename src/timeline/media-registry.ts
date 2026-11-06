@@ -15,12 +15,14 @@ export async function buildMediaMap(): Promise<Map<MediaId, MediaInfo>> {
     if (entry.tool !== 'ingest') continue;
     const result = entry.result as {
       mediaId?: unknown;
-      ref?: { path?: unknown; audio?: unknown };
+      ref?: { path?: unknown; audio?: unknown; video?: unknown };
     };
     const mediaId = result.mediaId;
     const path = result.ref?.path;
     if (typeof mediaId === 'string' && typeof path === 'string') {
-      map.set(mediaId as MediaId, { path, hasAudio: result.ref?.audio != null });
+      // An entry without a `video` key leaves video presence unknown.
+      const hasVideo = result.ref && 'video' in result.ref ? result.ref.video != null : undefined;
+      map.set(mediaId as MediaId, { path, hasAudio: result.ref?.audio != null, hasVideo });
     }
   }
   return map;

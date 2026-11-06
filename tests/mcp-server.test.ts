@@ -52,6 +52,7 @@ describe('MCP server', () => {
     try {
       const { tools } = await client.listTools();
       expect(tools.map((t) => t.name).sort()).toEqual([
+        'timeline_check',
         'timeline_edit',
         'timeline_export',
         'timeline_redo',

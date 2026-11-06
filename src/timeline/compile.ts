@@ -40,6 +40,8 @@ import type { MediaId } from './schema.js';
 export interface MediaInfo {
   path: string;
   hasAudio: boolean;
+  /** Whether the source has a video stream; unknown (undefined) counts as yes. */
+  hasVideo?: boolean;
 }
 
 export interface CompileContext {

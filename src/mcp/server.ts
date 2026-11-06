@@ -1,10 +1,17 @@
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { readFile, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { CompileError, checkExportable, compileTimeline } from '../timeline/compile.js';
+import {
+  buildFrameAtPlan,
+  CompileError,
+  checkExportable,
+  compileTimeline,
+} from '../timeline/compile.js';
 import type { Composition } from '../timeline/composition.js';
 import {
   applyVerbs,
@@ -13,10 +20,12 @@ import {
   undoLastDocOp,
 } from '../timeline/document-store.js';
 import { buildMediaMap } from '../timeline/media-registry.js';
+import { reviewCuts } from '../timeline/review.js';
 import { runPlan } from '../timeline/run-plan.js';
 import { EditableVerbSchema } from '../timeline/verbs.js';
 import {
   type CompositionSummary,
+  confinedMediaMap,
   makeVerbContext,
   summarizeComposition,
 } from '../ui/timeline-tools.js';
@@ -59,6 +68,13 @@ function jsonResult(value: unknown): { content: { type: 'text'; text: string }[]
   return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
 }
 
+/** A JPEG on disk as MCP image content, so the client's model can look at it. */
+async function jpegContent(
+  path: string,
+): Promise<{ type: 'image'; data: string; mimeType: 'image/jpeg' }> {
+  return { type: 'image', data: (await readFile(path)).toString('base64'), mimeType: 'image/jpeg' };
+}
+
 /**
  * The document summary plus whether it can render — the SAME renderability signal
  * the CLI `timeline show` and the `clip ui` give, so the MCP agent isn't blind to
@@ -87,9 +103,70 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Show the timeline',
       description:
-        'Read the current timeline document — tracks, clips, timings, and whether it can render (exportable + any blockers). Call this to ground yourself BEFORE editing and to VERIFY a change AFTER.',
+        'Read the current timeline document — tracks, clips, timings, and whether it can render (exportable + any blockers). Pass atSec to also get the rendered frame at that time as an image. Call this to ground yourself BEFORE editing and to VERIFY a change AFTER.',
+      inputSchema: {
+        atSec: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe(
+            'Also return the frame export would render at this timeline time, as an image.',
+          ),
+      },
     },
-    async () => jsonResult(await describeComposition(await readComposition())),
+    async ({ atSec }) => {
+      const comp = await readComposition();
+      const summary = jsonResult(await describeComposition(comp));
+      if (atSec === undefined) return summary;
+      const output = newOutputPath('mcp-frame', 'jpg');
+      try {
+        const plan = buildFrameAtPlan(
+          comp,
+          {
+            media: await confinedMediaMap(comp),
+            dir: getWorkspace(),
+            output,
+            tag: `mcp${randomBytes(4).toString('hex')}`,
+          },
+          atSec,
+        );
+        await runPlan(plan);
+        return { content: [...summary.content, await jpegContent(output)] };
+      } catch (err) {
+        if (!(err instanceof CompileError)) throw err;
+        const frameError = {
+          type: 'text' as const,
+          text: JSON.stringify({ frameError: err.message }),
+        };
+        return { content: [...summary.content, frameError] };
+      } finally {
+        await unlink(output).catch(() => undefined);
+      }
+    },
+  );
+
+  server.registerTool(
+    'timeline_check',
+    {
+      title: 'Check the cuts',
+      description:
+        "Review every hard cut (abutting clips with no transition). Reports cuts whose audio is loud right at the edge, which usually means a clipped word or a click, and returns a contact sheet image: one row per cut, the outgoing clip's last frame then the incoming clip's first. Run it after cutting (e.g. remove_silence) and before exporting.",
+    },
+    async () => {
+      const comp = await readComposition();
+      const media = await confinedMediaMap(comp);
+      const output = newOutputPath('cut-sheet', 'jpg');
+      try {
+        const { sheet, ...review } = await reviewCuts(comp, media, output, getWorkspace());
+        const summary = jsonResult({
+          ...review,
+          sheet: sheet ? { cuts: sheet.cuts, truncated: sheet.truncated } : null,
+        });
+        return sheet ? { content: [...summary.content, await jpegContent(sheet.path)] } : summary;
+      } finally {
+        await unlink(output).catch(() => undefined);
+      }
+    },
   );
 
   server.registerTool(
