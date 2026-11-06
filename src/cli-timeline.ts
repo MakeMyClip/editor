@@ -22,6 +22,7 @@ import { colorClip, mediaClip, textClip } from './timeline/ops.js';
 import { reviewCuts } from './timeline/review.js';
 import { runPlan } from './timeline/run-plan.js';
 import { analyzeSilence, DEFAULT_SENSITIVITY, SensitivitySchema } from './timeline/silence.js';
+import { transcribeClip } from './timeline/transcript.js';
 import { DEFAULT_VERB_TRACK as DEFAULT_TRACK, ensureTrack, trackEnd } from './timeline/verbs.js';
 import { ingest } from './tools/ingest.js';
 import { getWorkspace, newOutputPath, resolveInput } from './workspace.js';
@@ -39,6 +40,7 @@ const TIMELINE_HELP = `clip timeline — build and export a non-destructive comp
   clip timeline remove <clipId>
   clip timeline silence <clipId> [--sensitivity 0..1] [--dry-run]
   clip timeline check [--sheet <output.jpg>]
+  clip timeline transcribe <clipId> [--model <model.bin>] [--language <code>]
   clip timeline show
   clip timeline at <atSec>
   clip timeline frame <atSec> [<output>]
@@ -287,6 +289,23 @@ export async function runTimeline(args: string[]): Promise<void> {
       const media = await buildMediaMap();
       const sheetPath = flags.sheet ? resolveInput(flags.sheet) : newOutputPath('cut-sheet', 'jpg');
       out(await reviewCuts(comp, media, sheetPath, getWorkspace()));
+      return;
+    }
+
+    case 'transcribe': {
+      const [clipId] = positional;
+      if (!clipId) {
+        throw new Error(
+          'Usage: clip timeline transcribe <clipId> [--model <model.bin>] [--language <code>]',
+        );
+      }
+      const comp = await readComposition();
+      out(
+        await transcribeClip(comp, clipId, await buildMediaMap(), {
+          model: flags.model ? resolveInput(flags.model) : undefined,
+          language: flags.language || undefined,
+        }),
+      );
       return;
     }
 

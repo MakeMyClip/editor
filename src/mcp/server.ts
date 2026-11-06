@@ -22,7 +22,9 @@ import {
 import { buildMediaMap } from '../timeline/media-registry.js';
 import { reviewCuts } from '../timeline/review.js';
 import { runPlan } from '../timeline/run-plan.js';
+import { transcribeClip } from '../timeline/transcript.js';
 import { EditableVerbSchema } from '../timeline/verbs.js';
+import { WhisperLanguageSchema } from '../transcribe/whisper.js';
 import {
   type CompositionSummary,
   confinedMediaMap,
@@ -180,6 +182,25 @@ export function buildMcpServer(): McpServer {
     async ({ verbs }) => {
       const { doc, ops } = await applyVerbs(verbs, makeVerbContext());
       return jsonResult({ applied: ops.length, document: await describeComposition(doc) });
+    },
+  );
+
+  server.registerTool(
+    'timeline_transcript',
+    {
+      title: 'Transcribe a clip',
+      description:
+        "Transcribe a media clip's speech with the local whisper.cpp and return its words with timeline times. Optional feature: if whisper.cpp or a model isn't set up, the error says how. The first call per source file takes a while; later calls reuse the stored transcript. A word's `index` is stable for its source file.",
+      inputSchema: {
+        clipId: z.string().describe('Media clip to transcribe.'),
+        language: WhisperLanguageSchema.optional(),
+      },
+    },
+    async ({ clipId, language }) => {
+      const comp = await readComposition();
+      return jsonResult(
+        await transcribeClip(comp, clipId, await confinedMediaMap(comp), { language }),
+      );
     },
   );
 
