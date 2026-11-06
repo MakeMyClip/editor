@@ -11,6 +11,7 @@ import {
   applyOp,
   applyOps,
   CompositionOpError,
+  colorClip,
   mediaClip,
   textClip,
   videoTrack,
@@ -300,7 +301,7 @@ describe('planSilenceCut', () => {
         {
           op: 'addClip',
           trackId: 'v1',
-          clip: textClip({ id: 't', text: 'x', durationSec: 1, startSec: 0 }),
+          clip: colorClip({ id: 't', durationSec: 1, startSec: 0 }),
         },
       ]);
       const cut = planSilenceCut(twoTracks, 'c1', shortSound, { media: MEDIA, mintId: counter() });

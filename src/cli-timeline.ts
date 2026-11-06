@@ -1,6 +1,8 @@
 import { appendOp } from './session/store.js';
+import { CaptionError, DEFAULT_CAPTION_WORDS, planCaptions } from './timeline/captions.js';
 import { buildFrameAtPlan, checkExportable, compileTimeline } from './timeline/compile.js';
 import {
+  AnchorSchema,
   type Clip,
   clipDuration,
   clipEndSec,
@@ -8,6 +10,7 @@ import {
   compositionDuration,
   emptyComposition,
   makeClipId,
+  type TextStyle,
 } from './timeline/composition.js';
 import {
   mutateComposition,
@@ -49,6 +52,7 @@ const TIMELINE_HELP = `clip timeline — build and export a non-destructive comp
   clip timeline transcribe <clipId> [--model <model.bin>] [--language <code>]
   clip timeline cut-words <clipId> <fromIndex> <toIndex> [--transcript <id>]
   clip timeline remove-retakes <clipId> [--dry-run] [--transcript <id>]
+  clip timeline captions [<clipId>] [--words N] [--track T] [--font N --color C --anchor A --background C|none] [--dry-run]
   clip timeline show
   clip timeline at <atSec>
   clip timeline frame <atSec> [<output>]
@@ -351,6 +355,44 @@ export async function runTimeline(args: string[]): Promise<void> {
       // The transcript was read outside the write lock; reject if the doc moved since.
       const doc = await mutateComposition([op], { expectedBaseRev: comp.rev });
       out({ clipId, applied: true, ranges, rev: doc.rev });
+      return;
+    }
+
+    case 'captions': {
+      const [clipId] = positional;
+      const maxWords = num(flags.words, DEFAULT_CAPTION_WORDS);
+      if (!Number.isInteger(maxWords) || maxWords < 1 || maxWords > 12) {
+        throw new CaptionError(
+          `--words must be a whole number from 1 to 12, got "${flags.words}".`,
+        );
+      }
+      const style: Partial<TextStyle> = {};
+      if (flags.font) style.fontSize = num(flags.font, 48);
+      if (flags.color) style.color = flags.color;
+      if (flags.background)
+        style.background = flags.background === 'none' ? null : flags.background;
+      if (flags.anchor) style.anchor = AnchorSchema.parse(flags.anchor);
+      const comp = await readComposition();
+      const media = await buildMediaMap();
+      const plan = await planCaptions(
+        comp,
+        {
+          clipId,
+          transcriptId: flags.transcript || undefined,
+          maxWords,
+          track: flags.track,
+          style,
+        },
+        (id, transcriptId) => storedTranscriptForClip(comp, id, media, transcriptId),
+      );
+      const report = { captions: plan.captions, clipIds: plan.clipIds, track: plan.track };
+      if (flags['dry-run'] || plan.ops.length === 0) {
+        out({ ...report, applied: false, ...(flags['dry-run'] ? { dryRun: true } : {}) });
+        return;
+      }
+      // The transcripts were read outside the write lock; reject if the doc moved since.
+      const doc = await mutateComposition(plan.ops, { expectedBaseRev: comp.rev });
+      out({ ...report, applied: true, rev: doc.rev });
       return;
     }
 

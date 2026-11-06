@@ -2,12 +2,14 @@ import { resolve } from 'node:path';
 import { buildPreviewFrameArgs } from '../ffmpeg/args/preview.js';
 import { buildTransitionArgs } from '../ffmpeg/args/transition.js';
 import { quoteFilterArg } from '../ffmpeg/escape.js';
+import { fontFileFor, MissingFontError } from '../ffmpeg/font.js';
 import {
   type Clip,
   type Composition,
   clipDuration,
   clipEndSec,
   type Effect,
+  type TextClip,
   type Track,
 } from './composition.js';
 import type { MediaId } from './schema.js';
@@ -25,10 +27,17 @@ import type { MediaId } from './schema.js';
  * the result is a plan of arg arrays a runner executes. That makes it testable
  * exactly like the other arg-builders — assert the args, no FFmpeg in CI.
  *
- * v1 scope is a single video-track sequence of abutting clips. Constructs that
- * need true compositing — multiple populated video/audio tracks, a non-identity
- * per-clip transform, chromaKey (which needs a background layer), or timeline
- * gaps/overlaps — throw a clear `CompileError` rather than emitting a wrong graph.
+ * v1 scope is a single video-track sequence of abutting clips, plus text-only
+ * tracks above it (captions, titles over the picture), which each segment burns
+ * in for the stretch of timeline it covers. Constructs that need true
+ * compositing — a second track of media/color clips, audio tracks, a
+ * non-identity per-clip transform, chromaKey (which needs a background layer),
+ * or gaps/overlaps on the picture track — throw a clear `CompileError` rather
+ * than emitting a wrong graph.
+ *
+ * Text outside Latin is drawn with a font file that has its glyphs (see
+ * `ffmpeg/font.ts`); that lookup reads font files, once per process, unless the
+ * context supplies `fontFor`.
  *
  * Transition boundaries own their blend: a per-clip fadeOut/fadeIn on the SAME
  * cut as a transition is dropped during segment normalization (see the
@@ -59,6 +68,9 @@ export interface CompileContext {
    * one per frame request) gives the preview its own collision-free paths.
    */
   tag?: string;
+  /** Font file for a text, or undefined for FFmpeg's default font; throws
+   *  `MissingFontError` when none has its glyphs. Defaults to `fontFileFor`. */
+  fontFor?: (text: string) => string | undefined;
 }
 
 /** A side file (concat list / drawtext text) the runner must write before
@@ -115,26 +127,69 @@ export function speedFactor(effects: Effect[]): number {
   return effects.reduce((f, e) => (e.type === 'speed' ? f * e.factor : f), 1);
 }
 
-/** The single video track to export, with v1's "no compositing yet" guards. */
-function selectVideoTrack(comp: Composition): Track {
-  const populatedVideo = comp.tracks.filter((t) => t.kind === 'video' && t.clips.length > 0);
+const isTextOnly = (track: Track): boolean => track.clips.every((c) => c.kind === 'text');
+
+/**
+ * Split the populated video tracks into the picture track (the one holding
+ * media/color clips, else the lowest) and the text-only tracks drawn over it.
+ * Pure and non-throwing, so the cut review can skip text tracks too: caption
+ * boundaries aren't cuts.
+ */
+export function videoLayers(comp: Composition): { picture: Track | undefined; overlays: Track[] } {
+  const populated = comp.tracks.filter((t) => t.kind === 'video' && t.clips.length > 0);
+  const withPicture = populated.filter((t) => !isTextOnly(t));
+  const picture = withPicture.length > 1 ? undefined : (withPicture[0] ?? populated[0]);
+  return { picture, overlays: populated.filter((t) => t !== picture && isTextOnly(t)) };
+}
+
+/** The picture track to export and the text clips drawn over it, with v1's
+ *  "no compositing yet" guards. */
+function selectLayers(comp: Composition): { track: Track; overlays: TextClip[] } {
   const populatedAudio = comp.tracks.filter((t) => t.kind === 'audio' && t.clips.length > 0);
   if (populatedAudio.length > 0) {
     throw new CompileError(
       'Separate audio tracks are not supported in export yet — audio comes from the video clips. Move audio onto the video track or remove the audio track.',
     );
   }
-  if (populatedVideo.length === 0) {
+  if (!comp.tracks.some((t) => t.kind === 'video' && t.clips.length > 0)) {
     throw new CompileError('Nothing to export: no video track has clips.');
   }
-  if (populatedVideo.length > 1) {
+  const { picture: track, overlays } = videoLayers(comp);
+  if (!track) {
     throw new CompileError(
-      'Multi-track overlay export is not supported yet — flatten to a single video track first.',
+      'Multi-track overlay export is not supported yet — flatten to a single video track first (only text can sit on a track above it).',
     );
   }
-  const track = populatedVideo[0];
-  if (!track) throw new CompileError('Nothing to export: no video track has clips.');
-  return track;
+  const pictureIndex = comp.tracks.indexOf(track);
+  const clips: TextClip[] = [];
+  for (const overlay of overlays) {
+    if (comp.tracks.indexOf(overlay) < pictureIndex) {
+      throw new CompileError(
+        `Text track "${overlay.id}" is under track "${track.id}", so the picture would hide it. ` +
+          'Put the text on a track above it.',
+      );
+    }
+    for (const clip of overlay.clips) {
+      if (clip.kind !== 'text') continue;
+      assertCompilable(clip);
+      if (clip.effects.length > 0) {
+        throw new CompileError(
+          `Text clip "${clip.id}" over the picture has effects, which export can't draw over video yet. Remove them.`,
+        );
+      }
+      clips.push(clip);
+    }
+  }
+  const end = track.clips.reduce((max, c) => Math.max(max, clipEndSec(c)), 0);
+  const late = clips.find((c) => clipEndSec(c) > end + ABUT_EPSILON);
+  if (late) {
+    throw new CompileError(
+      `Text clip "${late.id}" runs to ${clipEndSec(late).toFixed(3)}s, past the end of the picture ` +
+        `(${end.toFixed(3)}s), where there is nothing to draw it over. Trim or remove it ` +
+        '(after cutting a captioned clip, make the captions again).',
+    );
+  }
+  return { track, overlays: clips.sort((a, b) => a.startSec - b.startSec) };
 }
 
 function assertCompilable(clip: Clip): void {
@@ -257,12 +312,15 @@ function segPath(dir: string, index: number, clipId: string, tag?: string): stri
  * Normalize one clip to a self-contained segment: canvas-sized video at the
  * composition fps, effects baked in, and a guaranteed stereo AAC audio track
  * (the source's, or generated silence) so the fold can always join segments.
+ * Text clips from the tracks above that overlap the clip are drawn last, over
+ * its effects, for the part of them inside it.
  */
 function buildSegmentStep(
   comp: Composition,
   clip: Clip,
   index: number,
   ctx: CompileContext,
+  overlays: TextClip[],
   fadeSuppress: FadeSuppression = { in: false, out: false },
 ): FfmpegStep {
   assertCompilable(clip);
@@ -327,7 +385,24 @@ function buildSegmentStep(
     audioSource = '1:a';
     const textfile = resolve(ctx.dir, `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}.txt`);
     textFiles.push({ path: textfile, content: clip.text });
-    fx.unshift(drawtextFilter(textfile, clip.style));
+    fx.unshift(drawtextFilter(textfile, clip, fontFor(ctx, clip)));
+  }
+
+  // Overlay times are timeline seconds; the segment runs in output time, which
+  // a speed effect scales.
+  const ratio = clipDuration(clip) > 0 ? outDur / clipDuration(clip) : 1;
+  const end = clipEndSec(clip);
+  for (const overlay of overlays) {
+    const from = Math.max(overlay.startSec, clip.startSec);
+    const to = Math.min(clipEndSec(overlay), end);
+    if (to - from <= ABUT_EPSILON) continue;
+    const textfile = resolve(
+      ctx.dir,
+      `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}-${overlay.id}.txt`,
+    );
+    textFiles.push({ path: textfile, content: overlay.text });
+    const window = `gte(t,${seconds((from - clip.startSec) * ratio)})*lt(t,${seconds((to - clip.startSec) * ratio)})`;
+    fx.push(drawtextFilter(textfile, overlay, fontFor(ctx, overlay), window));
   }
 
   // Geometry first: fit to canvas, pad, square pixels, lock fps. (No-op-ish for
@@ -372,21 +447,45 @@ function buildSegmentStep(
 
 const CENTER_POS = { x: '(w-text_w)/2', y: '(h-text_h)/2' };
 
+/** Seconds for a filter expression: millisecond precision, no float noise. */
+function seconds(sec: number): string {
+  return String(Math.round(sec * 1000) / 1000);
+}
+
+/** The font file for a text clip, with a missing font reported against the clip. */
+function fontFor(ctx: CompileContext, clip: TextClip): string | undefined {
+  try {
+    return (ctx.fontFor ?? fontFileFor)(clip.text);
+  } catch (err) {
+    if (err instanceof MissingFontError)
+      throw new CompileError(`Text clip "${clip.id}": ${err.message}`);
+    throw err;
+  }
+}
+
+/** drawtext for a text clip; `enable` limits it to a window of the segment.
+ *  `expansion=none`: spoken text like "50%" must not read as a % sequence. */
 function drawtextFilter(
   textfile: string,
-  style: { fontSize: number; color: string; background: string | null; anchor: string },
+  clip: TextClip,
+  fontFile: string | undefined,
+  enable?: string,
 ): string {
+  const { style } = clip;
   const pos = ANCHOR_EXPR[style.anchor] ?? CENTER_POS;
-  const opts = [
-    `textfile=${quoteFilterArg(textfile)}`,
+  const opts = [`textfile=${quoteFilterArg(textfile)}`];
+  if (fontFile) opts.push(`fontfile=${quoteFilterArg(fontFile)}`);
+  opts.push(
+    'expansion=none',
     `fontsize=${style.fontSize}`,
     `fontcolor=${quoteFilterArg(style.color)}`,
     `x=${quoteFilterArg(pos.x)}`,
     `y=${quoteFilterArg(pos.y)}`,
-  ];
+  );
   if (style.background) {
     opts.push('box=1', `boxcolor=${quoteFilterArg(style.background)}`, 'boxborderw=12');
   }
+  if (enable) opts.push(`enable=${quoteFilterArg(enable)}`);
   return `drawtext=${opts.join(':')}`;
 }
 
@@ -479,7 +578,7 @@ export function buildFrameAtPlan(
   atSec: number,
 ): FfmpegPlan {
   if (atSec < 0) throw new CompileError(`Frame time ${atSec}s is before the timeline start.`);
-  const track = selectVideoTrack(comp);
+  const { track, overlays } = selectLayers(comp);
   const clips = [...track.clips].sort((a, b) => a.startSec - b.startSec);
   // Fail the way export does on an unexportable doc, so the preview tells the
   // truth instead of silently picking one of several overlapping clips.
@@ -497,7 +596,7 @@ export function buildFrameAtPlan(
   assertCompilable(clip);
 
   // Encode the clip's segment exactly as export would, then extract the frame.
-  const segStep = buildSegmentStep(comp, clip, index, ctx);
+  const segStep = buildSegmentStep(comp, clip, index, ctx, overlays);
 
   // Map doc-local time to the post-speed SEGMENT timebase. The ratio is 1 unless
   // the clip carries a speed effect, which shortens the segment relative to the
@@ -541,7 +640,7 @@ export function checkExportable(
 }
 
 export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegPlan {
-  const track = selectVideoTrack(comp);
+  const { track, overlays } = selectLayers(comp);
   const clips = [...track.clips].sort((a, b) => a.startSec - b.startSec);
   const transitionAfter = new Map(track.transitions.map((t) => [t.afterClipId, t]));
 
@@ -562,7 +661,7 @@ export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegP
       in: prevClip ? transitionAfter.has(prevClip.id) : false,
       out: i < clips.length - 1 && transitionAfter.has(clip.id),
     };
-    const step = buildSegmentStep(comp, clip, i, ctx, fadeSuppress);
+    const step = buildSegmentStep(comp, clip, i, ctx, overlays, fadeSuppress);
     steps.push(step);
     return { clip, output: step.output, durationSec: outputDuration(clip) };
   });

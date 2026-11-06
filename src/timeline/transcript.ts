@@ -57,6 +57,14 @@ export class TranscriptError extends Error {
   }
 }
 
+/** Thrown when a clip's source hasn't been transcribed yet. */
+export class NoTranscriptError extends TranscriptError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NoTranscriptError';
+  }
+}
+
 export interface TranscribeOptions {
   /** Model file; defaults to `MAKEMYCLIP_WHISPER_MODEL`. */
   model?: string;
@@ -235,7 +243,7 @@ export async function storedTranscriptForClip(
   const { clip, info } = locateMediaClip(comp, clipId, media);
   const transcript = await readTranscript(transcriptPath(clip.mediaId));
   if (!transcript) {
-    throw new TranscriptError(
+    throw new NoTranscriptError(
       `Clip "${clipId}" has no transcript yet. Transcribe it first (\`clip timeline transcribe\` or timeline_transcript).`,
     );
   }

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_CAPTION_TRACK, DEFAULT_CAPTION_WORDS, planCaptions } from './captions.js';
 import type { MediaInfo } from './compile.js';
 import {
   AnchorSchema,
@@ -6,6 +7,7 @@ import {
   clipEndSec,
   type MediaClip,
   makeClipId,
+  type TextStyle,
   TransitionKindSchema,
 } from './composition.js';
 import { applyOps, type CompositionOp, colorClip, mediaClip, textClip, videoTrack } from './ops.js';
@@ -158,6 +160,42 @@ const EDITABLE_VERB_SCHEMAS = [
       .string()
       .optional()
       .describe('Optional `transcriptId` the retakes were read from; refused if it changed.'),
+  }),
+  z.object({
+    verb: z.literal('caption_speech'),
+    clipId: z
+      .string()
+      .optional()
+      .describe(
+        'Media clip to caption. Default: every media clip whose source has a transcript, replacing the whole caption track.',
+      ),
+    transcriptId: z
+      .string()
+      .optional()
+      .describe(
+        'Optional `transcriptId` (with clipId) the words were read from; refused if it changed.',
+      ),
+    maxWords: z
+      .number()
+      .int()
+      .min(1)
+      .max(12)
+      .optional()
+      .describe(
+        `Most words per caption (default ${DEFAULT_CAPTION_WORDS}); 1 shows one word at a time. A pause or a sentence end also starts a new caption.`,
+      ),
+    track: z
+      .string()
+      .optional()
+      .describe(`Caption track id (default "${DEFAULT_CAPTION_TRACK}"), kept above the video.`),
+    fontSize: z.number().int().positive().optional(),
+    color: z.string().optional().describe('Text color (default white).'),
+    background: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Box color behind the text (default black@0.6), or null for none.'),
+    anchor: AnchorSchema.optional().describe('Where captions sit (default bottom-center).'),
   }),
   z.object({
     verb: z.literal('transition'),
@@ -347,6 +385,25 @@ export async function lowerVerb(
         media,
       });
       return op ? [op] : [];
+    }
+    case 'caption_speech': {
+      const style: Partial<TextStyle> = {};
+      if (verb.fontSize !== undefined) style.fontSize = verb.fontSize;
+      if (verb.color !== undefined) style.color = verb.color;
+      if (verb.background !== undefined) style.background = verb.background;
+      if (verb.anchor !== undefined) style.anchor = verb.anchor;
+      const plan = await planCaptions(
+        comp,
+        {
+          clipId: verb.clipId,
+          transcriptId: verb.transcriptId,
+          maxWords: verb.maxWords,
+          track: verb.track,
+          style,
+        },
+        (clipId, transcriptId) => ctx.transcript(comp, clipId, transcriptId),
+      );
+      return plan.ops;
     }
     case 'transition':
       return [
