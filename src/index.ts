@@ -161,6 +161,8 @@ export {
   colorClip,
   invertOp,
   mediaClip,
+  type SourceRange,
+  SourceRangeSchema,
   type TrackedApply,
   textClip,
   videoTrack,
@@ -177,6 +179,16 @@ export {
   TimecodeSchema,
   VideoStreamSchema,
 } from './timeline/schema.js';
+export {
+  analyzeSilence,
+  DEFAULT_SENSITIVITY,
+  planSilenceCut,
+  SensitivitySchema,
+  type SilenceAnalysisContext,
+  SilenceAnalysisError,
+  type SilenceCut,
+  sensitivityToDetect,
+} from './timeline/silence.js';
 export {
   type CompositionVerb,
   type CompositionVerbKind,

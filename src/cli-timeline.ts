@@ -20,6 +20,7 @@ import {
 import { buildMediaMap } from './timeline/media-registry.js';
 import { colorClip, mediaClip, textClip } from './timeline/ops.js';
 import { runPlan } from './timeline/run-plan.js';
+import { analyzeSilence, DEFAULT_SENSITIVITY, SensitivitySchema } from './timeline/silence.js';
 import { DEFAULT_VERB_TRACK as DEFAULT_TRACK, ensureTrack, trackEnd } from './timeline/verbs.js';
 import { ingest } from './tools/ingest.js';
 import { getWorkspace, newOutputPath, resolveInput } from './workspace.js';
@@ -35,6 +36,7 @@ const TIMELINE_HELP = `clip timeline — build and export a non-destructive comp
   clip timeline move <clipId> <startSec> [--track T]
   clip timeline split <clipId> <atSec>
   clip timeline remove <clipId>
+  clip timeline silence <clipId> [--sensitivity 0..1] [--dry-run]
   clip timeline show
   clip timeline at <atSec>
   clip timeline frame <atSec> [<output>]
@@ -49,12 +51,17 @@ interface Parsed {
   flags: Record<string, string>;
 }
 
+/** Flags that take no value, so they don't swallow the next argument. */
+const BOOLEAN_FLAGS = new Set(['dry-run']);
+
 function parseArgs(args: string[]): Parsed {
   const positional: string[] = [];
   const flags: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
     const a = args[i] ?? '';
-    if (a.startsWith('--')) {
+    if (a.startsWith('--') && BOOLEAN_FLAGS.has(a.slice(2))) {
+      flags[a.slice(2)] = 'true';
+    } else if (a.startsWith('--')) {
       flags[a.slice(2)] = args[i + 1] ?? '';
       i++;
     } else {
@@ -237,6 +244,39 @@ export async function runTimeline(args: string[]): Promise<void> {
       if (!clipId) throw new Error('Usage: clip timeline remove <clipId>');
       await mutateComposition([{ op: 'removeClip', clipId }]);
       out({ removed: clipId });
+      return;
+    }
+
+    case 'silence': {
+      const [clipId] = positional;
+      if (!clipId) {
+        throw new Error('Usage: clip timeline silence <clipId> [--sensitivity 0..1] [--dry-run]');
+      }
+      const parsed = SensitivitySchema.safeParse(num(flags.sensitivity, DEFAULT_SENSITIVITY));
+      if (!parsed.success) {
+        throw new Error(`--sensitivity must be between 0 and 1, got "${flags.sensitivity}".`);
+      }
+      const sensitivity = parsed.data;
+      const comp = await readComposition();
+      const cut = await analyzeSilence(comp, clipId, { media: await buildMediaMap(), sensitivity });
+      const report = {
+        clipId,
+        sensitivity,
+        silenceCount: cut.silenceCount,
+        removedSec: cut.removedSec,
+        keepRegions: cut.keepRegions,
+      };
+      if (cut.op?.op !== 'silenceCut') {
+        out({ ...report, applied: false, message: 'No silence to remove at this sensitivity.' });
+        return;
+      }
+      if (flags['dry-run']) {
+        out({ ...report, applied: false, dryRun: true });
+        return;
+      }
+      // Analysis read `comp` outside the write lock; reject if the doc moved since.
+      const doc = await mutateComposition([cut.op], { expectedBaseRev: comp.rev });
+      out({ ...report, applied: true, clipIds: [clipId, ...cut.op.newClipIds], rev: doc.rev });
       return;
     }
 

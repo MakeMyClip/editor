@@ -6,6 +6,8 @@ import {
   ColorClipSchema,
   type Composition,
   CompositionSchema,
+  clipDuration,
+  clipEndSec,
   type Effect,
   EffectSchema,
   type MediaClip,
@@ -23,6 +25,13 @@ import {
   TransitionSchema,
 } from './composition.js';
 import type { MediaId } from './schema.js';
+
+/** A window of a media clip's source, in source seconds. */
+export const SourceRangeSchema = z.object({
+  sourceInSec: z.number().nonnegative(),
+  sourceOutSec: z.number().positive(),
+});
+export type SourceRange = z.infer<typeof SourceRangeSchema>;
 
 /**
  * Declarative, reversible-by-history edit operations on a CompositionDoc. The
@@ -43,6 +52,7 @@ export type CompositionOp =
   | { op: 'setTrim'; clipId: string; sourceInSec?: number; sourceOutSec?: number }
   | { op: 'setDuration'; clipId: string; durationSec: number }
   | { op: 'splitClip'; clipId: string; atSec: number; newClipId: string }
+  | { op: 'silenceCut'; clipId: string; keepRegions: SourceRange[]; newClipIds: string[] }
   | { op: 'addEffect'; clipId: string; effect: Effect; index?: number }
   | { op: 'removeEffect'; clipId: string; index: number }
   | { op: 'setTransform'; clipId: string; transform: Partial<Transform> }
@@ -106,6 +116,12 @@ export const CompositionOpSchema = z.discriminatedUnion('op', [
     clipId: z.string(),
     atSec: z.number(),
     newClipId: z.string(),
+  }),
+  z.object({
+    op: z.literal('silenceCut'),
+    clipId: z.string(),
+    keepRegions: z.array(SourceRangeSchema).min(1),
+    newClipIds: z.array(z.string().min(1)),
   }),
   z.object({
     op: z.literal('addEffect'),
@@ -261,6 +277,10 @@ export function applyOp(comp: Composition, op: CompositionOp): Composition {
     }
     case 'splitClip': {
       splitClipInDraft(draft, op.clipId, op.atSec, op.newClipId);
+      break;
+    }
+    case 'silenceCut': {
+      silenceCutInDraft(draft, op.clipId, op.keepRegions, op.newClipIds);
       break;
     }
     case 'addEffect': {
@@ -457,6 +477,26 @@ export function invertOp(comp: Composition, op: CompositionOp): CompositionOp[] 
       }
       return inverse;
     }
+    case 'silenceCut': {
+      const { track, clip } = locateClip(comp, op.clipId);
+      if (clip.kind !== 'media') return []; // applyOp will reject.
+      // Drop every sub-clip (the last one carries the re-homed transition), put
+      // the original clip back whole, then its transition, then undo the ripple.
+      const inverse: CompositionOp[] = [
+        ...op.newClipIds.map((clipId): CompositionOp => ({ op: 'removeClip', clipId })),
+        { op: 'removeClip', clipId: op.clipId },
+        { op: 'addClip', trackId: track.id, clip: structuredClone(clip) },
+      ];
+      for (const t of track.transitions) {
+        if (t.afterClipId === op.clipId) {
+          inverse.push({ op: 'addTransition', trackId: track.id, transition: structuredClone(t) });
+        }
+      }
+      for (const later of clipsAfter(track, clip)) {
+        inverse.push({ op: 'moveClip', clipId: later.id, startSec: later.startSec });
+      }
+      return inverse;
+    }
     case 'addEffect': {
       const { clip } = locateClip(comp, op.clipId);
       const at =
@@ -595,6 +635,94 @@ function splitClipInDraft(
   }
 
   track.clips.splice(index + 1, 0, second);
+  sortClips(track);
+}
+
+/** Same tolerance as the export compiler's abut check: a clip that starts
+ *  within this of another's end counts as following it. */
+const RIPPLE_EPSILON = 1e-4;
+
+/** Clips on `track` that start at or after `clip` ends — the ones a silence
+ *  cut ripples left. Shared by the reducer and `invertOp` so undo moves back
+ *  exactly the clips the cut moved. */
+function clipsAfter(track: Track, clip: Clip): Clip[] {
+  const end = clipEndSec(clip);
+  return track.clips.filter((c) => c.id !== clip.id && c.startSec >= end - RIPPLE_EPSILON);
+}
+
+/**
+ * Replace a media clip with one sub-clip per kept source window, packed back to
+ * back from the clip's start, and ripple the rest of the track left by the time
+ * removed so it still abuts. The first sub-clip keeps the original id. The clip's
+ * transform and effects carry over, except a fadeIn stays on the first sub-clip
+ * and a fadeOut on the last, and a transition after the clip moves to the last.
+ * Other tracks are not shifted.
+ */
+function silenceCutInDraft(
+  comp: Composition,
+  clipId: string,
+  keepRegions: SourceRange[],
+  newClipIds: string[],
+): void {
+  const { track, index, clip } = locateClip(comp, clipId);
+  if (clip.kind !== 'media') {
+    throw new CompositionOpError(`silenceCut only applies to media clips, not "${clip.kind}".`);
+  }
+  if (keepRegions.length === 0) {
+    throw new CompositionOpError('silenceCut needs at least one region to keep.');
+  }
+  if (newClipIds.length !== keepRegions.length - 1) {
+    throw new CompositionOpError(
+      `silenceCut needs ${keepRegions.length - 1} new clip id(s) — one per kept region after the first — got ${newClipIds.length}.`,
+    );
+  }
+  let prevOut = clip.sourceInSec;
+  for (const r of keepRegions) {
+    if (
+      r.sourceInSec < prevOut ||
+      r.sourceOutSec <= r.sourceInSec ||
+      r.sourceOutSec > clip.sourceOutSec
+    ) {
+      throw new CompositionOpError(
+        `silenceCut regions must be ascending, non-overlapping, non-empty windows inside clip "${clipId}"'s source range (${clip.sourceInSec}..${clip.sourceOutSec}).`,
+      );
+    }
+    prevOut = r.sourceOutSec;
+  }
+  if (new Set([clipId, ...newClipIds]).size !== newClipIds.length + 1) {
+    throw new CompositionOpError('silenceCut new clip ids must be unique.');
+  }
+  for (const id of newClipIds) {
+    if (locate(comp, id)) throw new CompositionOpError(`Clip "${id}" already exists.`);
+  }
+
+  const kept = keepRegions.reduce((sum, r) => sum + (r.sourceOutSec - r.sourceInSec), 0);
+  const removed = clipDuration(clip) - kept;
+  for (const later of clipsAfter(track, clip)) {
+    later.startSec = Math.max(0, later.startSec - removed);
+  }
+
+  const last = keepRegions.length - 1;
+  let cursor = clip.startSec;
+  const subClips: MediaClip[] = keepRegions.map((r, i) => {
+    const sub: MediaClip = structuredClone(clip);
+    sub.id = i === 0 ? clipId : (newClipIds[i - 1] as string);
+    sub.startSec = cursor;
+    sub.sourceInSec = r.sourceInSec;
+    sub.sourceOutSec = r.sourceOutSec;
+    sub.effects = sub.effects.filter(
+      (e) => !(e.type === 'fadeIn' && i > 0) && !(e.type === 'fadeOut' && i < last),
+    );
+    cursor += r.sourceOutSec - r.sourceInSec;
+    return sub;
+  });
+
+  const lastId = subClips[last]?.id ?? clipId;
+  for (const t of track.transitions) {
+    if (t.afterClipId === clipId) t.afterClipId = lastId;
+  }
+
+  track.clips.splice(index, 1, ...subClips);
   sortClips(track);
 }
 

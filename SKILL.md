@@ -313,6 +313,8 @@ npx -y @makemyclip/editor timeline export final.mp4          # compile the docum
 
 Prefer the timeline over chaining single-file tools whenever the user is *assembling* a video (multiple clips, transitions, a final render): edits are non-destructive and reversible (`timeline undo` / `redo`, `timeline log`), and `timeline at <sec>` / `timeline frame <sec>` give you read-only eyes on the current document before you change it. Run `npx -y @makemyclip/editor timeline --help` for the full subcommand list.
 
+To cut the pauses out of a talking clip already on the timeline, use `timeline silence <clipId>` instead of the single-file `silence_remove`: it splits the clip into back-to-back sub-clips that keep the speech, moves later clips on the track up, and lands as one edit that `timeline undo` reverses. `--sensitivity` (0–1, default 0.5) cuts more as it rises; `--dry-run` prints the kept source windows and the seconds removed without changing the document. Later clips on other tracks don't move.
+
 ### Open the local UI (implemented)
 
 ```bash
