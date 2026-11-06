@@ -148,18 +148,27 @@ describe('fontFileFor', () => {
   ];
 
   it('leaves Latin text on the default font', () => {
-    expect(fontFileFor('Café, “quoted” — fine', candidates())).toBeUndefined();
+    expect(fontFileFor('Café, “quoted” — fine', { candidates: candidates() })).toBeUndefined();
+  });
+
+  it('gives Latin text a file only when asked, and the default font when none is readable', () => {
+    expect(fontFileFor('PLAIN CAPTION', { always: true, candidates: candidates() })).toBe(
+      paths.latin,
+    );
+    expect(
+      fontFileFor('PLAIN CAPTION', { always: true, candidates: [join(dir, 'missing.ttf')] }),
+    ).toBeUndefined();
   });
 
   it('picks the first font that has every glyph, skipping unreadable ones', () => {
-    expect(fontFileFor('Жизнь', candidates())).toBe(paths.cyrillic);
-    expect(fontFileFor('Жизнь 你好', candidates())).toBe(paths.cjk);
+    expect(fontFileFor('Жизнь', { candidates: candidates() })).toBe(paths.cyrillic);
+    expect(fontFileFor('Жизнь 你好', { candidates: candidates() })).toBe(paths.cjk);
   });
 
   it('names the characters no font has', () => {
-    expect(() => fontFileFor('Жизнь あ', candidates())).toThrow(MissingFontError);
+    expect(() => fontFileFor('Жизнь あ', { candidates: candidates() })).toThrow(MissingFontError);
     try {
-      fontFileFor('Жизнь あ', candidates());
+      fontFileFor('Жизнь あ', { candidates: candidates() });
     } catch (err) {
       expect((err as MissingFontError).missing).toBe('あ');
       expect((err as Error).message).toMatch(/MAKEMYCLIP_FALLBACK_FONT/);

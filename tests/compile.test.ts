@@ -495,6 +495,28 @@ describe('compileTimeline — text over the picture (captions)', () => {
     expect(plain?.expansion).toBe('none');
   });
 
+  it('asks for a font file for captions even in Latin, not for a title on the picture', () => {
+    const comp = applyOps(captioned([caption('c1', 'caption', 0, 1)]), [
+      { op: 'removeClip', clipId: 'b' },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: textClip({ id: 't', text: 'Title', startSec: 4, durationSec: 3 }),
+      },
+    ]);
+    const asked: [string, boolean][] = [];
+    const fontFor = (text: string, always: boolean) => {
+      asked.push([text, always]);
+      return always ? '/fonts/Sans.ttf' : undefined;
+    };
+    const plan = compileTimeline(comp, ctx({ fontFor }));
+    expect(asked).toEqual([
+      ['caption', true],
+      ['Title', false],
+    ]);
+    expect(drawtexts(plan.steps[0]?.args)[0]?.fontfile).toBe('/fonts/Sans.ttf');
+  });
+
   it('reports a missing font as a blocker on the text clip', () => {
     const comp = captioned([caption('c1', '你好', 0, 1)]);
     const fontFor = () => {

@@ -23,6 +23,7 @@ import type { MediaId } from '../src/timeline/schema.js';
 import {
   type ClipWord,
   NoTranscriptError,
+  planWordCut,
   type Transcript,
   TranscriptError,
 } from '../src/timeline/transcript.js';
@@ -89,6 +90,11 @@ describe('groupCaptions', () => {
     const han = '一 二 三 四 五 六 七 八 九 十 十 一 二 三 四 五 六 七'.split(' ');
     const cues = groupCaptions(spoken(han.join(' ')), 20, 12);
     expect(cues.every((c) => [...c.text].length <= 16)).toBe(true);
+  });
+
+  it('ends a caption on or before a clip end that falls between milliseconds', () => {
+    const cues = groupCaptions(spoken('last word', 3.5), 4.066667, 7);
+    expect(cues.at(-1)?.endSec).toBe(4.066);
   });
 
   it('gives a zero-length word a short caption instead of dropping it', () => {
@@ -221,6 +227,25 @@ describe('planCaptions', () => {
     await expect(
       planCaptions(currentDoc, { clipId: 'c' }, lookup(new Map()), counter()),
     ).rejects.toThrow(/no transcript yet/);
+  });
+
+  it('leaves a later word cut free to run before the captions are made again', async () => {
+    currentDoc = cutRecording();
+    const transcripts = new Map([[M, RECORDING]]);
+    currentDoc = applyOps(
+      currentDoc,
+      (await planCaptions(currentDoc, {}, lookup(transcripts), counter())).ops,
+    );
+    const b = findClip(currentDoc, 'b')?.clip;
+    if (b?.kind !== 'media') throw new Error('expected clip b');
+    const media = new Map([[M, { path: '/a.mp4', hasAudio: true }]]);
+    // "here" ends clip b's speech; cutting it pulls the picture's end in under
+    // the caption that held it.
+    const op = planWordCut(currentDoc, b, RECORDING, [{ fromIndex: 6, toIndex: 6 }], { media });
+    const after = applyOps(currentDoc, op ? [op] : []);
+    expect(checkExportable(after, media, '.').blockers.join(' ')).toMatch(
+      /make the captions again/,
+    );
   });
 
   it('refuses a caption track that holds video', async () => {

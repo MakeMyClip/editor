@@ -193,6 +193,30 @@ describe.skipIf(!IS_CI || !filters.has('drawtext'))(
       },
     );
 
+    it('renders a clip with hundreds of captions, its graph read from a file', async () => {
+      await blackClip(join(workspace, 'talk.mp4'), 4);
+      await cli(['new', '--width', '320', '--height', '180', '--fps', '10']);
+      await cli(['add-media', join(workspace, 'talk.mp4')]);
+      await storeTranscript(
+        Array.from({ length: 400 }, (_, i) => ({
+          text: `w${i}`,
+          startSec: i / 100,
+          endSec: i / 100 + 0.009,
+        })),
+      );
+      expect(await cli(['captions', '--words', '1', '--font', '28'])).toMatchObject({
+        captions: 400,
+      });
+      const frame = async (atSec: number): Promise<Buffer> => {
+        const out = join(workspace, `many-${atSec}.png`);
+        await cli(['frame', String(atSec), out]);
+        return pixels(out);
+      };
+      expect(differingPixels(await frame(1.005), await frame(2.005))).toBeGreaterThan(
+        GLYPHS_DIFFER,
+      );
+    });
+
     it.skipIf(!NO_CJK_FONT)(
       'tells boxes from glyphs: a font without CJK draws 你好 and 世界 alike',
       async () => {

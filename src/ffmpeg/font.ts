@@ -8,6 +8,10 @@ import { join } from 'node:path';
  * the wrong one draws empty boxes. Fonts come from the system or from
  * `MAKEMYCLIP_FALLBACK_FONT`; nothing is downloaded. Each candidate's
  * character map is read once per process and checked against the text.
+ *
+ * Captions ask for a file even for Latin text: each drawtext without one asks
+ * fontconfig for the default font, about a quarter second per caption with a
+ * Homebrew FFmpeg, while a file loads in milliseconds.
  */
 
 /** Thrown when no available font has every glyph the text needs. */
@@ -79,16 +83,23 @@ export function fallbackFontCandidates(): string[] {
   return explicit ? [explicit, ...systemFonts()] : systemFonts();
 }
 
+export interface FontOptions {
+  /** Return a file for Latin text too (when one is installed), not just
+   *  for the text FFmpeg's default font may lack. */
+  always?: boolean;
+  candidates?: string[];
+}
+
 /**
- * The font file to draw `text` with: undefined for Latin text (FFmpeg's default
- * font), else the first candidate whose character map covers every character.
- * Throws `MissingFontError` when none does.
+ * The font file to draw `text` with: the first candidate whose character map
+ * covers every character. Latin text gets undefined (FFmpeg's default font)
+ * unless `always` is set, and falls back to it when no candidate is readable.
+ * Throws `MissingFontError` when no font has the glyphs of other text.
  */
-export function fontFileFor(
-  text: string,
-  candidates: string[] = fallbackFontCandidates(),
-): string | undefined {
-  if (usesDefaultFont(text)) return undefined;
+export function fontFileFor(text: string, opts: FontOptions = {}): string | undefined {
+  const latin = usesDefaultFont(text);
+  if (latin && !opts.always) return undefined;
+  const candidates = opts.candidates ?? fallbackFontCandidates();
   const needed = [...new Set(text)]
     .map((ch) => ch.codePointAt(0) ?? 0)
     .filter((cp) => cp > 0x20 && !isInvisible(cp));
@@ -96,6 +107,7 @@ export function fontFileFor(
     const covers = coverageOf(path);
     if (covers && needed.every(covers)) return path;
   }
+  if (latin) return undefined;
   const missing = needed.filter((cp) => !candidates.some((p) => coverageOf(p)?.(cp)));
   throw new MissingFontError(String.fromCodePoint(...missing.slice(0, 12)));
 }

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { buildSilenceDetectArgs } from '../ffmpeg/args/silence-detect.js';
 import { runFfmpeg } from '../ffmpeg/run.js';
 import { computeKeepRegions, parseSilences } from '../tools/silence-remove.js';
-import { checkExportable, type MediaInfo, speedFactor } from './compile.js';
+import { checkExportable, type MediaInfo, speedFactor, withoutTextOverlays } from './compile.js';
 import {
   type Composition,
   findClip,
@@ -180,8 +180,8 @@ export function planSilenceCut(
   // The merge above covers the common case; anything else the shorter clip
   // breaks (a lone short region, an outgoing transition when the clip opens the
   // track) is caught by the compiler itself. The dir only names unwritten paths.
-  if (op && checkExportable(comp, opts.media, '.').exportable) {
-    const after = checkExportable(applyOp(comp, op), opts.media, '.');
+  if (op && checkExportable(withoutTextOverlays(comp), opts.media, '.').exportable) {
+    const after = checkExportable(withoutTextOverlays(applyOp(comp, op)), opts.media, '.');
     if (!after.exportable) {
       throw new SilenceAnalysisError(
         `Cutting these pauses would stop the timeline from exporting: ${after.blockers.join(' ')} ` +

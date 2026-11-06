@@ -211,7 +211,8 @@ export function groupCaptions(words: ClipWord[], endSec: number, maxWords: numbe
     cues.push({
       text: joinWords(group.map((w) => w.text)),
       startSec: roundMs(first.startSec),
-      endSec: roundMs(end),
+      // Down, so a clip that ends between milliseconds still holds its caption.
+      endSec: floorMs(end),
     });
   });
   return cues;
@@ -250,4 +251,8 @@ function displayWidth(text: string): number {
 
 function roundMs(sec: number): number {
   return Math.round(sec * 1000) / 1000;
+}
+
+function floorMs(sec: number): number {
+  return Math.floor(sec * 1000 + 1e-6) / 1000;
 }

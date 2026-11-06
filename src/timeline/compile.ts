@@ -69,8 +69,9 @@ export interface CompileContext {
    */
   tag?: string;
   /** Font file for a text, or undefined for FFmpeg's default font; throws
-   *  `MissingFontError` when none has its glyphs. Defaults to `fontFileFor`. */
-  fontFor?: (text: string) => string | undefined;
+   *  `MissingFontError` when none has its glyphs. `always` asks for a file for
+   *  Latin text too (captions). Defaults to `fontFileFor`. */
+  fontFor?: (text: string, always: boolean) => string | undefined;
 }
 
 /** A side file (concat list / drawtext text) the runner must write before
@@ -140,6 +141,18 @@ export function videoLayers(comp: Composition): { picture: Track | undefined; ov
   const withPicture = populated.filter((t) => !isTextOnly(t));
   const picture = withPicture.length > 1 ? undefined : (withPicture[0] ?? populated[0]);
   return { picture, overlays: populated.filter((t) => t !== picture && isTextOnly(t)) };
+}
+
+/** The document without the text over its picture: what a cut's exportability
+ *  check looks at, since captions don't move with a cut and are made again after
+ *  one. */
+export function withoutTextOverlays(comp: Composition): Composition {
+  const overlays = new Set(videoLayers(comp).overlays);
+  if (overlays.size === 0) return comp;
+  return {
+    ...comp,
+    tracks: comp.tracks.map((t) => (overlays.has(t) ? { ...t, clips: [], transitions: [] } : t)),
+  };
 }
 
 /** The picture track to export and the text clips drawn over it, with v1's
@@ -391,7 +404,7 @@ function buildSegmentStep(
     audioSource = '1:a';
     const textfile = resolve(ctx.dir, `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}.txt`);
     textFiles.push({ path: textfile, content: clip.text });
-    fx.unshift(drawtextFilter(textfile, clip, fontFor(ctx, clip)));
+    fx.unshift(drawtextFilter(textfile, clip, fontFor(ctx, clip, false)));
   }
 
   // Overlay times are timeline seconds; the segment runs in output time, which
@@ -408,7 +421,7 @@ function buildSegmentStep(
     );
     textFiles.push({ path: textfile, content: overlay.text });
     const window = `gte(t,${seconds((from - clip.startSec) * ratio)})*lt(t,${seconds((to - clip.startSec) * ratio)})`;
-    fx.push(drawtextFilter(textfile, overlay, fontFor(ctx, overlay), window));
+    fx.push(drawtextFilter(textfile, overlay, fontFor(ctx, overlay, true), window));
   }
 
   // Geometry first: fit to canvas, pad, square pixels, lock fps. (No-op-ish for
@@ -458,10 +471,11 @@ function seconds(sec: number): string {
   return String(Math.round(sec * 1000) / 1000);
 }
 
-/** The font file for a text clip, with a missing font reported against the clip. */
-function fontFor(ctx: CompileContext, clip: TextClip): string | undefined {
+/** The font file for a text clip, with a missing font reported against the clip.
+ *  Text over the picture always gets a file: see `ffmpeg/font.ts`. */
+function fontFor(ctx: CompileContext, clip: TextClip, always: boolean): string | undefined {
   try {
-    return (ctx.fontFor ?? fontFileFor)(clip.text);
+    return ctx.fontFor ? ctx.fontFor(clip.text, always) : fontFileFor(clip.text, { always });
   } catch (err) {
     if (err instanceof MissingFontError)
       throw new CompileError(`Text clip "${clip.id}": ${err.message}`);

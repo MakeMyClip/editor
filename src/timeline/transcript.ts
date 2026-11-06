@@ -13,7 +13,7 @@ import {
   WhisperLanguageSchema,
 } from '../transcribe/whisper.js';
 import { getWorkspace, resolveInWorkspace } from '../workspace.js';
-import { checkExportable, type MediaInfo } from './compile.js';
+import { checkExportable, type MediaInfo, withoutTextOverlays } from './compile.js';
 import { type Composition, findClip, type MediaClip, makeClipId } from './composition.js';
 import { applyOp, type CompositionOp, type SourceRange } from './ops.js';
 import { type MediaId, MediaIdSchema } from './schema.js';
@@ -427,8 +427,8 @@ export function planWordCut(
     newClipIds: keepRegions.slice(1).map(() => mintId()),
   };
   // The dir only names unwritten paths.
-  if (checkExportable(comp, opts.media, '.').exportable) {
-    const after = checkExportable(applyOp(comp, op), opts.media, '.');
+  if (checkExportable(withoutTextOverlays(comp), opts.media, '.').exportable) {
+    const after = checkExportable(withoutTextOverlays(applyOp(comp, op)), opts.media, '.');
     if (!after.exportable) {
       throw new TranscriptError(
         `Cutting those words would stop the timeline from exporting: ${after.blockers.join(' ')} ` +
