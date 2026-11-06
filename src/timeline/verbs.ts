@@ -8,6 +8,7 @@ import {
 } from './composition.js';
 import { applyOps, type CompositionOp, colorClip, mediaClip, textClip, videoTrack } from './ops.js';
 import type { MediaId } from './schema.js';
+import { SensitivitySchema, type SilenceCut } from './silence.js';
 
 /**
  * The VERB layer — a small, natural-language-shaped editing vocabulary that the
@@ -110,6 +111,15 @@ const EDITABLE_VERB_SCHEMAS = [
   }),
   z.object({ verb: z.literal('remove'), clipId: z.string() }),
   z.object({
+    verb: z.literal('remove_silence'),
+    clipId: z
+      .string()
+      .describe(
+        'Media clip to cut the pauses out of. It is split into back-to-back sub-clips that keep the speech, and later clips on its track move up.',
+      ),
+    sensitivity: SensitivitySchema.optional(),
+  }),
+  z.object({
     verb: z.literal('transition'),
     afterClipId: z
       .string()
@@ -153,6 +163,8 @@ export type CompositionVerbKind = CompositionVerb['verb'];
 export interface VerbContext {
   /** Register a media file and report its id + duration (wraps the ingest tool). */
   ingest: (path: string) => Promise<{ mediaId: MediaId; durationSec: number }>;
+  /** Plan a silence cut for a media clip (runs FFmpeg's silencedetect). */
+  analyzeSilence: (comp: Composition, clipId: string, sensitivity?: number) => Promise<SilenceCut>;
   /** Track a clip is placed on when the verb doesn't say. */
   defaultTrack: string;
 }
@@ -252,6 +264,11 @@ export async function lowerVerb(
       return [{ op: 'splitClip', clipId: verb.clipId, atSec: verb.atSec, newClipId: makeClipId() }];
     case 'remove':
       return [{ op: 'removeClip', clipId: verb.clipId }];
+    case 'remove_silence': {
+      // Nothing to cut lowers to an empty batch, which is a true no-op.
+      const cut = await ctx.analyzeSilence(comp, verb.clipId, verb.sensitivity);
+      return cut.op ? [cut.op] : [];
+    }
     case 'transition':
       return [
         {

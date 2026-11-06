@@ -1,5 +1,12 @@
 import { appendOp } from '../session/store.js';
-import { type Composition, clipEndSec, compositionDuration } from '../timeline/composition.js';
+import {
+  type Composition,
+  clipEndSec,
+  compositionDuration,
+  findClip,
+} from '../timeline/composition.js';
+import { buildMediaMap } from '../timeline/media-registry.js';
+import { analyzeSilence } from '../timeline/silence.js';
 import { DEFAULT_VERB_TRACK, type VerbContext } from '../timeline/verbs.js';
 import { ingest } from '../tools/ingest.js';
 import { resolveInWorkspace } from '../workspace.js';
@@ -20,6 +27,17 @@ export function makeVerbContext(): VerbContext {
         result: result as unknown as Record<string, unknown>,
       });
       return { mediaId: result.mediaId, durationSec: result.ref.durationSec };
+    },
+    analyzeSilence: async (comp, clipId, sensitivity) => {
+      const media = await buildMediaMap();
+      // Untrusted (agent/UI) input — re-check the clip's registered file is still
+      // inside the workspace (it may have been swapped for a symlink since ingest).
+      const clip = findClip(comp, clipId)?.clip;
+      const info = clip?.kind === 'media' ? media.get(clip.mediaId) : undefined;
+      if (clip?.kind === 'media' && info) {
+        media.set(clip.mediaId, { ...info, path: resolveInWorkspace(info.path) });
+      }
+      return analyzeSilence(comp, clipId, { media, sensitivity });
     },
   };
 }

@@ -18,6 +18,13 @@ const TRANSITION_KINDS = [
   'circleclose',
 ];
 
+/** Named strengths over remove_silence's 0..1 sensitivity (0.5 = the CLI default). */
+const SILENCE_PRESETS = [
+  { label: 'Gentle', sensitivity: 0.25 },
+  { label: 'Normal', sensitivity: 0.5 },
+  { label: 'Aggressive', sensitivity: 0.75 },
+];
+
 function num(value: string): number | undefined {
   const n = Number(value);
   return value.trim() === '' || Number.isNaN(n) ? undefined : n;
@@ -44,7 +51,8 @@ export function ClipInspector({
   hasNext: boolean;
   busy: boolean;
   error: string | null;
-  onApply: (verbs: Verb[]) => void;
+  /** Resolves to the number of ops applied, or null if the edit failed. */
+  onApply: (verbs: Verb[]) => Promise<number | null>;
   onClose: () => void;
 }) {
   const isMedia = clip.kind === 'media';
@@ -53,6 +61,8 @@ export function ClipInspector({
   const [startSec, setStartSec] = useState(String(clip.startSec));
   const [trKind, setTrKind] = useState('fade');
   const [trDur, setTrDur] = useState('0.5');
+  const [silencePreset, setSilencePreset] = useState('Normal');
+  const [silenceNote, setSilenceNote] = useState<string | null>(null);
 
   const start = clip.startSec;
   const end = clipEndSec(clip);
@@ -114,6 +124,45 @@ export function ClipInspector({
             }
           >
             Apply trim
+          </button>
+        </div>
+      ) : null}
+
+      {isMedia ? (
+        <div className="ci-section">
+          <div className="ci-section-title">Remove silence</div>
+          <label className="form-field">
+            <span className="form-field-label">Strength</span>
+            <select
+              className="form-input"
+              value={silencePreset}
+              onChange={(e) => setSilencePreset(e.target.value)}
+            >
+              {SILENCE_PRESETS.map((p) => (
+                <option key={p.label} value={p.label}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="form-hint">Cuts pauses and moves later clips up. Undo restores the clip.</p>
+          {silenceNote ? <p className="form-hint">{silenceNote}</p> : null}
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={busy}
+            onClick={async () => {
+              setSilenceNote(null);
+              const sensitivity = SILENCE_PRESETS.find(
+                (p) => p.label === silencePreset,
+              )?.sensitivity;
+              const applied = await onApply([
+                { verb: 'remove_silence', clipId: clip.id, sensitivity },
+              ]);
+              if (applied === 0) setSilenceNote('No pauses found at this strength.');
+            }}
+          >
+            Remove silence
           </button>
         </div>
       ) : null}
