@@ -22,7 +22,13 @@ import { colorClip, mediaClip, textClip } from './timeline/ops.js';
 import { reviewCuts } from './timeline/review.js';
 import { runPlan } from './timeline/run-plan.js';
 import { analyzeSilence, DEFAULT_SENSITIVITY, SensitivitySchema } from './timeline/silence.js';
-import { transcribeClip } from './timeline/transcript.js';
+import {
+  clipWords,
+  findRetakes,
+  planWordCut,
+  storedTranscriptForClip,
+  transcribeClip,
+} from './timeline/transcript.js';
 import { DEFAULT_VERB_TRACK as DEFAULT_TRACK, ensureTrack, trackEnd } from './timeline/verbs.js';
 import { ingest } from './tools/ingest.js';
 import { getWorkspace, newOutputPath, resolveInput } from './workspace.js';
@@ -41,6 +47,8 @@ const TIMELINE_HELP = `clip timeline — build and export a non-destructive comp
   clip timeline silence <clipId> [--sensitivity 0..1] [--dry-run]
   clip timeline check [--sheet <output.jpg>]
   clip timeline transcribe <clipId> [--model <model.bin>] [--language <code>]
+  clip timeline cut-words <clipId> <fromIndex> <toIndex> [--transcript <id>]
+  clip timeline remove-retakes <clipId> [--dry-run] [--transcript <id>]
   clip timeline show
   clip timeline at <atSec>
   clip timeline frame <atSec> [<output>]
@@ -306,6 +314,43 @@ export async function runTimeline(args: string[]): Promise<void> {
           language: flags.language || undefined,
         }),
       );
+      return;
+    }
+
+    case 'cut-words':
+    case 'remove-retakes': {
+      const [clipId, from, to] = positional;
+      const isCutWords = sub === 'cut-words';
+      if (!clipId || (isCutWords && (from === undefined || to === undefined))) {
+        throw new Error(
+          isCutWords
+            ? 'Usage: clip timeline cut-words <clipId> <fromIndex> <toIndex>'
+            : 'Usage: clip timeline remove-retakes <clipId> [--dry-run]',
+        );
+      }
+      const comp = await readComposition();
+      const media = await buildMediaMap();
+      const { clip, transcript } = await storedTranscriptForClip(
+        comp,
+        clipId,
+        media,
+        flags.transcript || undefined,
+      );
+      const ranges = isCutWords
+        ? [{ fromIndex: num(from, 0), toIndex: num(to, 0) }]
+        : findRetakes(clipWords(transcript, clip));
+      const op = planWordCut(comp, clip, transcript, ranges, { media });
+      if (!op) {
+        out({ clipId, applied: false, ranges, message: 'Nothing to cut in this clip.' });
+        return;
+      }
+      if (flags['dry-run']) {
+        out({ clipId, applied: false, dryRun: true, ranges });
+        return;
+      }
+      // The transcript was read outside the write lock; reject if the doc moved since.
+      const doc = await mutateComposition([op], { expectedBaseRev: comp.rev });
+      out({ clipId, applied: true, ranges, rev: doc.rev });
       return;
     }
 

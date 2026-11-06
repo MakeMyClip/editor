@@ -205,11 +205,17 @@ export {
   type ClipTranscript,
   type ClipWord,
   clipWords,
+  findRetakes,
+  planWordCut,
+  type Retake,
+  storedTranscriptForClip,
   type Transcript,
   TranscriptError,
   TranscriptSchema,
   transcribeClip,
   transcribeMedia,
+  transcriptForClip,
+  type WordRange,
 } from './timeline/transcript.js';
 export {
   type CompositionVerb,

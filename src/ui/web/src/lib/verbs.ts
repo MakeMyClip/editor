@@ -9,6 +9,8 @@ export type Verb =
   | { verb: 'split'; clipId: string; atSec: number }
   | { verb: 'remove'; clipId: string }
   | { verb: 'remove_silence'; clipId: string; sensitivity?: number }
+  | { verb: 'cut_words'; clipId: string; fromIndex: number; toIndex: number; transcriptId: string }
+  | { verb: 'remove_retakes'; clipId: string; transcriptId?: string }
   | {
       verb: 'transition';
       afterClipId: string;
