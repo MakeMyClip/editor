@@ -1,4 +1,5 @@
 import { appendOp } from '../session/store.js';
+import type { MediaInfo } from '../timeline/compile.js';
 import {
   type Composition,
   clipEndSec,
@@ -6,6 +7,7 @@ import {
   findClip,
 } from '../timeline/composition.js';
 import { buildMediaMap } from '../timeline/media-registry.js';
+import type { MediaId } from '../timeline/schema.js';
 import { analyzeSilence } from '../timeline/silence.js';
 import { DEFAULT_VERB_TRACK, type VerbContext } from '../timeline/verbs.js';
 import { ingest } from '../tools/ingest.js';
@@ -40,6 +42,22 @@ export function makeVerbContext(): VerbContext {
       return analyzeSilence(comp, clipId, { media, sensitivity });
     },
   };
+}
+
+/** The media registry with every file the document uses re-checked against the
+ *  workspace, for reads on behalf of untrusted (agent/UI) callers: a registered
+ *  file may have been swapped for an outward symlink since ingest. */
+export async function confinedMediaMap(comp: Composition): Promise<Map<MediaId, MediaInfo>> {
+  const media = await buildMediaMap();
+  for (const track of comp.tracks) {
+    for (const clip of track.clips) {
+      const info = clip.kind === 'media' ? media.get(clip.mediaId) : undefined;
+      if (clip.kind === 'media' && info) {
+        media.set(clip.mediaId, { ...info, path: resolveInWorkspace(info.path) });
+      }
+    }
+  }
+  return media;
 }
 
 export interface CompositionSummary {

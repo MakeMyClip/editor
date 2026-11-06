@@ -315,6 +315,8 @@ Prefer the timeline over chaining single-file tools whenever the user is *assemb
 
 To cut the pauses out of a talking clip already on the timeline, use `timeline silence <clipId>` instead of the single-file `silence_remove`: it splits the clip into back-to-back sub-clips that keep the speech, moves later clips on the track up, and lands as one edit that `timeline undo` reverses. `--sensitivity` (0–1, default 0.5) cuts more as it rises; `--dry-run` prints the kept source windows and the seconds removed without changing the document. Later clips on other tracks don't move.
 
+After cutting, run `timeline check` before exporting: it lists every hard cut whose audio is loud right at the join (usually a clipped word or a click) and writes a contact sheet (`--sheet out.jpg`) with the outgoing clip's last frame and the incoming clip's first for each cut. Open the sheet to see the jumps. A flagged cut is a reason to trim or move that boundary, not a verdict.
+
 ### Open the local UI (implemented)
 
 ```bash

@@ -167,6 +167,18 @@ export {
   textClip,
   videoTrack,
 } from './timeline/ops.js';
+export {
+  type CutCheck,
+  type CutPoint,
+  type CutReport,
+  type CutReview,
+  type CutSheet,
+  checkCuts,
+  hardCuts,
+  ReviewError,
+  renderCutSheet,
+  reviewCuts,
+} from './timeline/review.js';
 export { type RunPlanResult, runPlan } from './timeline/run-plan.js';
 export {
   AudioStreamSchema,
