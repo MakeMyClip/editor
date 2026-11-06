@@ -229,6 +229,7 @@ export function App() {
                 busy={verbBusy}
                 error={verbError}
                 onApply={handleApplyVerbs}
+                onSeek={setPlayheadSec}
                 onClose={() => setSelectedClipId(null)}
               />
             ) : (

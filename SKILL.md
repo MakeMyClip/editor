@@ -319,6 +319,8 @@ After cutting, run `timeline check` before exporting: it lists every hard cut wh
 
 To read what's said in a clip, run `timeline transcribe <clipId>`: it returns the clip's words with their timeline times, so you can find a sentence before cutting around it. Transcription is optional and runs a local whisper.cpp; if it isn't set up, the command says how (install whisper.cpp, download a model, set `MAKEMYCLIP_WHISPER_MODEL`). The first run per source file takes a while; later runs reuse the stored transcript. Whisper tends to leave out filler words like "um", so don't rely on the transcript to find them.
 
+To cut by words, use the `index` values from `timeline transcribe`: `timeline cut-words <clipId> <fromIndex> <toIndex>` removes those words (inclusive) and moves later clips on the track up. Add `--transcript <transcriptId>` from the same `timeline transcribe` output so the cut is refused, not misplaced, if the clip was transcribed again since. The transcript also lists `retakes`, phrases said twice in a row; `timeline remove-retakes <clipId>` cuts the earlier take of each (`--dry-run` lists them first). Each is one edit that `timeline undo` reverses. A cut splits the clip, so transcribe the resulting clips again before the next cut, and run `timeline check` afterwards.
+
 ### Open the local UI (implemented)
 
 ```bash

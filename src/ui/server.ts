@@ -35,18 +35,31 @@ import { CompositionOpError } from '../timeline/ops.js';
 import { runPlan } from '../timeline/run-plan.js';
 import type { MediaId } from '../timeline/schema.js';
 import { SilenceAnalysisError } from '../timeline/silence.js';
+import { TranscriptError, transcribeClip } from '../timeline/transcript.js';
 import { CompositionVerbSchema } from '../timeline/verbs.js';
 import { ingest } from '../tools/ingest.js';
 import { preview } from '../tools/preview.js';
 import { snapshot } from '../tools/snapshot.js';
 import { undo } from '../tools/undo.js';
+import { TranscriptionUnavailableError } from '../transcribe/whisper.js';
 import {
   ensureWorkspace,
   getWorkspace,
   newOutputPath,
   WorkspaceBoundaryError,
 } from '../workspace.js';
-import { makeVerbContext } from './timeline-tools.js';
+import { clipConfinedMedia, makeVerbContext } from './timeline-tools.js';
+
+/** Errors about the clip or its setup, not the server: silence removal or
+ *  transcription can't work on this clip, or whisper.cpp isn't set up. */
+function isClipConditionError(err: unknown): boolean {
+  return (
+    err instanceof SilenceAnalysisError ||
+    err instanceof TranscriptError ||
+    err instanceof TranscriptionUnavailableError
+  );
+}
+
 import { isRegisteredTool, TOOL_REGISTRY } from './tool-registry.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -204,12 +217,31 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       if (err instanceof ZodError) {
         return c.json({ error: 'Validation failed', issues: err.issues }, 400);
       }
-      // A lost write race is retriable (409); a stale/bad clip reference or a clip
-      // silence removal can't cut is a client condition (422) — neither is a server fault.
+      // A lost write race is retriable (409); a stale/bad clip reference, or a clip
+      // silence removal or transcription can't work on, is a client condition
+      // (422) — neither is a server fault.
       if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
       if (err instanceof CompositionConflictError) return c.json({ error: err.message }, 409);
       if (err instanceof CompositionOpError) return c.json({ error: err.message }, 422);
-      if (err instanceof SilenceAnalysisError) return c.json({ error: err.message }, 422);
+      if (isClipConditionError(err)) return c.json({ error: (err as Error).message }, 422);
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  /**
+   * GET /api/timeline/transcript/:clipId — the clip's words on the timeline and
+   * any repeated takes, transcribing its source with the local whisper.cpp on
+   * first use (optional; 422 with the setup steps when it isn't set up).
+   */
+  app.get('/api/timeline/transcript/:clipId', async (c) => {
+    try {
+      const comp = await readComposition();
+      const clipId = c.req.param('clipId');
+      return c.json(await transcribeClip(comp, clipId, await clipConfinedMedia(comp, clipId)));
+    } catch (err) {
+      if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
+      if (isClipConditionError(err)) return c.json({ error: (err as Error).message }, 422);
       const message = err instanceof Error ? err.message : String(err);
       return c.json({ error: message }, 500);
     }

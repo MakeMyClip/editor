@@ -9,10 +9,14 @@ import { applyOps, mediaClip, textClip, videoTrack } from '../src/timeline/ops.j
 import type { MediaId } from '../src/timeline/schema.js';
 import {
   clipWords,
+  findRetakes,
+  planWordCut,
+  storedTranscriptForClip,
   type Transcript,
   TranscriptError,
   transcribeClip,
   transcribeMedia,
+  transcriptIdOf,
   transcriptPath,
 } from '../src/timeline/transcript.js';
 import {
@@ -159,6 +163,121 @@ const transcript = (words: Transcript['words']): Transcript => ({
   words,
 });
 
+const word = (index: number, text: string) => ({ index, text, startSec: index, endSec: index + 1 });
+
+describe('findRetakes', () => {
+  it('finds a phrase said twice in a row and reports the earlier take', () => {
+    const words = [
+      'So,',
+      'today',
+      'I',
+      'want',
+      'to',
+      'show,',
+      'I',
+      'want',
+      'to',
+      'show',
+      'you',
+    ].map((t, i) => word(i, t));
+    expect(findRetakes(words)).toEqual([{ fromIndex: 2, toIndex: 5, text: 'I want to show,' }]);
+  });
+
+  it('ignores a single repeated word, and matches across case and punctuation', () => {
+    expect(findRetakes(['very', 'very', 'good'].map((t, i) => word(i, t)))).toEqual([]);
+    expect(findRetakes(['no', 'no', 'no', 'no'].map((t, i) => word(i, t)))).toEqual([]);
+    expect(findRetakes(['very', 'very', 'very', 'very', 'good'].map((t, i) => word(i, t)))).toEqual(
+      [],
+    );
+    expect(findRetakes(['The', 'plan.', 'the', 'plan', 'works'].map((t, i) => word(i, t)))).toEqual(
+      [{ fromIndex: 0, toIndex: 1, text: 'The plan.' }],
+    );
+  });
+
+  it('keeps the transcript index of each word', () => {
+    const words = [word(40, 'go'), word(41, 'now'), word(42, 'go'), word(43, 'now')];
+    expect(findRetakes(words)).toEqual([{ fromIndex: 40, toIndex: 41, text: 'go now' }]);
+  });
+});
+
+describe('planWordCut', () => {
+  const t = transcript([
+    { text: 'So,', startSec: 0, endSec: 0.4 },
+    { text: 'today', startSec: 0.4, endSec: 0.8 },
+    { text: 'I', startSec: 0.8, endSec: 1 },
+    { text: 'want', startSec: 1, endSec: 1.4 },
+    { text: 'more', startSec: 1.4, endSec: 2 },
+  ]);
+  const MEDIA = new Map<MediaId, MediaInfo>([[M, { path: '/ws/talk.mp4', hasAudio: true }]]);
+  const clip = mediaClip({ id: 'c', mediaId: M, sourceOutSec: 2, startSec: 0 });
+  let n = 0;
+  const mint = () => `n${++n}`;
+  const plan = (c: typeof clip, ranges: { fromIndex: number; toIndex: number }[]) =>
+    planWordCut(
+      applyOps(emptyComposition(), [
+        { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+        { op: 'addClip', trackId: 'v0', clip: c },
+      ]),
+      c,
+      t,
+      ranges,
+      { media: MEDIA, mintId: mint },
+    );
+
+  it('keeps the rest of the clip around the cut words', () => {
+    expect(plan(clip, [{ fromIndex: 2, toIndex: 3 }])).toEqual({
+      op: 'silenceCut',
+      clipId: 'c',
+      keepRegions: [
+        { sourceInSec: 0, sourceOutSec: 0.8 },
+        { sourceInSec: 1.4, sourceOutSec: 2 },
+      ],
+      newClipIds: ['n1'],
+    });
+  });
+
+  it('merges overlapping ranges and clips them to the clip window', () => {
+    const trimmed = { ...clip, sourceInSec: 0.4 };
+    const ranges = [
+      { fromIndex: 0, toIndex: 1 },
+      { fromIndex: 1, toIndex: 2 },
+    ];
+    expect(plan(trimmed, ranges)).toMatchObject({
+      keepRegions: [{ sourceInSec: 1, sourceOutSec: 2 }],
+      newClipIds: [],
+    });
+  });
+
+  it('returns null for words outside the clip, and refuses to cut everything', () => {
+    const early = { ...clip, sourceInSec: 1.4 };
+    expect(plan(early, [{ fromIndex: 0, toIndex: 1 }])).toBeNull();
+    expect(() => plan(clip, [{ fromIndex: 0, toIndex: 4 }])).toThrow(/remove the clip/);
+    expect(() => plan(clip, [{ fromIndex: 3, toIndex: 9 }])).toThrow(TranscriptError);
+  });
+
+  it('refuses a cut that leaves the clip shorter than its incoming transition', () => {
+    const after = { ...clip, startSec: 2 };
+    const comp = applyOps(emptyComposition(), [
+      { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'a', mediaId: M, sourceOutSec: 2, startSec: 0 }),
+      },
+      { op: 'addClip', trackId: 'v0', clip: after },
+      {
+        op: 'addTransition',
+        trackId: 'v0',
+        transition: { afterClipId: 'a', kind: 'fade', durationSec: 0.5 },
+      },
+    ]);
+    const cut = (fromIndex: number, toIndex: number) =>
+      planWordCut(comp, after, t, [{ fromIndex, toIndex }], { media: MEDIA, mintId: mint });
+    expect(() => cut(1, 4)).toThrow(/stop the timeline from exporting/);
+    expect(cut(3, 3)).toMatchObject({ op: 'silenceCut', clipId: 'c' });
+  });
+});
+
 describe('clipWords', () => {
   it("places the clip's words on the timeline, clipping words at its edges", () => {
     const t = transcript([
@@ -237,6 +356,52 @@ describe('transcribeMedia / transcribeClip', () => {
     await store(info, model, 'auto');
     await writeFile(info.path, 'edited video bytes');
     await expect(transcribeMedia(M, info)).rejects.toThrow();
+  });
+
+  // The fake source fails audio extraction: one shared run fails once, so both
+  // callers see the same error; the next call after it starts a new run.
+  it('shares one run between concurrent requests for the same transcription', async () => {
+    const { info } = await setup();
+    const [a, b] = await Promise.allSettled([transcribeMedia(M, info), transcribeMedia(M, info)]);
+    expect(a.status).toBe('rejected');
+    expect(b.status).toBe('rejected');
+    const reason = (r: PromiseSettledResult<unknown>) =>
+      r.status === 'rejected' ? r.reason : undefined;
+    expect(reason(b)).toBe(reason(a));
+    const [c] = await Promise.allSettled([transcribeMedia(M, info)]);
+    expect(reason(c)).toBeInstanceOf(Error);
+    expect(reason(c)).not.toBe(reason(a));
+  });
+
+  it('edits against the stored transcript whatever made it, and only that one', async () => {
+    const { info, model } = await setup();
+    const comp = applyOps(emptyComposition(), [
+      { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'c', mediaId: M, sourceOutSec: 1, startSec: 0 }),
+      },
+    ]);
+    const media = new Map([[M, info]]);
+    await expect(storedTranscriptForClip(comp, 'c', media)).rejects.toThrow(/no transcript yet/);
+
+    // Made with a forced language and no model configured now: still the one used.
+    const stored = await store(info, model, 'de');
+    delete process.env.MAKEMYCLIP_WHISPER_MODEL;
+    await expect(storedTranscriptForClip(comp, 'c', media)).resolves.toMatchObject({
+      transcript: stored,
+    });
+    await expect(
+      storedTranscriptForClip(comp, 'c', media, transcriptIdOf(stored)),
+    ).resolves.toMatchObject({ transcript: stored });
+    // Words read from an earlier transcript of the same file are refused.
+    await expect(storedTranscriptForClip(comp, 'c', media, 'feedfacecafe')).rejects.toThrow(
+      /transcribed again/,
+    );
+
+    await writeFile(info.path, 'edited video bytes');
+    await expect(storedTranscriptForClip(comp, 'c', media)).rejects.toThrow(/source changed/);
   });
 
   it('refuses a transcripts folder that is a symlink out of the workspace', async () => {

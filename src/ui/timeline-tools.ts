@@ -9,6 +9,7 @@ import {
 import { buildMediaMap } from '../timeline/media-registry.js';
 import type { MediaId } from '../timeline/schema.js';
 import { analyzeSilence } from '../timeline/silence.js';
+import { storedTranscriptForClip } from '../timeline/transcript.js';
 import { DEFAULT_VERB_TRACK, type VerbContext } from '../timeline/verbs.js';
 import { ingest } from '../tools/ingest.js';
 import { resolveInWorkspace } from '../workspace.js';
@@ -30,18 +31,29 @@ export function makeVerbContext(): VerbContext {
       });
       return { mediaId: result.mediaId, durationSec: result.ref.durationSec };
     },
-    analyzeSilence: async (comp, clipId, sensitivity) => {
-      const media = await buildMediaMap();
-      // Untrusted (agent/UI) input — re-check the clip's registered file is still
-      // inside the workspace (it may have been swapped for a symlink since ingest).
-      const clip = findClip(comp, clipId)?.clip;
-      const info = clip?.kind === 'media' ? media.get(clip.mediaId) : undefined;
-      if (clip?.kind === 'media' && info) {
-        media.set(clip.mediaId, { ...info, path: resolveInWorkspace(info.path) });
-      }
-      return analyzeSilence(comp, clipId, { media, sensitivity });
+    analyzeSilence: async (comp, clipId, sensitivity) =>
+      analyzeSilence(comp, clipId, { media: await clipConfinedMedia(comp, clipId), sensitivity }),
+    transcript: async (comp, clipId, transcriptId) => {
+      const media = await clipConfinedMedia(comp, clipId);
+      return { ...(await storedTranscriptForClip(comp, clipId, media, transcriptId)), media };
     },
   };
+}
+
+/** The media registry with the clip's registered file re-checked against the
+ *  workspace: untrusted (agent/UI) input, and the file may have been swapped
+ *  for a symlink since ingest. */
+export async function clipConfinedMedia(
+  comp: Composition,
+  clipId: string,
+): Promise<Map<MediaId, MediaInfo>> {
+  const media = await buildMediaMap();
+  const clip = findClip(comp, clipId)?.clip;
+  const info = clip?.kind === 'media' ? media.get(clip.mediaId) : undefined;
+  if (clip?.kind === 'media' && info) {
+    media.set(clip.mediaId, { ...info, path: resolveInWorkspace(info.path) });
+  }
+  return media;
 }
 
 /** The media registry with every file the document uses re-checked against the

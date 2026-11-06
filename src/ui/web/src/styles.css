@@ -1309,6 +1309,52 @@ body,
   align-self: flex-start;
 }
 
+.ci-transcript {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.15rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  line-height: 1.6;
+}
+
+.ci-word {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0 0.2rem;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ci-word:hover {
+  background: var(--accent-soft);
+}
+
+.ci-word.is-retake {
+  background: rgba(245, 166, 35, 0.16);
+  color: var(--warn);
+}
+
+.ci-word.is-selected {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ci-retake-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--warn);
+}
+
+.ci-transcript-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .ci-remove {
   align-self: flex-start;
   font: inherit;

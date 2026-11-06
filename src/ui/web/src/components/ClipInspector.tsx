@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { clipDuration, clipEndSec, clipLabel } from '../lib/composition.js';
 import type { Verb } from '../lib/verbs.js';
 import type { Clip } from '../types.js';
+import { TranscriptSection } from './TranscriptSection.js';
 
 const TRANSITION_KINDS = [
   'fade',
@@ -44,6 +45,7 @@ export function ClipInspector({
   busy,
   error,
   onApply,
+  onSeek,
   onClose,
 }: {
   clip: Clip;
@@ -53,6 +55,8 @@ export function ClipInspector({
   error: string | null;
   /** Resolves to the number of ops applied, or null if the edit failed. */
   onApply: (verbs: Verb[]) => Promise<number | null>;
+  /** Move the playhead to a timeline time. */
+  onSeek: (sec: number) => void;
   onClose: () => void;
 }) {
   const isMedia = clip.kind === 'media';
@@ -165,6 +169,10 @@ export function ClipInspector({
             Remove silence
           </button>
         </div>
+      ) : null}
+
+      {clip.kind === 'media' ? (
+        <TranscriptSection clip={clip} busy={busy} onApply={onApply} onSeek={onSeek} />
       ) : null}
 
       <div className="ci-section">

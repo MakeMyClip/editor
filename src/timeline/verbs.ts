@@ -1,14 +1,23 @@
 import { z } from 'zod';
+import type { MediaInfo } from './compile.js';
 import {
   AnchorSchema,
   type Composition,
   clipEndSec,
+  type MediaClip,
   makeClipId,
   TransitionKindSchema,
 } from './composition.js';
 import { applyOps, type CompositionOp, colorClip, mediaClip, textClip, videoTrack } from './ops.js';
 import type { MediaId } from './schema.js';
 import { SensitivitySchema, type SilenceCut } from './silence.js';
+import {
+  clipWords,
+  findRetakes,
+  planWordCut,
+  type Transcript,
+  TranscriptError,
+} from './transcript.js';
 
 /**
  * The VERB layer — a small, natural-language-shaped editing vocabulary that the
@@ -120,6 +129,37 @@ const EDITABLE_VERB_SCHEMAS = [
     sensitivity: SensitivitySchema.optional(),
   }),
   z.object({
+    verb: z.literal('cut_words'),
+    clipId: z.string().describe('Media clip to cut the words out of.'),
+    fromIndex: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe('First word to cut: its `index` from timeline_transcript.'),
+    toIndex: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe('Last word to cut (inclusive). Later clips on the track move up.'),
+    transcriptId: z
+      .string()
+      .describe(
+        'The `transcriptId` from the timeline_transcript call the indices came from; the cut is refused if the clip was transcribed again since.',
+      ),
+  }),
+  z.object({
+    verb: z.literal('remove_retakes'),
+    clipId: z
+      .string()
+      .describe(
+        'Media clip to cut repeated takes from: each phrase said twice in a row loses its earlier take (see `retakes` in timeline_transcript).',
+      ),
+    transcriptId: z
+      .string()
+      .optional()
+      .describe('Optional `transcriptId` the retakes were read from; refused if it changed.'),
+  }),
+  z.object({
     verb: z.literal('transition'),
     afterClipId: z
       .string()
@@ -165,6 +205,14 @@ export interface VerbContext {
   ingest: (path: string) => Promise<{ mediaId: MediaId; durationSec: number }>;
   /** Plan a silence cut for a media clip (runs FFmpeg's silencedetect). */
   analyzeSilence: (comp: Composition, clipId: string, sensitivity?: number) => Promise<SilenceCut>;
+  /** A media clip, its source's STORED transcript (the one whose word indices
+   *  the caller saw) and the media the timeline uses; throws if it hasn't been
+   *  transcribed. */
+  transcript: (
+    comp: Composition,
+    clipId: string,
+    transcriptId?: string,
+  ) => Promise<{ clip: MediaClip; transcript: Transcript; media: Map<MediaId, MediaInfo> }>;
   /** Track a clip is placed on when the verb doesn't say. */
   defaultTrack: string;
 }
@@ -268,6 +316,37 @@ export async function lowerVerb(
       // Nothing to cut lowers to an empty batch, which is a true no-op.
       const cut = await ctx.analyzeSilence(comp, verb.clipId, verb.sensitivity);
       return cut.op ? [cut.op] : [];
+    }
+    case 'cut_words': {
+      const { clip, transcript, media } = await ctx.transcript(
+        comp,
+        verb.clipId,
+        verb.transcriptId,
+      );
+      const op = planWordCut(
+        comp,
+        clip,
+        transcript,
+        [{ fromIndex: verb.fromIndex, toIndex: verb.toIndex }],
+        { media },
+      );
+      if (!op) {
+        throw new TranscriptError(
+          `Words ${verb.fromIndex}..${verb.toIndex} aren't inside clip "${verb.clipId}".`,
+        );
+      }
+      return [op];
+    }
+    case 'remove_retakes': {
+      const { clip, transcript, media } = await ctx.transcript(
+        comp,
+        verb.clipId,
+        verb.transcriptId,
+      );
+      const op = planWordCut(comp, clip, transcript, findRetakes(clipWords(transcript, clip)), {
+        media,
+      });
+      return op ? [op] : [];
     }
     case 'transition':
       return [
