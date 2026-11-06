@@ -2,10 +2,15 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { appendOp } from '../src/session/store.js';
+import { emptyComposition } from '../src/timeline/composition.js';
+import { applyOps, mediaClip, videoTrack } from '../src/timeline/ops.js';
+import type { MediaId } from '../src/timeline/schema.js';
 import { makeVerbContext } from '../src/ui/timeline-tools.js';
 import { TOOL_REGISTRY } from '../src/ui/tool-registry.js';
 import { resolveInput, resolveInWorkspace, WorkspaceBoundaryError } from '../src/workspace.js';
 
+const M = 'm_aaaaaaaaaaaa' as MediaId;
 let workspace: string;
 let saved: string | undefined;
 
@@ -67,6 +72,33 @@ describe('the agent/UI ingest surfaces are gated', () => {
     await expect(makeVerbContext().ingest('/etc/passwd')).rejects.toBeInstanceOf(
       WorkspaceBoundaryError,
     );
+  });
+
+  it('makeVerbContext().analyzeSilence (remove_silence) refuses a registered file since swapped for an outward symlink', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'mmc-outside-'));
+    try {
+      const clipPath = join(workspace, 'clip.mp4');
+      await writeFile(join(outside, 'secret.mp4'), 'x');
+      await symlink(join(outside, 'secret.mp4'), clipPath);
+      await appendOp({
+        tool: 'ingest',
+        args: { path: clipPath },
+        result: { mediaId: M, ref: { path: clipPath, audio: {} } },
+      });
+      const comp = applyOps(emptyComposition(), [
+        { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+        {
+          op: 'addClip',
+          trackId: 'v0',
+          clip: mediaClip({ id: 'c1', mediaId: M, sourceOutSec: 4, startSec: 0 }),
+        },
+      ]);
+      await expect(makeVerbContext().analyzeSilence(comp, 'c1')).rejects.toBeInstanceOf(
+        WorkspaceBoundaryError,
+      );
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
 

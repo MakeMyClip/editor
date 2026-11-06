@@ -34,6 +34,7 @@ import { buildMediaMap } from '../timeline/media-registry.js';
 import { CompositionOpError } from '../timeline/ops.js';
 import { runPlan } from '../timeline/run-plan.js';
 import type { MediaId } from '../timeline/schema.js';
+import { SilenceAnalysisError } from '../timeline/silence.js';
 import { CompositionVerbSchema } from '../timeline/verbs.js';
 import { ingest } from '../tools/ingest.js';
 import { preview } from '../tools/preview.js';
@@ -203,11 +204,12 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       if (err instanceof ZodError) {
         return c.json({ error: 'Validation failed', issues: err.issues }, 400);
       }
-      // A lost write race is retriable (409); a stale/bad clip reference is a
-      // client condition (422) — neither is a server fault.
+      // A lost write race is retriable (409); a stale/bad clip reference or a clip
+      // silence removal can't cut is a client condition (422) — neither is a server fault.
       if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
       if (err instanceof CompositionConflictError) return c.json({ error: err.message }, 409);
       if (err instanceof CompositionOpError) return c.json({ error: err.message }, 422);
+      if (err instanceof SilenceAnalysisError) return c.json({ error: err.message }, 422);
       const message = err instanceof Error ? err.message : String(err);
       return c.json({ error: message }, 500);
     }
