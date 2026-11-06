@@ -65,20 +65,20 @@ let graphOption: Promise<string> | undefined;
 
 /**
  * The option that reads a filtergraph from a file: `-/filter_complex` since
- * FFmpeg 7 (which deprecates the old one), `-filter_complex_script` before.
- * A build that doesn't name its version is taken as current.
+ * FFmpeg 7 (which deprecates the old one), `-filter_complex_script` before. A
+ * build that doesn't name its version (a git snapshot) gets the old option
+ * while its help still lists it.
  */
 export function filterGraphFileOption(): Promise<string> {
-  graphOption ??= runFfmpeg(['-hide_banner', '-version']).then(
-    ({ stdout }) => {
-      const major = parseFfmpegMajor(stdout);
-      return major !== null && major < 7 ? '-filter_complex_script' : '-/filter_complex';
-    },
-    (err: unknown) => {
-      graphOption = undefined;
-      throw err;
-    },
-  );
+  graphOption ??= (async () => {
+    const major = parseFfmpegMajor((await runFfmpeg(['-hide_banner', '-version'])).stdout);
+    if (major !== null) return major < 7 ? '-filter_complex_script' : '-/filter_complex';
+    const help = (await runFfmpeg(['-hide_banner', '-h', 'full'])).stdout;
+    return help.includes('-filter_complex_script') ? '-filter_complex_script' : '-/filter_complex';
+  })().catch((err: unknown) => {
+    graphOption = undefined;
+    throw err;
+  });
   return graphOption;
 }
 

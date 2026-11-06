@@ -1,4 +1,4 @@
-import { closeSync, openSync, readSync } from 'node:fs';
+import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -112,25 +112,37 @@ export function fontFileFor(text: string, opts: FontOptions = {}): string | unde
   throw new MissingFontError(String.fromCodePoint(...missing.slice(0, 12)));
 }
 
-/** Spaces and format characters draw nothing, so no font needs them. */
+/** Spaces, format characters and variation selectors (the U+FE0F in ♥️) draw
+ *  nothing of their own, so no font needs them. */
 function isInvisible(cp: number): boolean {
-  return /[\p{White_Space}\p{Cf}]/u.test(String.fromCodePoint(cp));
+  return /[\p{White_Space}\p{Cf}\p{Variation_Selector}]/u.test(String.fromCodePoint(cp));
 }
 
 type Coverage = (codePoint: number) => boolean;
 
 const coverageCache = new Map<string, Coverage | null>();
 
-/** The font's character map as a lookup, or null when it can't be read. */
+/**
+ * The font's character map as a lookup, or null when it can't be read. Kept
+ * per file size and mtime, and a missing file is looked for again next time,
+ * so a font installed while `clip ui` or `clip mcp` runs is picked up.
+ */
 function coverageOf(path: string): Coverage | null {
-  let covers = coverageCache.get(path);
+  let key: string;
+  try {
+    const { size, mtimeMs } = statSync(path);
+    key = `${path}:${size}:${mtimeMs}`;
+  } catch {
+    return null;
+  }
+  let covers = coverageCache.get(key);
   if (covers === undefined) {
     try {
       covers = readCoverage(path);
     } catch {
       covers = null;
     }
-    coverageCache.set(path, covers);
+    coverageCache.set(key, covers);
   }
   return covers;
 }

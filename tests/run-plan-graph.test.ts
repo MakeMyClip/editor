@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseFfmpegMajor } from '../src/ffmpeg/run.js';
 import { INLINE_GRAPH_MAX, spillLongGraph } from '../src/timeline/run-plan.js';
 
@@ -34,5 +37,48 @@ describe('spillLongGraph', () => {
       '/ws/g.txt',
       'out.mp4',
     ]);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('filterGraphFileOption', () => {
+  const saved = process.env.MAKEMYCLIP_FFMPEG_PATH;
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'mmc-graph-option-'));
+    vi.resetModules();
+  });
+
+  afterEach(async () => {
+    if (saved === undefined) delete process.env.MAKEMYCLIP_FFMPEG_PATH;
+    else process.env.MAKEMYCLIP_FFMPEG_PATH = saved;
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  /** A fake FFmpeg printing `version` for -version and `help` for -h full. */
+  async function option(version: string, help: string): Promise<string> {
+    const bin = join(dir, 'ffmpeg');
+    await writeFile(
+      bin,
+      `#!/bin/sh\nfor a in "$@"; do\n  [ "$a" = -version ] && { echo '${version}'; exit 0; }\n  [ "$a" = full ] && { echo '${help}'; exit 0; }\ndone\n`,
+    );
+    await chmod(bin, 0o755);
+    process.env.MAKEMYCLIP_FFMPEG_PATH = bin;
+    const { filterGraphFileOption } = await import('../src/ffmpeg/run.js');
+    return filterGraphFileOption();
+  }
+
+  it('picks by version, and by the help text when the build has none', async () => {
+    expect(await option('ffmpeg version 6.1.1', '')).toBe('-filter_complex_script');
+    vi.resetModules();
+    expect(await option('ffmpeg version 7.1.1', '')).toBe('-/filter_complex');
+    vi.resetModules();
+    expect(await option('ffmpeg version N-1-gabc', '-filter_complex_script <file>')).toBe(
+      '-filter_complex_script',
+    );
+    vi.resetModules();
+    expect(await option('ffmpeg version N-1-gabc', '-filter_complex <graph>')).toBe(
+      '-/filter_complex',
+    );
   });
 });

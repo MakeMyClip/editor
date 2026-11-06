@@ -165,6 +165,17 @@ describe('fontFileFor', () => {
     expect(fontFileFor('Жизнь 你好', { candidates: candidates() })).toBe(paths.cjk);
   });
 
+  it('needs no glyph for a variation selector', () => {
+    expect(fontFileFor('Жизнь\uFE0F', { candidates: candidates() })).toBe(paths.cyrillic);
+  });
+
+  it('finds a font installed after a check came up empty', async () => {
+    const later = join(dir, 'installed-later.ttf');
+    expect(() => fontFileFor('あ', { candidates: [later] })).toThrow(MissingFontError);
+    await writeFile(later, sfnt(3, 10, format12([[0x3040, 0x309f]])));
+    expect(fontFileFor('あ', { candidates: [later] })).toBe(later);
+  });
+
   it('names the characters no font has', () => {
     expect(() => fontFileFor('Жизнь あ', { candidates: candidates() })).toThrow(MissingFontError);
     try {
