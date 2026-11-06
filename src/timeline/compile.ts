@@ -109,7 +109,7 @@ function isIdentityTransform(clip: Clip): boolean {
 }
 
 /** Net speed multiplier from the effect stack (1 when none). */
-function speedFactor(effects: Effect[]): number {
+export function speedFactor(effects: Effect[]): number {
   return effects.reduce((f, e) => (e.type === 'speed' ? f * e.factor : f), 1);
 }
 

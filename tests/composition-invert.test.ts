@@ -125,6 +125,28 @@ describe('invertOp — per-op round-trip (apply then inverse = identity)', () =>
     expectRoundtrip(richDoc(), { op: 'splitClip', clipId: 't1', atSec: 1, newClipId: 't1b' });
   });
 
+  it('silenceCut WITH a following transition and a rippled clip after it', () => {
+    expectRoundtrip(richDoc(), {
+      op: 'silenceCut',
+      clipId: 'c1',
+      keepRegions: [
+        { sourceInSec: 0.5, sourceOutSec: 1.5 },
+        { sourceInSec: 2, sourceOutSec: 3 },
+        { sourceInSec: 4, sourceOutSec: 4.8 },
+      ],
+      newClipIds: ['c1b', 'c1c'],
+    });
+  });
+
+  it('silenceCut of the last clip, one kept window', () => {
+    expectRoundtrip(richDoc(), {
+      op: 'silenceCut',
+      clipId: 'c2',
+      keepRegions: [{ sourceInSec: 1, sourceOutSec: 3 }],
+      newClipIds: [],
+    });
+  });
+
   it('addEffect (append)', () => {
     expectRoundtrip(richDoc(), {
       op: 'addEffect',
@@ -275,6 +297,23 @@ describe('invertOp — clips carrying effects + a transform (no silent data loss
 
   it('splitClip preserves effects + transform on both halves through the round-trip', () => {
     expectRoundtrip(decoratedDoc(), { op: 'splitClip', clipId: 'c1', atSec: 2, newClipId: 'c1b' });
+  });
+
+  it('silenceCut restores the fades it dropped from the sub-clips', () => {
+    expectRoundtrip(
+      applyOps(decoratedDoc(), [
+        { op: 'addEffect', clipId: 'c1', effect: { type: 'fadeOut', durationSec: 0.5 } },
+      ]),
+      {
+        op: 'silenceCut',
+        clipId: 'c1',
+        keepRegions: [
+          { sourceInSec: 0, sourceOutSec: 2 },
+          { sourceInSec: 3, sourceOutSec: 5 },
+        ],
+        newClipIds: ['c1b'],
+      },
+    );
   });
 
   it('moveClip across tracks preserves effects + transform + the dropped transition', () => {
