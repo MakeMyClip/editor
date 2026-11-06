@@ -248,6 +248,43 @@ describe('planCaptions', () => {
     );
   });
 
+  it('replaces the captions a trim left past the clip when captioning it again', async () => {
+    currentDoc = applyOps(cutRecording(), [{ op: 'removeClip', clipId: 'b' }]);
+    const long = transcriptOf(M, spoken('one two three four five six seven eight nine ten'));
+    const transcripts = new Map([[M, long]]);
+    currentDoc = applyOps(
+      currentDoc,
+      (await planCaptions(currentDoc, { maxWords: 2 }, lookup(transcripts), counter())).ops,
+    );
+    currentDoc = applyOps(currentDoc, [{ op: 'setTrim', clipId: 'a', sourceOutSec: 1 }]);
+    const again = await planCaptions(
+      currentDoc,
+      { clipId: 'a', maxWords: 2 },
+      lookup(transcripts),
+      counter('again'),
+    );
+    const doc = applyOps(currentDoc, again.ops);
+    const captions = doc.tracks.find((t) => t.id === 'captions')?.clips ?? [];
+    expect(captions.every((c) => c.id.startsWith('again'))).toBe(true);
+    expect(checkExportable(doc, new Map([[M, { path: '/a.mp4', hasAudio: true }]]), '.')).toEqual({
+      exportable: true,
+      blockers: [],
+    });
+  });
+
+  it('lifts a caption track left under the picture back on top', async () => {
+    currentDoc = applyOps(cutRecording(), [
+      { op: 'addTrack', track: videoTrack({ id: 'captions' }), index: 0 },
+    ]);
+    const plan = await planCaptions(currentDoc, {}, lookup(new Map([[M, RECORDING]])), counter());
+    const doc = applyOps(currentDoc, plan.ops);
+    expect(doc.tracks.map((t) => t.id)).toEqual(['v0', 'captions']);
+    expect(doc.tracks[1]?.clips).toHaveLength(2);
+    expect(
+      checkExportable(doc, new Map([[M, { path: '/a.mp4', hasAudio: true }]]), '.').exportable,
+    ).toBe(true);
+  });
+
   it('refuses a caption track that holds video', async () => {
     currentDoc = applyOps(cutRecording(), [
       { op: 'addTrack', track: videoTrack({ id: 'captions' }) },

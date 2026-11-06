@@ -1,5 +1,7 @@
+import { videoLayers } from './compile.js';
 import {
   type Anchor,
+  type Clip,
   type Composition,
   clipEndSec,
   type MediaClip,
@@ -94,12 +96,16 @@ export async function planCaptions(
     ? [await transcriptFor(request.clipId, request.transcriptId)]
     : await everyTranscribedClip(comp, trackId, transcriptFor);
 
-  const covered = (startSec: number, endSec: number): boolean =>
-    !request.clipId ||
-    sources.some(({ clip }) => startSec < clipEndSec(clip) && endSec > clip.startSec);
-  const removed: CompositionOp[] = (track?.clips ?? [])
-    .filter((c) => covered(c.startSec, clipEndSec(c)))
-    .map((c) => ({ op: 'removeClip', clipId: c.id }));
+  // A clip's captions run from its start to the next clip on its track, so the
+  // ones a trim left past its new end are replaced too.
+  const spans = sources.map(({ clip }) => ({
+    start: clip.startSec,
+    end: nextClipStart(comp, clip),
+  }));
+  const replaced = (c: Clip): boolean =>
+    !request.clipId || spans.some((s) => c.startSec < s.end && clipEndSec(c) > s.start);
+  const kept = (track?.clips ?? []).filter((c) => !replaced(c));
+  const removed = (track?.clips.length ?? 0) - kept.length;
 
   const style = { ...defaultCaptionStyle(comp), ...request.style };
   const added: CompositionOp[] = sources.flatMap(({ clip, transcript }) =>
@@ -118,16 +124,41 @@ export async function planCaptions(
     ),
   );
 
-  // The caption track goes on top, so the picture can't hide it.
-  const addTrack: CompositionOp[] = track
-    ? []
-    : [{ op: 'addTrack', track: videoTrack({ id: trackId }) }];
+  // The caption track sits above the picture, so the picture can't hide it; one
+  // left under it (the picture moved up a track since) is lifted to the top.
+  const { picture } = videoLayers(comp);
+  const lift = Boolean(
+    track && picture && comp.tracks.indexOf(track) < comp.tracks.indexOf(picture),
+  );
+  let trackOps: CompositionOp[];
+  if (!track) trackOps = [{ op: 'addTrack', track: videoTrack({ id: trackId }) }];
+  else if (lift) {
+    trackOps = [
+      { op: 'removeTrack', trackId },
+      { op: 'addTrack', track: { ...track, clips: kept, transitions: [] } },
+    ];
+  } else {
+    trackOps = track.clips
+      .filter((c) => !kept.includes(c))
+      .map((c): CompositionOp => ({ op: 'removeClip', clipId: c.id }));
+  }
   return {
-    ops: added.length > 0 || removed.length > 0 ? [...addTrack, ...removed, ...added] : [],
+    ops: added.length > 0 || removed > 0 || lift ? [...trackOps, ...added] : [],
     captions: added.length,
     clipIds: sources.map(({ clip }) => clip.id),
     track: trackId,
   };
+}
+
+/** Where the next clip on a clip's track starts (Infinity when it's the last). */
+function nextClipStart(comp: Composition, clip: MediaClip): number {
+  const track = comp.tracks.find((t) => t.clips.some((c) => c.id === clip.id));
+  return (track?.clips ?? [])
+    .filter((c) => c.id !== clip.id && c.startSec >= clip.startSec)
+    .reduce(
+      (next, c) => Math.min(next, Math.max(c.startSec, clipEndSec(clip))),
+      Number.POSITIVE_INFINITY,
+    );
 }
 
 /** Every media clip outside the caption track whose source has a transcript.

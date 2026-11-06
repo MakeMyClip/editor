@@ -1,8 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { unlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { filterGraphFileOption, requireDrawtext, runFfmpeg } from '../ffmpeg/run.js';
-import { getWorkspace } from '../workspace.js';
 import type { FfmpegPlan } from './compile.js';
 
 export interface RunPlanResult {
@@ -54,7 +53,11 @@ export async function runPlan(plan: FfmpegPlan): Promise<RunPlanResult> {
       if (step.output !== plan.output) cleanup.push(step.output);
       let { args } = step;
       if (step.args.some((a) => a.length > INLINE_GRAPH_MAX)) {
-        const graphPath = join(getWorkspace(), `.graph-${randomBytes(4).toString('hex')}.txt`);
+        // Beside the step's output: a folder the plan already writes to.
+        const graphPath = join(
+          dirname(step.output),
+          `.graph-${randomBytes(4).toString('hex')}.txt`,
+        );
         const spilled = spillLongGraph(step.args, graphPath, await filterGraphFileOption());
         if (spilled.graph !== null) {
           await writeFile(graphPath, spilled.graph, 'utf-8');
