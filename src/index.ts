@@ -202,6 +202,16 @@ export {
   sensitivityToDetect,
 } from './timeline/silence.js';
 export {
+  type ClipTranscript,
+  type ClipWord,
+  clipWords,
+  type Transcript,
+  TranscriptError,
+  TranscriptSchema,
+  transcribeClip,
+  transcribeMedia,
+} from './timeline/transcript.js';
+export {
   type CompositionVerb,
   type CompositionVerbKind,
   CompositionVerbSchema,
@@ -324,3 +334,8 @@ export {
   type ZoomPanResult,
   zoomPan,
 } from './tools/zoom-pan.js';
+export {
+  TranscriptionUnavailableError,
+  WHISPER_MODEL_ENV,
+  WHISPER_PATH_ENV,
+} from './transcribe/whisper.js';
