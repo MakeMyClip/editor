@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { buildCellStillArgs, buildContactSheetArgs } from '../ffmpeg/args/contact-sheet.js';
 import { buildPeakVolumeArgs } from '../ffmpeg/args/volume-detect.js';
 import { runFfmpeg } from '../ffmpeg/run.js';
-import { type MediaInfo, speedFactor } from './compile.js';
+import { type MediaInfo, speedFactor, videoLayers } from './compile.js';
 import {
   type Clip,
   type Composition,
@@ -83,10 +83,13 @@ export type PeakMeter = (
   durationSec: number,
 ) => Promise<number | null>;
 
-/** Hard cuts on every track: abutting clips with no transition between them. */
+/** Hard cuts on every track: abutting clips with no transition between them.
+ *  Text tracks over the picture (captions) are skipped: their joins aren't cuts. */
 export function hardCuts(comp: Composition): CutPoint[] {
   const cuts: CutPoint[] = [];
+  const overlays = new Set(videoLayers(comp).overlays);
   for (const track of comp.tracks) {
+    if (overlays.has(track)) continue;
     const clips = [...track.clips].sort((a, b) => a.startSec - b.startSec);
     const blended = new Set(track.transitions.map((t) => t.afterClipId));
     for (let i = 1; i < clips.length; i++) {

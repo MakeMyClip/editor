@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { clipDuration, clipEndSec, clipLabel, compositionDuration } from '../lib/composition.js';
+import type { Verb } from '../lib/verbs.js';
 import type { Clip, Composition, MediaClip } from '../types.js';
+import { CaptionsPanel } from './CaptionsPanel.js';
 
 const PX_PER_SEC = 90;
 const GUTTER = 128; // left lane-label column width (px)
@@ -25,6 +27,8 @@ export function DocTimeline({
   exporting,
   onUndo,
   onRedo,
+  onApply,
+  verbError,
 }: {
   composition: Composition;
   selectedClipId: string | null;
@@ -35,6 +39,9 @@ export function DocTimeline({
   exporting: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  /** Apply editing verbs (captions); resolves to the ops applied, or null on error. */
+  onApply: (verbs: Verb[]) => Promise<number | null>;
+  verbError: string | null;
 }) {
   const total = compositionDuration(composition);
   const spanSec = Math.max(total, MIN_SPAN_SEC);
@@ -82,6 +89,7 @@ export function DocTimeline({
           rev {composition.rev}
         </span>
         <span className="doc-tl-playtime">▶ {playhead.toFixed(2)}s</span>
+        <CaptionsPanel busy={exporting} error={verbError} onApply={onApply} />
         <button
           type="button"
           className="btn-secondary doc-tl-histbtn"

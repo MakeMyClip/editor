@@ -12,6 +12,14 @@ export type Verb =
   | { verb: 'cut_words'; clipId: string; fromIndex: number; toIndex: number; transcriptId: string }
   | { verb: 'remove_retakes'; clipId: string; transcriptId?: string }
   | {
+      verb: 'caption_speech';
+      clipId?: string;
+      maxWords?: number;
+      anchor?: string;
+      color?: string;
+      background?: string | null;
+    }
+  | {
       verb: 'transition';
       afterClipId: string;
       kind?: string;

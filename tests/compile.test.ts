@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MissingFontError } from '../src/ffmpeg/font.js';
 import { type CompileContext, CompileError, compileTimeline } from '../src/timeline/compile.js';
 import { emptyComposition } from '../src/timeline/composition.js';
 import { applyOps, colorClip, mediaClip, textClip, videoTrack } from '../src/timeline/ops.js';
@@ -413,5 +414,166 @@ describe('compileTimeline — fade clamping', () => {
     // d clamped to outDur (2), start = 0 — a full fade within the window.
     expect(fc).toContain('fade=t=out:st=0:d=2');
     expect(fc).toContain('afade=t=out:st=0:d=2');
+  });
+});
+
+describe('compileTimeline — text over the picture (captions)', () => {
+  const caption = (id: string, text: string, startSec: number, durationSec: number) =>
+    textClip({ id, text, startSec, durationSec, style: { anchor: 'bottom-center' } });
+
+  /** Two abutting media clips on v0 and the given text clips on a track above. */
+  function captioned(texts: ReturnType<typeof caption>[], speed?: number) {
+    return applyOps(emptyComposition(), [
+      { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+      { op: 'addTrack', track: videoTrack({ id: 'captions' }) },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({
+          id: 'a',
+          mediaId: M1,
+          sourceInSec: 10,
+          sourceOutSec: 14,
+          startSec: 0,
+          effects: speed ? [{ type: 'speed', factor: speed }] : [],
+        }),
+      },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'b', mediaId: M2, sourceOutSec: 3, startSec: 4 }),
+      },
+      ...texts.map((clip) => ({ op: 'addClip' as const, trackId: 'captions', clip })),
+    ]);
+  }
+
+  /** Every drawtext in a step's graph, parsed the way FFmpeg reads it. */
+  function drawtexts(args: string[] | undefined) {
+    const fc = args?.[args.indexOf('-filter_complex') + 1] ?? '';
+    return fc
+      .split('drawtext=')
+      .slice(1)
+      .map((rest) => parseFilter(`drawtext=${rest}`).options);
+  }
+
+  it('draws each caption in the segment it falls in, timed in segment seconds', () => {
+    const comp = captioned([
+      caption('c1', 'hello there', 0.5, 1.5),
+      caption('c2', 'and you', 4.2, 1),
+    ]);
+    const plan = compileTimeline(comp, ctx({ fontFor: () => undefined }));
+    const [segA, segB] = plan.steps;
+    expect(drawtexts(segA?.args).map((o) => o.enable)).toEqual(['gte(t,0.5)*lt(t,2)']);
+    expect(drawtexts(segB?.args).map((o) => o.enable)).toEqual(['gte(t,0.2)*lt(t,1.2)']);
+    expect(segA?.textFiles.map((f) => f.content)).toEqual(['hello there']);
+    expect(segB?.textFiles.map((f) => f.content)).toEqual(['and you']);
+    // The picture runs only as long as v0; captions don't lengthen the export.
+    expect(plan.durationSec).toBe(7);
+  });
+
+  it('splits a caption across a cut and draws it over the effects', () => {
+    const comp = captioned([caption('c1', 'across', 3.5, 1)]);
+    const plan = compileTimeline(comp, ctx({ fontFor: () => undefined }));
+    expect(drawtexts(plan.steps[0]?.args)[0]?.enable).toBe('gte(t,3.5)*lt(t,4)');
+    expect(drawtexts(plan.steps[1]?.args)[0]?.enable).toBe('gte(t,0)*lt(t,0.5)');
+    const fc = plan.steps[0]?.args.join(' ') ?? '';
+    expect(fc.indexOf('fps=30')).toBeLessThan(fc.indexOf('drawtext='));
+  });
+
+  it('scales caption times with a speed effect so they stay on the speech', () => {
+    const comp = captioned([caption('c1', 'fast', 1, 2)], 2);
+    const plan = compileTimeline(comp, ctx({ fontFor: () => undefined }));
+    expect(drawtexts(plan.steps[0]?.args)[0]?.enable).toBe('gte(t,0.5)*lt(t,1.5)');
+  });
+
+  it('turns off % expansion and uses the font that has the glyphs', () => {
+    const comp = captioned([caption('c1', 'Привет 50%', 0, 1), caption('c2', 'plain', 1, 1)]);
+    const fontFor = (text: string) => (text.startsWith('П') ? '/fonts/Cyr.ttf' : undefined);
+    const [cyr, plain] = drawtexts(compileTimeline(comp, ctx({ fontFor })).steps[0]?.args);
+    expect(cyr).toMatchObject({ fontfile: '/fonts/Cyr.ttf', expansion: 'none' });
+    expect(plain?.fontfile).toBeUndefined();
+    expect(plain?.expansion).toBe('none');
+  });
+
+  it('asks for a font file for captions even in Latin, not for a title on the picture', () => {
+    const comp = applyOps(captioned([caption('c1', 'caption', 0, 1)]), [
+      { op: 'removeClip', clipId: 'b' },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: textClip({ id: 't', text: 'Title', startSec: 4, durationSec: 3 }),
+      },
+    ]);
+    const asked: [string, boolean][] = [];
+    const fontFor = (text: string, always: boolean) => {
+      asked.push([text, always]);
+      return always ? '/fonts/Sans.ttf' : undefined;
+    };
+    const plan = compileTimeline(comp, ctx({ fontFor }));
+    expect(asked).toEqual([
+      ['caption', true],
+      ['Title', false],
+    ]);
+    expect(drawtexts(plan.steps[0]?.args)[0]?.fontfile).toBe('/fonts/Sans.ttf');
+  });
+
+  it('reports a missing font as a blocker on the text clip', () => {
+    const comp = captioned([caption('c1', '你好', 0, 1)]);
+    const fontFor = () => {
+      throw new MissingFontError('你好');
+    };
+    expect(() => compileTimeline(comp, ctx({ fontFor }))).toThrow(/Text clip "c1".*glyphs/);
+  });
+
+  it('rejects text under the picture, text past its end, and effects on text over it', () => {
+    const under = applyOps(emptyComposition(), [
+      { op: 'addTrack', track: videoTrack({ id: 'captions' }) },
+      { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+      { op: 'addClip', trackId: 'captions', clip: caption('c1', 'hidden', 0, 1) },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 0 }),
+      },
+    ]);
+    expect(() => compileTimeline(under, ctx())).toThrow(/under track "v0"/);
+    expect(() => compileTimeline(captioned([caption('c1', 'late', 6.5, 1)]), ctx())).toThrow(
+      /past the end of the picture/,
+    );
+    const faded = textClip({
+      id: 'c1',
+      text: 'x',
+      startSec: 0,
+      durationSec: 1,
+      effects: [{ type: 'fadeIn', durationSec: 0.2 }],
+    });
+    expect(() => compileTimeline(captioned([faded]), ctx())).toThrow(/has effects/);
+  });
+
+  it('draws a higher track over a lower one, whatever their start times', () => {
+    const comp = applyOps(captioned([caption('low', 'caption', 2, 1)]), [
+      { op: 'addTrack', track: videoTrack({ id: 'titles' }) },
+      { op: 'addClip', trackId: 'titles', clip: caption('high', 'title', 0, 3) },
+    ]);
+    const plan = compileTimeline(comp, ctx({ fontFor: () => undefined }));
+    const order = plan.steps[0]?.textFiles.map((f) => f.content);
+    expect(order).toEqual(['caption', 'title']);
+  });
+
+  it('rejects transitions on a text track instead of dropping them', () => {
+    const comp = applyOps(captioned([caption('c1', 'a', 0, 1), caption('c2', 'b', 1, 1)]), [
+      {
+        op: 'addTransition',
+        trackId: 'captions',
+        transition: { afterClipId: 'c1', kind: 'fade', durationSec: 0.5 },
+      },
+    ]);
+    expect(() => compileTimeline(comp, ctx())).toThrow(/has transitions/);
+  });
+
+  it('still treats a lone text track as the picture (a title sequence)', () => {
+    const comp = oneTrack({ op: 'addClip', trackId: 'v0', clip: caption('t', 'Title', 0, 2) });
+    const plan = compileTimeline(comp, ctx({ fontFor: () => undefined }));
+    expect(drawtexts(plan.steps[0]?.args)[0]?.enable).toBeUndefined();
   });
 });

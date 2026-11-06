@@ -321,6 +321,8 @@ To read what's said in a clip, run `timeline transcribe <clipId>`: it returns th
 
 To cut by words, use the `index` values from `timeline transcribe`: `timeline cut-words <clipId> <fromIndex> <toIndex>` removes those words (inclusive) and moves later clips on the track up. Add `--transcript <transcriptId>` from the same `timeline transcribe` output so the cut is refused, not misplaced, if the clip was transcribed again since. The transcript also lists `retakes`, phrases said twice in a row; `timeline remove-retakes <clipId>` cuts the earlier take of each (`--dry-run` lists them first). Each is one edit that `timeline undo` reverses. A cut splits the clip, so transcribe the resulting clips again before the next cut, and run `timeline check` afterwards.
 
+To caption speech, run `timeline captions` once the cuts are done: it turns the stored transcripts into text clips on a `captions` track above the video, timed to the words, and export burns them in. With no clip id it captions every transcribed clip and replaces the whole caption track; `timeline captions <clipId>` replaces only the captions over that clip. Captions are short phrases (up to 7 words, broken at pauses and sentence ends); `--words 1` shows one word at a time. Style with `--font <size> --color <color> --anchor <position> --background <color|none>` (default white on a dark box, bottom center). Captions don't move with later cuts, so run it again after one. It's one edit that `timeline undo` reverses, and `timeline frame <sec>` shows a captioned frame. Text outside Latin (Cyrillic, Chinese, Japanese, Korean) is drawn with an installed font that has its glyphs; if none does, export says which characters are missing — install a font (for CJK, Noto Sans CJK) or set `MAKEMYCLIP_FALLBACK_FONT` to a font file. Nothing is downloaded.
+
 ### Open the local UI (implemented)
 
 ```bash
@@ -329,7 +331,7 @@ npx -y @makemyclip/editor ui
 
 Starts a tiny local server on `http://127.0.0.1:5573` and opens your browser. The UI renders the session log (every op the agent has run), shows result paths and timestamps, and lets the user click an op to play its output. Useful as a companion to the chat-driven workflow — the user can watch the session evolve in real time and check outputs without touching the terminal.
 
-Local-only. The UI is a dark timeline editor: drag-drop import, a monitor (the composited frame at the playhead), an editable timeline (select a clip to trim / split / move / transition / remove), one-click export, timeline undo/redo, and snapshot — so the user can take over visually whenever the agent goes off-script.
+Local-only. The UI is a dark timeline editor: drag-drop import, a monitor (the composited frame at the playhead), an editable timeline (select a clip to trim / split / move / transition / remove), captions from transcripts (the timeline's Captions button), one-click export, timeline undo/redo, and snapshot — so the user can take over visually whenever the agent goes off-script.
 
 ### Session safety — snapshot, undo, inspect, delete (implemented)
 
