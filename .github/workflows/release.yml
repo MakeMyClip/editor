@@ -13,7 +13,7 @@ jobs:
       contents: write       # write CHANGELOG, create GitHub releases
       issues: write         # comment on released issues
       pull-requests: write  # comment on released PRs
-      id-token: write       # npm Trusted Publishing via OIDC
+      id-token: write       # npm Trusted Publishing and MCP Registry login via OIDC
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -42,6 +42,30 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # The MCP Registry's CLI, verified against its release signature. The
+      # release step runs it (as semantic-release's successCmd) once npm has
+      # the new version and the .mcpb is on the GitHub release.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Install mcp-publisher
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.8
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          archive="mcp-publisher_linux_amd64.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
       - name: Release
         env:

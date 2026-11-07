@@ -17,8 +17,9 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "pnpm build:mcpb",
-        "publishCmd": "npm publish --provenance --access public"
+        "prepareCmd": "pnpm build:mcpb && pnpm registry:prepare",
+        "publishCmd": "npm publish --provenance --access public",
+        "successCmd": "pnpm registry:publish"
       }
     ],
     [
