@@ -11,6 +11,7 @@ The open-source AI video editor for Claude Code and any MCP client: remove silen
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="./package.json"><img src="https://img.shields.io/badge/node-%E2%89%A524-brightgreen" alt="Node 24+"></a>
   <a href="https://www.npmjs.com/package/@makemyclip/editor"><img src="https://img.shields.io/npm/v/@makemyclip/editor.svg" alt="npm"></a>
+  <a href="https://skills.sh/makemyclip/editor"><img src="https://skills.sh/b/makemyclip/editor" alt="skills.sh"></a>
   <img src="https://img.shields.io/badge/tests-741%20passing-brightgreen" alt="Tests: 741 passing">
   <img src="https://img.shields.io/badge/telemetry-none-brightgreen" alt="Telemetry: none">
 </p>
@@ -399,7 +400,7 @@ Built on the work of [FFmpeg](https://ffmpeg.org/), [whisper.cpp](https://github
 | | |
 |---|---|
 | **npm** | [`@makemyclip/editor`](https://www.npmjs.com/package/@makemyclip/editor) |
-| **Skill page** | [skills.sh/MakeMyClip/editor](https://skills.sh/MakeMyClip/editor) |
+| **Skill page** | [skills.sh/makemyclip/editor/editor](https://skills.sh/makemyclip/editor/editor) |
 | **GitHub** | [MakeMyClip/editor](https://github.com/MakeMyClip/editor) |
 | **Website** | [makemyclip.com](https://makemyclip.com) |
 | **For AI agents** | [llms.txt](./llms.txt) |
