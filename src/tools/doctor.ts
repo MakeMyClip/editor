@@ -1,5 +1,4 @@
 import { randomBytes } from 'node:crypto';
-import { statSync } from 'node:fs';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execa } from 'execa';
@@ -7,7 +6,8 @@ import ffmpegStatic from 'ffmpeg-static';
 import { z } from 'zod';
 import { fontFileFor } from '../ffmpeg/font.js';
 import { FFMPEG_PATH_ENV, parseFilterList, resolveFfmpeg } from '../ffmpeg/run.js';
-import { WHISPER_MODEL_ENV, WHISPER_PATH_ENV } from '../transcribe/whisper.js';
+import { isFile } from '../system-binary.js';
+import { WHISPER_MODEL_ENV, WHISPER_PATH_ENV, whisperBinary } from '../transcribe/whisper.js';
 import { getWorkspace } from '../workspace.js';
 
 /**
@@ -48,6 +48,8 @@ export interface DoctorResult {
   /** False when any check failed. Warnings leave it true. */
   ok: boolean;
   checks: DoctorCheck[];
+  /** Where the MAKEMYCLIP_* settings named in the fixes are changed. */
+  howToSet: string;
 }
 
 /** What the checks read from the machine; tests pass stubs. */
@@ -73,6 +75,8 @@ export interface DoctorDeps {
 const MIN_NODE_MAJOR = 24;
 const WORKSPACE_ENV = 'MAKEMYCLIP_WORKSPACE';
 const FALLBACK_FONT_ENV = 'MAKEMYCLIP_FALLBACK_FONT';
+/** Set to `mcpb` by the Claude Desktop extension's manifest. */
+const BUNDLE_ENV = 'MAKEMYCLIP_BUNDLE';
 
 export function defaultDoctorDeps(): DoctorDeps {
   return {
@@ -88,13 +92,7 @@ export function defaultDoctorDeps(): DoctorDeps {
       });
       return { stdout };
     },
-    isFile: (path) => {
-      try {
-        return statSync(path).isFile();
-      } catch {
-        return false;
-      }
-    },
+    isFile,
     probeWritable: async (dir) => {
       await mkdir(dir, { recursive: true });
       const probe = join(dir, `.doctor-${randomBytes(4).toString('hex')}`);
@@ -120,7 +118,17 @@ export async function doctor(
     await checkWhisper(deps),
     checkWhisperModel(deps),
   ];
-  return { ok: checks.every((c) => c.status !== 'fail'), checks };
+  return {
+    ok: checks.every((c) => c.status !== 'fail'),
+    checks,
+    howToSet: inExtension(deps)
+      ? "Change these in Claude Desktop, in the MakeMyClip Editor extension's settings: Media folder is MAKEMYCLIP_WORKSPACE, FFmpeg is MAKEMYCLIP_FFMPEG_PATH, Whisper model is MAKEMYCLIP_WHISPER_MODEL and whisper-cli is MAKEMYCLIP_WHISPER_PATH."
+      : 'Set environment variables in your shell profile; for `clip mcp`, set them in the MCP client config for the server.',
+  };
+}
+
+function inExtension(deps: DoctorDeps): boolean {
+  return deps.env[BUNDLE_ENV] === 'mcpb';
 }
 
 function checkNode(version: string): DoctorCheck {
@@ -138,7 +146,7 @@ function checkNode(version: string): DoctorCheck {
 const SOURCE_NAMES = {
   env: FFMPEG_PATH_ENV,
   bundled: 'bundled ffmpeg-static',
-  system: 'ffmpeg on PATH',
+  system: 'system',
 } as const;
 
 function installFfmpegHint(platform: NodeJS.Platform): string {
@@ -150,7 +158,12 @@ function installFfmpegHint(platform: NodeJS.Platform): string {
 async function checkFfmpeg(
   deps: DoctorDeps,
 ): Promise<{ check: DoctorCheck; filters: Set<string> | null }> {
-  const { path, source } = resolveFfmpeg(deps.env, deps.bundledFfmpeg);
+  const { path, source } = resolveFfmpeg({
+    env: deps.env,
+    platform: deps.platform,
+    isFile: deps.isFile,
+    bundled: deps.bundledFfmpeg,
+  });
   const base = { id: 'ffmpeg', label: 'FFmpeg' } as const;
   try {
     const { stdout } = await deps.run(path, ['-hide_banner', '-version']);
@@ -163,17 +176,20 @@ async function checkFfmpeg(
   } catch (err) {
     const install = installFfmpegHint(deps.platform);
     let fix: string;
+    const found = `It is found on PATH and in Homebrew's, MacPorts' and winget's folders; or set ${FFMPEG_PATH_ENV} to its path.`;
     if (source === 'env') {
-      fix = `Point ${FFMPEG_PATH_ENV} at a working ffmpeg binary, or unset it to use the bundled one.`;
-    } else if (source === 'bundled' && !deps.isFile(path)) {
-      fix =
-        'The bundled FFmpeg was never downloaded: ffmpeg-static fetches it in an install script, ' +
-        "which was skipped (npm's --ignore-scripts, or a package manager that blocks build scripts). " +
-        `Reinstall with install scripts allowed, or install FFmpeg (${install}) and set ${FFMPEG_PATH_ENV} to its path.`;
+      fix = `Point ${FFMPEG_PATH_ENV} at a working ffmpeg binary, or unset it.`;
     } else if (source === 'bundled') {
       fix = `Install FFmpeg (${install}) and set ${FFMPEG_PATH_ENV} to its path.`;
+    } else if (inExtension(deps)) {
+      fix = `The Claude Desktop extension doesn't include FFmpeg: install it (${install}). ${found}`;
+    } else if (deps.bundledFfmpeg !== null) {
+      fix =
+        "ffmpeg-static's FFmpeg isn't installed: it downloads in an install script, which was skipped " +
+        "(npm's --ignore-scripts, or a package manager that blocks build scripts). " +
+        `Reinstall with install scripts allowed, or install FFmpeg (${install}). ${found}`;
     } else {
-      fix = `ffmpeg-static has no build for this platform. Install FFmpeg (${install}) so \`ffmpeg\` is on PATH, or set ${FFMPEG_PATH_ENV} to its path.`;
+      fix = `ffmpeg-static has no build for this platform. Install FFmpeg (${install}). ${found}`;
     }
     return {
       check: {
@@ -264,9 +280,12 @@ const WHISPER_PURPOSE = 'Optional: transcript cuts, retake removal and captions 
 
 async function checkWhisper(deps: DoctorDeps): Promise<DoctorCheck> {
   const base = { id: 'whisper', label: 'whisper.cpp (optional)' } as const;
-  const explicit = deps.env[WHISPER_PATH_ENV];
-  const binary = explicit ?? 'whisper-cli';
-  const where = explicit === undefined ? 'on PATH' : WHISPER_PATH_ENV;
+  const { path: binary, source } = whisperBinary({
+    env: deps.env,
+    platform: deps.platform,
+    isFile: deps.isFile,
+  });
+  const where = source === 'env' ? WHISPER_PATH_ENV : 'installed';
   try {
     await deps.run(binary, ['--help']);
   } catch (err) {
@@ -282,9 +301,9 @@ async function checkWhisper(deps: DoctorDeps): Promise<DoctorCheck> {
         status: 'warn',
         detail: `${binary} (${where}) doesn't run: ${reason(err)}. ${WHISPER_PURPOSE}`,
         fix:
-          explicit === undefined
-            ? `Install or reinstall whisper.cpp (${install}). If whisper-cli isn't on PATH, set ${WHISPER_PATH_ENV} to it.`
-            : `Point ${WHISPER_PATH_ENV} at the whisper-cli binary, or unset it to use whisper-cli on PATH.`,
+          source === 'system'
+            ? `Install or reinstall whisper.cpp (${install}). whisper-cli is found on PATH and in Homebrew's folder; or set ${WHISPER_PATH_ENV} to it.`
+            : `Point ${WHISPER_PATH_ENV} at the whisper-cli binary, or unset it.`,
       };
     }
   }
@@ -353,11 +372,7 @@ export function formatDoctorReport(result: DoctorResult): string {
   else if (warns > 0)
     lines.push(`Ready. ${plural(warns, 'warning')}: those features stay off until fixed.`);
   else lines.push('Ready. Everything is set up.');
-  if (fails + warns > 0) {
-    lines.push(
-      'Set environment variables in your shell profile; for `clip mcp`, set them in the MCP client config for the server.',
-    );
-  }
+  if (fails + warns > 0) lines.push(result.howToSet);
   return `${lines.join('\n')}\n`;
 }
 

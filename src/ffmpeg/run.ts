@@ -1,30 +1,37 @@
 import { execa } from 'execa';
 import ffmpegStatic from 'ffmpeg-static';
+import { envSetting, findSystemBinary, isFile, type SystemLookup } from '../system-binary.js';
 
 export const FFMPEG_PATH_ENV = 'MAKEMYCLIP_FFMPEG_PATH';
 
 export interface FfmpegResolution {
   path: string;
-  /** `env`: MAKEMYCLIP_FFMPEG_PATH; `bundled`: ffmpeg-static; `system`: `ffmpeg` on PATH. */
+  /** `env`: MAKEMYCLIP_FFMPEG_PATH; `bundled`: ffmpeg-static; `system`: an installed `ffmpeg`. */
   source: 'env' | 'bundled' | 'system';
 }
 
-/**
- * Resolution order: explicit override → bundled binary → system PATH. The
- * override exists so legally-cautious users can point at an LGPL-only or
- * system-managed FFmpeg; see the License section in the README.
- */
-export function resolveFfmpeg(
-  env: Record<string, string | undefined> = process.env,
-  bundled: string | null = ffmpegStatic,
-): FfmpegResolution {
-  const override = env[FFMPEG_PATH_ENV];
-  if (override !== undefined) return { path: override, source: 'env' };
-  if (bundled !== null) return { path: bundled, source: 'bundled' };
-  return { path: 'ffmpeg', source: 'system' };
+export interface FfmpegLookup extends SystemLookup {
+  /** ffmpeg-static's binary path; null on a platform it has no build for. */
+  bundled?: string | null;
 }
 
-const ffmpegPath = resolveFfmpeg().path;
+/**
+ * Resolution order: explicit override → bundled binary → an installed FFmpeg.
+ * The override exists so legally-cautious users can point at an LGPL-only or
+ * system-managed FFmpeg; see the License section in the README. The bundled
+ * binary is skipped when it isn't on disk: ffmpeg-static downloads it in an
+ * install script, which `--ignore-scripts` skips and the Claude Desktop
+ * extension leaves out on purpose.
+ */
+export function resolveFfmpeg(lookup: FfmpegLookup = {}): FfmpegResolution {
+  const override = envSetting(FFMPEG_PATH_ENV, lookup.env);
+  if (override !== undefined) return { path: override, source: 'env' };
+  const bundled = lookup.bundled !== undefined ? lookup.bundled : ffmpegStatic;
+  if (bundled !== null && (lookup.isFile ?? isFile)(bundled)) {
+    return { path: bundled, source: 'bundled' };
+  }
+  return { path: findSystemBinary('ffmpeg', lookup), source: 'system' };
+}
 
 export interface FfmpegResult {
   stdout: string;
@@ -34,7 +41,9 @@ export interface FfmpegResult {
 
 export async function runFfmpeg(args: string[]): Promise<FfmpegResult> {
   const start = Date.now();
-  const { stdout, stderr } = await execa(ffmpegPath, args, {
+  // Resolved per run, so an FFmpeg installed while `clip mcp` or `clip ui`
+  // runs is picked up without a restart.
+  const { stdout, stderr } = await execa(resolveFfmpeg().path, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return { stdout, stderr, durationMs: Date.now() - start };
@@ -110,6 +119,7 @@ export function filterGraphFileOption(): Promise<string> {
  */
 export async function requireDrawtext(): Promise<void> {
   if ((await listFilters()).has('drawtext')) return;
+  const ffmpegPath = resolveFfmpeg().path;
   throw new MissingFilterError(
     'drawtext',
     ffmpegPath,

@@ -1,7 +1,5 @@
 import { execa } from 'execa';
-import ffmpegStatic from 'ffmpeg-static';
-
-const ffmpegPath = process.env.MAKEMYCLIP_FFMPEG_PATH ?? ffmpegStatic ?? 'ffmpeg';
+import { resolveFfmpeg } from './run.js';
 
 export interface VideoStream {
   codec: string;
@@ -32,7 +30,7 @@ export interface MediaProbe {
  */
 export async function probe(inputPath: string): Promise<MediaProbe> {
   const { stderr, exitCode } = await execa(
-    ffmpegPath,
+    resolveFfmpeg().path,
     ['-hide_banner', '-i', inputPath, '-f', 'null', '-'],
     {
       reject: false,
@@ -114,7 +112,7 @@ function parseAudioStream(stderr: string): AudioStream | null {
  * no decode, unlike `probe`.
  */
 export async function probeTimecode(inputPath: string): Promise<string | null> {
-  const { stderr } = await execa(ffmpegPath, ['-hide_banner', '-i', inputPath], {
+  const { stderr } = await execa(resolveFfmpeg().path, ['-hide_banner', '-i', inputPath], {
     reject: false,
     env: { ...process.env, LC_ALL: 'C' },
   });
