@@ -283,6 +283,33 @@ describe('interchange — FCPXML', () => {
     expect(titles[0]?.getAttribute('duration')).toBe('3s');
   });
 
+  it('keeps both appearances of text that flashes on either side of a transition', () => {
+    const root = fcpxml(
+      doc([
+        {
+          id: 'v0',
+          clips: [media('a', 0, 0, 5), media('b', 5, 0, 5, B)],
+          transitions: [{ afterClipId: 'a', durationSec: 1 }],
+        },
+        {
+          id: 'captions',
+          clips: [textClip({ id: 't', text: 'Edge', startSec: 4.8, durationSec: 0.4 })],
+        },
+      ]),
+    );
+    // On A at 4.8–5.0s; on B, which starts 1s earlier in output time, at 4.0–4.2s.
+    // Each sits on the clip at its start, in that clip's own time: A from 0s, so
+    // 4s; B is on screen from 4.5s showing its source from 0.5s, so 4.8s → 0.8s.
+    const titles = all(root, 'title').map((t) => [
+      t.getAttribute('offset'),
+      t.getAttribute('duration'),
+    ]);
+    expect(titles).toEqual([
+      ['4s', '1/5s'],
+      ['4/5s', '1/5s'],
+    ]);
+  });
+
   it('writes a gap, a black card as a gap and a colored card as a solid', () => {
     const root = fcpxml(
       doc([

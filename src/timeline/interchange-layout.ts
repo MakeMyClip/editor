@@ -568,16 +568,21 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
         );
       }
       const spec = titleSpec(clip, track.id);
+      // A transition moves a clip earlier in output time than the text's part
+      // on the clip before it, so order the parts by output time first.
+      const parts = docSpans
+        .map((doc) => ({
+          start: Math.max(from, doc.start) - doc.shift,
+          end: Math.min(to, doc.end) - doc.shift,
+        }))
+        .filter((part) => part.end > part.start)
+        .sort((a, b) => a.start - b.start);
       const pieces: Array<{ start: number; end: number }> = [];
-      for (const doc of docSpans) {
-        const start = Math.max(from, doc.start);
-        const end = Math.min(to, doc.end);
-        if (end <= start) continue;
-        const piece = { start: start - doc.shift, end: end - doc.shift };
+      for (const part of parts) {
         const last = pieces[pieces.length - 1];
-        // Across a transition both clips show the text: one title covers it.
-        if (last && piece.start <= last.end) last.end = Math.max(last.end, piece.end);
-        else pieces.push(piece);
+        // Where both clips show the text (inside a transition), one title covers it.
+        if (last && part.start <= last.end) last.end = Math.max(last.end, part.end);
+        else pieces.push({ ...part });
       }
       for (const piece of pieces) {
         titles.push({
