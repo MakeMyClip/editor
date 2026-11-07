@@ -647,18 +647,18 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
         });
       }
     }
-    // Text a transition makes overlap (the outgoing clip's caption under the
-    // incoming one's) goes on separate lanes; its fades make the cross-fade.
+    // Overlapping text goes on separate lanes (its fades make any cross-fade),
+    // each above every earlier one still on screen: the mp4 draws a track's
+    // text in start order, later on top.
     laid.sort((a, b) => a.offset - b.offset);
-    const laneEnds = new Map<number, number>();
     const base = nextLane;
-    for (const title of laid) {
-      let lane = base;
-      while ((laneEnds.get(lane) ?? 0) > title.offset) lane++;
-      laneEnds.set(lane, title.offset + title.duration);
-      title.lane = lane;
-      nextLane = Math.max(nextLane, lane + 1);
-    }
+    laid.forEach((title, i) => {
+      const under = laid
+        .slice(0, i)
+        .filter((earlier) => earlier.offset + earlier.duration > title.offset);
+      title.lane = Math.max(base, ...under.map((earlier) => earlier.lane + 1));
+      nextLane = Math.max(nextLane, title.lane + 1);
+    });
     titles.push(...laid);
   }
 

@@ -359,6 +359,30 @@ describe('interchange — FCPXML', () => {
     expect(all(byText('Across'), 'adjust-blend')).toHaveLength(0);
   });
 
+  it('stacks overlapping text of one track in start order, later on top', () => {
+    const root = fcpxml(
+      doc([
+        { id: 'v0', clips: [media('a', 0, 0, 5)] },
+        {
+          id: 'captions',
+          clips: [
+            textClip({ id: 't1', text: 'One', startSec: 0, durationSec: 2 }),
+            textClip({ id: 't2', text: 'Two', startSec: 1, durationSec: 3 }),
+            textClip({ id: 't3', text: 'Three', startSec: 2, durationSec: 2 }),
+          ],
+        },
+        {
+          id: 'titles',
+          clips: [textClip({ id: 'top', text: 'Top', startSec: 0, durationSec: 1 })],
+        },
+      ]),
+    );
+    const lanes = Object.fromEntries(
+      all(root, 'title').map((t) => [t.getAttribute('name'), t.getAttribute('lane')]),
+    );
+    expect(lanes).toEqual({ One: '1', Two: '2', Three: '3', Top: '4' });
+  });
+
   it('keeps both appearances of text that flashes on either side of a transition', () => {
     const root = fcpxml(
       doc([
