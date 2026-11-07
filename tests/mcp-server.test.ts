@@ -52,6 +52,7 @@ describe('MCP server', () => {
     try {
       const { tools } = await client.listTools();
       expect(tools.map((t) => t.name).sort()).toEqual([
+        'doctor',
         'timeline_check',
         'timeline_edit',
         'timeline_export',
@@ -60,6 +61,28 @@ describe('MCP server', () => {
         'timeline_transcript',
         'timeline_undo',
       ]);
+    } finally {
+      await close();
+    }
+  });
+
+  it('answers "is my setup OK?" with the doctor checks', async () => {
+    const { client, close } = await connect();
+    try {
+      const report = payload(await client.callTool({ name: 'doctor', arguments: {} }));
+      const checks = report.checks as { id: string; status: string }[];
+      expect(typeof report.ok).toBe('boolean');
+      expect(checks.map((c) => c.id)).toEqual([
+        'node',
+        'ffmpeg',
+        'drawtext',
+        'vidstab',
+        'workspace',
+        'font',
+        'whisper',
+        'whisper-model',
+      ]);
+      expect(checks.find((c) => c.id === 'workspace')?.status).toBe('ok');
     } finally {
       await close();
     }

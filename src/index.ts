@@ -53,7 +53,13 @@ export {
   probe,
   type VideoStream,
 } from './ffmpeg/probe.js';
-export { MissingFilterError, runFfmpeg } from './ffmpeg/run.js';
+export {
+  FFMPEG_PATH_ENV,
+  type FfmpegResolution,
+  MissingFilterError,
+  resolveFfmpeg,
+  runFfmpeg,
+} from './ffmpeg/run.js';
 export {
   appendOp,
   atomicWriteFile,
@@ -272,6 +278,18 @@ export {
   type DeleteOpResult,
   deleteOp,
 } from './tools/delete-op.js';
+export {
+  type DoctorCheck,
+  type DoctorCheckId,
+  type DoctorDeps,
+  DoctorInput,
+  type DoctorInputType,
+  type DoctorResult,
+  type DoctorStatus,
+  defaultDoctorDeps,
+  doctor,
+  formatDoctorReport,
+} from './tools/doctor.js';
 export {
   HighlightReelInput,
   type HighlightReelInputType,

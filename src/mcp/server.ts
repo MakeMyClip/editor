@@ -30,6 +30,7 @@ import { reviewCuts } from '../timeline/review.js';
 import { runPlan } from '../timeline/run-plan.js';
 import { transcribeClip } from '../timeline/transcript.js';
 import { EditableVerbSchema } from '../timeline/verbs.js';
+import { doctor } from '../tools/doctor.js';
 import { WhisperLanguageSchema } from '../transcribe/whisper.js';
 import {
   type CompositionSummary,
@@ -292,6 +293,16 @@ export function buildMcpServer(): McpServer {
         throw err;
       }
     },
+  );
+
+  server.registerTool(
+    'doctor',
+    {
+      title: 'Check the setup',
+      description:
+        'Check that this computer has what the editor needs: Node, FFmpeg and its text and stabilization filters, a writable workspace and a caption font, plus the optional local whisper.cpp and model for transcription. Each problem comes with its fix; settings named MAKEMYCLIP_* go in the env of this server in the MCP client config. Run it when the user asks whether their setup works, or when a tool fails with a setup error.',
+    },
+    async () => jsonResult(await doctor()),
   );
 
   return server;

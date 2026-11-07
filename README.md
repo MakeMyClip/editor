@@ -84,7 +84,7 @@ clip ui   # opens http://127.0.0.1:5573
 }
 ```
 
-The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The MCP server exposes the timeline tools (show / edit / check / transcribe / undo / redo / export) over stdio; media stays confined to `MAKEMYCLIP_WORKSPACE`, and `MAKEMYCLIP_WHISPER_MODEL` is only needed for transcription and captions. Everything runs locally and offline — no API key.
+The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The MCP server exposes the timeline tools (show / edit / check / transcribe / undo / redo / export) and a `doctor` setup check over stdio; media stays confined to `MAKEMYCLIP_WORKSPACE`, and `MAKEMYCLIP_WHISPER_MODEL` is only needed for transcription and captions. Everything runs locally and offline — no API key.
 
 **Optional: local transcription** (for editing by transcript, removing retakes, and captions):
 
@@ -94,6 +94,14 @@ export MAKEMYCLIP_WHISPER_MODEL=/path/to/ggml-base.en.bin
 ```
 
 Download a model such as `ggml-base.en.bin` from [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp), and set `MAKEMYCLIP_WHISPER_PATH` if `whisper-cli` isn't on your `PATH`. The editor never downloads a model itself.
+
+**Check your setup:**
+
+```bash
+npx -y @makemyclip/editor doctor   # add --json for a machine-readable report
+```
+
+It checks Node, which FFmpeg runs and whether it can draw text and captions, the workspace, a caption font, and the optional whisper.cpp and model, and prints the fix for anything missing. In Claude Desktop or another MCP client, ask "is my setup OK?" and Claude runs the same check.
 
 ---
 

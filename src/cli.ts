@@ -9,6 +9,7 @@ import { adjust } from './tools/adjust.js';
 import { chromaKey } from './tools/chroma-key.js';
 import { concat } from './tools/concat.js';
 import { deleteOp } from './tools/delete-op.js';
+import { doctor, formatDoctorReport } from './tools/doctor.js';
 import { highlightReel } from './tools/highlight-reel.js';
 import { ingest } from './tools/ingest.js';
 import { inspect } from './tools/inspect.js';
@@ -73,6 +74,11 @@ MCP (drive the editor from Claude Desktop / any MCP client — no API key):
   clip mcp                          Start the MCP server over stdio. Add it to your
                                     client's MCP config; it exposes the timeline tools
                                     (show / edit / undo / redo / export).
+
+Setup:
+  clip doctor [--json]              Check Node, FFmpeg and its filters, the workspace, the
+                                    caption font and the optional whisper.cpp; print a fix
+                                    for each problem. Exits 1 when the editor can't run.
 
 Session safety (these tools do not log themselves):
   clip snapshot [<label>]           Save the current session as a named snapshot.
@@ -555,6 +561,15 @@ async function main(argv: string[]): Promise<void> {
     };
     const result = await runAndLog('stabilize', stabilizeArgs, () => stabilize(stabilizeArgs));
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (command === 'doctor') {
+    const result = await doctor();
+    process.stdout.write(
+      args.includes('--json') ? `${JSON.stringify(result, null, 2)}\n` : formatDoctorReport(result),
+    );
+    if (!result.ok) process.exitCode = 1;
     return;
   }
 
