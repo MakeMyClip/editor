@@ -18,6 +18,7 @@ import {
   sourceRate,
   type TitleSpec,
   timecodeFrames,
+  toFrames,
 } from './interchange-layout.js';
 import type { MediaId } from './schema.js';
 
@@ -60,6 +61,8 @@ const EDGE = 40;
 interface Asset {
   id: string;
   formatId?: string;
+  /** The rate the source's frames are counted in. */
+  rate: FrameRate;
   /** Source time of the file's first frame (its start timecode). */
   start: Rational;
   info: InterchangeMedia;
@@ -160,7 +163,7 @@ export function writeFcpxml(layout: Layout, projectName: string): FcpxmlResult {
     const durRate = srcRate ?? rate;
     const durFrames = Math.ceil((info.durationSec * durRate.den) / durRate.num);
     const id = ids.take();
-    assets.set(mediaId, { id, formatId, start, info });
+    assets.set(mediaId, { id, formatId, rate: durRate, start, info });
     resources.push(
       `<asset${attrs({
         id,
@@ -241,7 +244,7 @@ export function writeFcpxml(layout: Layout, projectName: string): FcpxmlResult {
             name: titleName(title.text),
             start: formatTime(GENERATOR_START),
             duration: time(title.duration),
-          })}>${titleBody(title)}</title>`,
+          })}>${titleBody(title)}${blend(title.fades)}</title>`,
       )
       .join('');
 
@@ -255,7 +258,11 @@ export function writeFcpxml(layout: Layout, projectName: string): FcpxmlResult {
     switch (item.kind) {
       case 'media': {
         const asset = assets.get(item.mediaId) as Asset;
-        const start = addTime(asset.start, framesTime(item.sourceIn, rate));
+        // The in-point on a source frame, then any head hidden under a transition.
+        const start = addTime(
+          addTime(asset.start, framesTime(toFrames(item.sourceInSec, asset.rate), asset.rate)),
+          framesTime(item.head, rate),
+        );
         const volume = asset.info.audio
           ? (() => {
               const param = fadeParam(item.fades, rate);

@@ -224,9 +224,13 @@ export type SpineItem =
       kind: 'media';
       clipId: string;
       mediaId: MediaId;
-      /** First visible source frame, counted at the sequence rate from the
-       *  start of the media file (not its timecode). */
-      sourceIn: number;
+      /** The clip's in-point in its source, in seconds from the start of the
+       *  media file (not its timecode), kept exact so writers can count it in
+       *  the source's own frames. */
+      sourceInSec: number;
+      /** Sequence frames hidden at the head under a transition: the first
+       *  visible frame is `head` frames past the in-point. */
+      head: number;
       /** Product of the clip's volume effects (1 = unchanged). */
       gain: number;
     })
@@ -244,11 +248,13 @@ export interface LaidTransition {
   cut: number;
 }
 
-/** Text over the picture: one stretch of output time on lane ≥ 1. */
+/** Text over the picture: one stretch of output time on lane ≥ 1. Where a
+ *  transition overlaps two titles of a track, they cross-fade, as in the mp4. */
 export interface LaidTitle extends TitleSpec {
   lane: number;
   offset: number;
   duration: number;
+  fades: Fades;
 }
 
 export interface Layout {
@@ -500,6 +506,12 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
       in: before ? 0 : fadeFrames(clip, 'fadeIn', rate, visible),
       out: after ? 0 : fadeFrames(clip, 'fadeOut', rate, visible),
     };
+    if (fades.in + fades.out > visible) {
+      throw new InterchangeError(
+        `Clip "${clip.id}" fades in and out over more than its ${(visible / (rate.den / rate.num)).toFixed(3)}s on screen, ` +
+          "so the fades overlap, which an editor's fades can't. Shorten the fades.",
+      );
+    }
     const base = { offset: cursor, duration: visible, fades };
 
     if (clip.kind === 'media') {
@@ -522,7 +534,8 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
         kind: 'media',
         clipId: clip.id,
         mediaId: clip.mediaId,
-        sourceIn: frames(clip.sourceInSec) + head,
+        sourceInSec: clip.sourceInSec,
+        head,
         gain,
       });
     } else if (clip.kind === 'color') {
@@ -554,8 +567,11 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
 
   // Text over the picture, one title per stretch of output time it shows in.
   const titles: LaidTitle[] = [];
-  const lanes = [...overlays].sort((a, b) => comp.tracks.indexOf(a) - comp.tracks.indexOf(b));
-  lanes.forEach((track, laneIndex) => {
+  let nextLane = 1;
+  for (const track of [...overlays].sort(
+    (a, b) => comp.tracks.indexOf(a) - comp.tracks.indexOf(b),
+  )) {
+    const laid: Array<LaidTitle & { from: number; to: number }> = [];
     for (const clip of [...track.clips].sort((a, b) => a.startSec - b.startSec)) {
       if (clip.kind !== 'text') continue;
       const from = frames(clip.startSec);
@@ -585,15 +601,39 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
         else pieces.push({ ...part });
       }
       for (const piece of pieces) {
-        titles.push({
+        laid.push({
           ...spec,
-          lane: laneIndex + 1,
+          lane: 0,
           offset: piece.start,
           duration: piece.end - piece.start,
+          fades: { in: 0, out: 0 },
+          from,
+          to,
         });
       }
     }
-  });
+    // A transition can make two titles of one track overlap in output time
+    // (the outgoing clip's caption under the incoming clip's): the mp4 fades
+    // one out as the other fades in, so cross-fade them, on separate lanes.
+    laid.sort((a, b) => a.offset - b.offset);
+    const laneEnds = new Map<number, number>();
+    const base = nextLane;
+    laid.forEach((title, i) => {
+      for (const earlier of laid.slice(0, i)) {
+        const overlap = earlier.offset + earlier.duration - title.offset;
+        if (overlap > 0 && earlier.to <= title.from) {
+          earlier.fades.out = Math.max(earlier.fades.out, overlap);
+          title.fades.in = Math.max(title.fades.in, overlap);
+        }
+      }
+      let lane = base;
+      while ((laneEnds.get(lane) ?? 0) > title.offset) lane++;
+      laneEnds.set(lane, title.offset + title.duration);
+      title.lane = lane;
+      nextLane = Math.max(nextLane, lane + 1);
+    });
+    titles.push(...laid.map(({ from: _from, to: _to, ...title }) => title));
+  }
 
   return {
     rate,

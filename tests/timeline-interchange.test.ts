@@ -139,6 +139,14 @@ describe('interchange — FCPXML', () => {
       doc([{ id: 'v0', clips: [media('c1', 0, 10, 15), media('c2', 5, 20.01, 22)] }], {
         fps: 29.97,
       }),
+      new Map([
+        [
+          A,
+          source('/footage/a.mov', {
+            video: { codec: 'h264', width: 1920, height: 1080, fps: 29.97 },
+          }),
+        ],
+      ]),
     );
     expect(all(root, 'format')[0]?.getAttribute('frameDuration')).toBe('1001/30000s');
     const [c1, c2] = all(root, 'asset-clip');
@@ -281,6 +289,44 @@ describe('interchange — FCPXML', () => {
     // Doc 3s–7s: starts at 3s on A, ends at 7s − 1s of overlap = 6s.
     expect(titles[0]?.getAttribute('offset')).toBe('3s');
     expect(titles[0]?.getAttribute('duration')).toBe('3s');
+  });
+
+  it('keeps a fast source in-point on its own frame, not the sequence frame', () => {
+    const fast = new Map([
+      [
+        A,
+        source('/footage/a.mov', { video: { codec: 'h264', width: 1920, height: 1080, fps: 60 } }),
+      ],
+    ]);
+    const comp = doc([{ id: 'v0', clips: [media('a', 0, 1 / 60, 2)] }]);
+    expect(one(fcpxml(comp, fast), 'asset-clip').getAttribute('start')).toBe('1/60s');
+    const clip = one(parse(exportAs('xmeml', comp, fast).files[0]?.content ?? ''), 'clipitem');
+    expect(text(one(clip, 'rate'), 'timebase')).toBe('60');
+    expect(text(clip, 'in')).toBe('1');
+  });
+
+  it('cross-fades captions a transition makes overlap, on separate lanes', () => {
+    const root = fcpxml(
+      doc([
+        {
+          id: 'v0',
+          clips: [media('a', 0, 0, 5), media('b', 5, 0, 5, B)],
+          transitions: [{ afterClipId: 'a', durationSec: 1 }],
+        },
+        {
+          id: 'captions',
+          clips: [
+            textClip({ id: 't1', text: 'Before', startSec: 3, durationSec: 2 }),
+            textClip({ id: 't2', text: 'After', startSec: 5, durationSec: 2 }),
+          ],
+        },
+      ]),
+    );
+    const [t1, t2] = all(root, 'title');
+    // Output 3–5s and 4–6s: the mp4 fades the first out as the second fades in.
+    expect([t1?.getAttribute('lane'), t2?.getAttribute('lane')]).toEqual(['1', '2']);
+    expect(one(t1 as Element, 'fadeOut').getAttribute('duration')).toBe('1s');
+    expect(one(t2 as Element, 'fadeIn').getAttribute('duration')).toBe('1s');
   });
 
   it('keeps both appearances of text that flashes on either side of a transition', () => {
@@ -454,6 +500,29 @@ describe('interchange — refusals', () => {
     refuse(
       withEffect({ type: 'chromaKey', color: 'green', similarity: 0.3, blend: 0.1 }),
       /chromaKey/,
+    );
+  });
+
+  it('refuses a fade in and out that overlap', () => {
+    refuse(
+      doc([
+        {
+          id: 'v0',
+          clips: [
+            mediaClip({
+              id: 'a',
+              mediaId: A,
+              startSec: 0,
+              sourceOutSec: 4,
+              effects: [
+                { type: 'fadeIn', durationSec: 3 },
+                { type: 'fadeOut', durationSec: 3 },
+              ],
+            }),
+          ],
+        },
+      ]),
+      /fades overlap/,
     );
   });
 

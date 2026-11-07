@@ -11,6 +11,7 @@ import {
   sourceRate,
   type TitleSpec,
   timecodeFrames,
+  toFrames,
 } from './interchange-layout.js';
 import type { MediaId } from './schema.js';
 
@@ -302,6 +303,7 @@ export function writeXmeml(layout: Layout, sequenceName: string): XmemlResult {
         const srcRate = (info.video && sourceRate(info.video.fps)) || rate;
         const toSource = (frames: number): number =>
           Math.round((frames * rate.num * srcRate.den) / (rate.den * srcRate.num));
+        const sourceIn = toFrames(item.sourceInSec, srcRate);
         entries.push({
           at: item.offset,
           xml:
@@ -311,8 +313,8 @@ export function writeXmeml(layout: Layout, sequenceName: string): XmemlResult {
             tag('duration', Math.ceil((info.durationSec * srcRate.den) / srcRate.num)) +
             rateXml(srcRate) +
             timing +
-            tag('in', toSource(item.sourceIn - head)) +
-            tag('out', toSource(item.sourceIn + item.duration + tail)) +
+            tag('in', sourceIn + toSource(item.head - head)) +
+            tag('out', sourceIn + toSource(item.head + item.duration + tail)) +
             fileXml(item.mediaId, info) +
             (track === 0
               ? fitScale(info)
