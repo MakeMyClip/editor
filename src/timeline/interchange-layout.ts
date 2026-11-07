@@ -592,6 +592,11 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
       if (clip.kind !== 'text') continue;
       const from = frames(clip.startSec);
       const to = frames(clipEndSec(clip));
+      if (to - from < 1) {
+        throw new InterchangeError(
+          `Text clip "${clip.id}" is shorter than one frame at ${comp.fps} fps. Lengthen or remove it.`,
+        );
+      }
       if (clipEndSec(clip) > clipEndSec(clips[clips.length - 1] as Clip) + ABUT_EPSILON) {
         throw new InterchangeError(
           `Text clip "${clip.id}" runs to ${clipEndSec(clip).toFixed(3)}s, past the end of the picture ` +

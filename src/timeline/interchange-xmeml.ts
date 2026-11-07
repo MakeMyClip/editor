@@ -382,12 +382,18 @@ export function writeXmeml(layout: Layout, sequenceName: string): XmemlResult {
 
   // Captions: every text clip, grouped by the track it came from.
   const byTrack = new Map<string, Array<{ offset: number; duration: number; title: TitleSpec }>>();
-  for (const item of layout.spine) {
-    if (item.kind !== 'title') continue;
+  layout.spine.forEach((item, index) => {
+    if (item.kind !== 'title') return;
+    // A title card's words show through the transitions around it, not just
+    // between the edits.
+    const before = layout.transitions.find((t) => t.afterIndex === index - 1);
+    const after = layout.transitions.find((t) => t.afterIndex === index);
+    const start = before ? before.offset : item.offset;
+    const end = after ? after.offset + after.duration : item.offset + item.duration;
     const list = byTrack.get(item.title.trackId) ?? [];
-    list.push({ offset: item.offset, duration: item.duration, title: item.title });
+    list.push({ offset: start, duration: end - start, title: item.title });
     byTrack.set(item.title.trackId, list);
-  }
+  });
   for (const title of layout.titles) {
     const list = byTrack.get(title.trackId) ?? [];
     list.push({ offset: title.offset, duration: title.duration, title });

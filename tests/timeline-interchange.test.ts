@@ -693,6 +693,19 @@ describe('interchange — refusals', () => {
     );
   });
 
+  it('refuses text shorter than a frame', () => {
+    refuse(
+      doc([
+        { id: 'v0', clips: [media('a', 0, 0, 3)] },
+        {
+          id: 'captions',
+          clips: [textClip({ id: 'blip', text: 'Blip', startSec: 0, durationSec: 0.01 })],
+        },
+      ]),
+      /"blip" is shorter than one frame/,
+    );
+  });
+
   it('refuses media it has no record of, or a clip past the end of its source', () => {
     refuse(doc([{ id: 'v0', clips: [media('a', 0, 0, 3)] }]), /No media registered/, new Map());
     refuse(doc([{ id: 'v0', clips: [media('a', 0, 50, 70)] }]), /source is 60s long/);
@@ -797,6 +810,24 @@ describe('interchange — FCP7 XML (Premiere)', () => {
     expect([text(clip, 'start'), text(clip, 'end')]).toEqual(['0', '60']);
     expect([text(clip, 'in'), text(clip, 'out')]).toEqual(['240', '288']);
     expect(text(clip, 'duration')).toBe('1440');
+  });
+
+  it('times a title card cue through the transitions around it', () => {
+    const out = exportAs(
+      'xmeml',
+      doc([
+        {
+          id: 'v0',
+          clips: [
+            textClip({ id: 'card', text: 'Chapter one', startSec: 0, durationSec: 5 }),
+            media('a', 5, 0, 5),
+          ],
+          transitions: [{ afterClipId: 'card', durationSec: 1 }],
+        },
+      ]),
+    );
+    // The card shows to 5s in output, fading under the clip from 4s.
+    expect(out.files[1]?.content).toBe('1\n00:00:00,000 --> 00:00:05,000\nChapter one\n');
   });
 
   it('writes text as SRT captions beside the XML, in output time', () => {
