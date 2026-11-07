@@ -1,10 +1,30 @@
 import { execa } from 'execa';
 import ffmpegStatic from 'ffmpeg-static';
 
-// Resolution order: explicit override → bundled binary → system PATH.
-// The override exists so legally-cautious users can point at an LGPL-only
-// or system-managed FFmpeg; see the License section in the README.
-const ffmpegPath = process.env.MAKEMYCLIP_FFMPEG_PATH ?? ffmpegStatic ?? 'ffmpeg';
+export const FFMPEG_PATH_ENV = 'MAKEMYCLIP_FFMPEG_PATH';
+
+export interface FfmpegResolution {
+  path: string;
+  /** `env`: MAKEMYCLIP_FFMPEG_PATH; `bundled`: ffmpeg-static; `system`: `ffmpeg` on PATH. */
+  source: 'env' | 'bundled' | 'system';
+}
+
+/**
+ * Resolution order: explicit override → bundled binary → system PATH. The
+ * override exists so legally-cautious users can point at an LGPL-only or
+ * system-managed FFmpeg; see the License section in the README.
+ */
+export function resolveFfmpeg(
+  env: Record<string, string | undefined> = process.env,
+  bundled: string | null = ffmpegStatic,
+): FfmpegResolution {
+  const override = env[FFMPEG_PATH_ENV];
+  if (override !== undefined) return { path: override, source: 'env' };
+  if (bundled !== null) return { path: bundled, source: 'bundled' };
+  return { path: 'ffmpeg', source: 'system' };
+}
+
+const ffmpegPath = resolveFfmpeg().path;
 
 export interface FfmpegResult {
   stdout: string;
