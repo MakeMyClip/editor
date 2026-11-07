@@ -365,7 +365,7 @@ These are the recovery loop the council called must-haves. Snapshot before any u
 npx skills add MakeMyClip/editor
 ```
 
-That's it. If a command fails with a setup error (FFmpeg, its drawtext filter, whisper.cpp, a font, the workspace), or the user asks whether their setup works, run `npx -y @makemyclip/editor doctor`: it lists each check with the fix for anything missing.
+That's it. Or, as a Claude Code plugin: `/plugin marketplace add MakeMyClip/editor`, then `/plugin install makemyclip-editor@makemyclip`. If a command fails with a setup error (FFmpeg, its drawtext filter, whisper.cpp, a font, the workspace), or the user asks whether their setup works, run `npx -y @makemyclip/editor doctor`: it lists each check with the fix for anything missing.
 
 ## License
 
