@@ -6,7 +6,7 @@ import ffmpegStatic from 'ffmpeg-static';
 import { z } from 'zod';
 import { fontFileFor } from '../ffmpeg/font.js';
 import { FFMPEG_PATH_ENV, parseFilterList, resolveFfmpeg } from '../ffmpeg/run.js';
-import { envSetting, isFile } from '../system-binary.js';
+import { envSetting, isExecutable, isFile } from '../system-binary.js';
 import { WHISPER_MODEL_ENV, WHISPER_PATH_ENV, whisperBinary } from '../transcribe/whisper.js';
 import { getWorkspace } from '../workspace.js';
 
@@ -65,6 +65,7 @@ export interface DoctorDeps {
    *  isn't found; `exitCode`, `stdout` and `stderr` set when it exited non-zero. */
   run(file: string, args: string[]): Promise<{ stdout: string }>;
   isFile(path: string): boolean;
+  isExecutable(path: string): boolean;
   /** Create the folder if needed, then write and remove a file in it. */
   probeWritable(dir: string): Promise<void>;
   /** The font file captions draw Latin text with; undefined means FFmpeg's default. */
@@ -93,6 +94,7 @@ export function defaultDoctorDeps(): DoctorDeps {
       return { stdout };
     },
     isFile,
+    isExecutable,
     probeWritable: async (dir) => {
       await mkdir(dir, { recursive: true });
       const probe = join(dir, `.doctor-${randomBytes(4).toString('hex')}`);
@@ -161,7 +163,7 @@ async function checkFfmpeg(
   const { path, source } = resolveFfmpeg({
     env: deps.env,
     platform: deps.platform,
-    isFile: deps.isFile,
+    isExecutable: deps.isExecutable,
     bundled: deps.bundledFfmpeg,
   });
   const base = { id: 'ffmpeg', label: 'FFmpeg' } as const;
@@ -283,7 +285,7 @@ async function checkWhisper(deps: DoctorDeps): Promise<DoctorCheck> {
   const { path: binary, source } = whisperBinary({
     env: deps.env,
     platform: deps.platform,
-    isFile: deps.isFile,
+    isExecutable: deps.isExecutable,
   });
   const where = source === 'env' ? WHISPER_PATH_ENV : 'installed';
   try {

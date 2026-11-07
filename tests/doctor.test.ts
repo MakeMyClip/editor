@@ -47,7 +47,8 @@ function deps(overrides: Partial<DoctorDeps> = {}): DoctorDeps & { calls: string
       if (args.includes('-filters')) return { stdout: FILTERS };
       return { stdout: 'usage: whisper-cli [options] file0 file1 ...\n' };
     },
-    isFile: (path) => path === BUNDLED || path.endsWith('.bin'),
+    isFile: (path) => path.endsWith('.bin'),
+    isExecutable: (path) => path === BUNDLED,
     probeWritable: async () => undefined,
     captionFont: () => '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     ...overrides,
@@ -65,7 +66,7 @@ describe('resolveFfmpeg', () => {
     env: { PATH: '/usr/bin' },
     platform: 'darwin' as const,
     bundled: BUNDLED,
-    isFile: (path: string) => path === BUNDLED || path === '/opt/homebrew/bin/ffmpeg',
+    isExecutable: (path: string) => path === BUNDLED || path === '/opt/homebrew/bin/ffmpeg',
   };
 
   it('prefers the env override, then the bundled binary, then an installed FFmpeg', () => {
@@ -81,12 +82,15 @@ describe('resolveFfmpeg', () => {
   });
 
   it('skips a bundled binary that is not on disk, and an empty override', () => {
-    const missing = { ...lookup, isFile: (path: string) => path === '/opt/homebrew/bin/ffmpeg' };
+    const missing = {
+      ...lookup,
+      isExecutable: (path: string) => path === '/opt/homebrew/bin/ffmpeg',
+    };
     expect(resolveFfmpeg(missing)).toEqual({ path: '/opt/homebrew/bin/ffmpeg', source: 'system' });
     expect(resolveFfmpeg({ ...lookup, env: { MAKEMYCLIP_FFMPEG_PATH: '' } }).source).toBe(
       'bundled',
     );
-    expect(resolveFfmpeg({ ...missing, isFile: () => false })).toEqual({
+    expect(resolveFfmpeg({ ...missing, isExecutable: () => false })).toEqual({
       path: 'ffmpeg',
       source: 'system',
     });
@@ -154,7 +158,7 @@ describe('doctor', () => {
     const result = await doctor(
       {},
       deps({
-        isFile: (path) => path.endsWith('.bin'),
+        isExecutable: () => false,
         run: async () => {
           throw spawnError('ENOENT');
         },
@@ -191,7 +195,7 @@ describe('doctor', () => {
     const d = deps({
       env: { MAKEMYCLIP_BUNDLE: 'mcpb', PATH: '/usr/bin:/bin', MAKEMYCLIP_WHISPER_MODEL: '' },
       platform: 'darwin',
-      isFile: (path) => homebrew.includes(path),
+      isExecutable: (path) => homebrew.includes(path),
     });
     const result = await doctor({}, d);
 
@@ -210,7 +214,7 @@ describe('doctor', () => {
       deps({
         env: { MAKEMYCLIP_BUNDLE: 'mcpb', MAKEMYCLIP_FFMPEG_PATH: '' },
         platform: 'win32',
-        isFile: () => false,
+        isExecutable: () => false,
         run: async () => {
           throw spawnError('ENOENT');
         },

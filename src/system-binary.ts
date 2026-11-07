@@ -1,11 +1,11 @@
-import { statSync } from 'node:fs';
+import { accessSync, constants, statSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 
 /** Where to look; tests pass stubs, everything else defaults to this process. */
 export interface SystemLookup {
   env?: Record<string, string | undefined>;
   platform?: NodeJS.Platform;
-  isFile?: (path: string) => boolean;
+  isExecutable?: (path: string) => boolean;
 }
 
 /**
@@ -23,6 +23,18 @@ export function envSetting(
 export function isFile(path: string): boolean {
   try {
     return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** A file this process may run. Windows has no execute bit, so a file is enough there. */
+export function isExecutable(path: string): boolean {
+  if (!isFile(path)) return false;
+  if (process.platform === 'win32') return true;
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
   } catch {
     return false;
   }
@@ -50,14 +62,14 @@ function installDirs(platform: NodeJS.Platform, env: Record<string, string | und
 export function findSystemBinary(name: string, lookup: SystemLookup = {}): string {
   const env = lookup.env ?? process.env;
   const platform = lookup.platform ?? process.platform;
-  const exists = lookup.isFile ?? isFile;
+  const runnable = lookup.isExecutable ?? isExecutable;
   const path = platform === 'win32' ? win32 : posix;
   const pathVar = (platform === 'win32' ? (env.Path ?? env.PATH) : env.PATH) ?? '';
   const file = platform === 'win32' ? `${name}.exe` : name;
   const dirs = [...pathVar.split(path.delimiter).filter(Boolean), ...installDirs(platform, env)];
   for (const dir of dirs) {
     const candidate = path.join(dir, file);
-    if (exists(candidate)) return candidate;
+    if (runnable(candidate)) return candidate;
   }
   return name;
 }

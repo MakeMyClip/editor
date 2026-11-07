@@ -1,3 +1,6 @@
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { envSetting, findSystemBinary } from '../src/system-binary.js';
 
@@ -15,7 +18,7 @@ describe('findSystemBinary', () => {
     const lookup = {
       env: { PATH: '/usr/bin:/home/me/bin' },
       platform: 'darwin' as const,
-      isFile: (path: string) => files.includes(path),
+      isExecutable: (path: string) => files.includes(path),
     };
     expect(findSystemBinary('ffmpeg', lookup)).toBe('/home/me/bin/ffmpeg');
     expect(findSystemBinary('ffmpeg', { ...lookup, env: { PATH: '/usr/bin:/bin' } })).toBe(
@@ -28,7 +31,7 @@ describe('findSystemBinary', () => {
     const found = findSystemBinary('ffmpeg', {
       env: { Path: 'C:\\Windows\\system32', LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local' },
       platform: 'win32',
-      isFile: (path) => path === exe,
+      isExecutable: (path) => path === exe,
     });
     expect(found).toBe(exe);
   });
@@ -38,8 +41,28 @@ describe('findSystemBinary', () => {
       findSystemBinary('whisper-cli', {
         env: { PATH: '/usr/bin' },
         platform: 'linux',
-        isFile: () => false,
+        isExecutable: () => false,
       }),
     ).toBe('whisper-cli');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'skips a file on PATH that is not executable',
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'mmc-which-'));
+      try {
+        const [first, second] = [join(dir, 'a'), join(dir, 'b')];
+        await mkdir(first);
+        await mkdir(second);
+        await writeFile(join(first, 'ffmpeg'), '');
+        await writeFile(join(second, 'ffmpeg'), '#!/bin/sh\n');
+        await chmod(join(second, 'ffmpeg'), 0o755);
+        const env = { PATH: `${first}:${second}` };
+
+        expect(findSystemBinary('ffmpeg', { env, platform: 'linux' })).toBe(join(second, 'ffmpeg'));
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
