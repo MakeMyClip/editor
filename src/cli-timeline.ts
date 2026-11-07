@@ -1,6 +1,8 @@
 import { appendOp } from './session/store.js';
+import { CaptionError, DEFAULT_CAPTION_WORDS, planCaptions } from './timeline/captions.js';
 import { buildFrameAtPlan, checkExportable, compileTimeline } from './timeline/compile.js';
 import {
+  AnchorSchema,
   type Clip,
   clipDuration,
   clipEndSec,
@@ -8,6 +10,7 @@ import {
   compositionDuration,
   emptyComposition,
   makeClipId,
+  type TextStyle,
 } from './timeline/composition.js';
 import {
   mutateComposition,
@@ -17,9 +20,24 @@ import {
   resetComposition,
   undoLastDocOp,
 } from './timeline/document-store.js';
-import { buildMediaMap } from './timeline/media-registry.js';
+import {
+  exportInterchange,
+  InterchangeFormatSchema,
+  interchangeExtension,
+  interchangeFormatFor,
+} from './timeline/interchange.js';
+import { buildMediaMap, buildMediaRefs } from './timeline/media-registry.js';
 import { colorClip, mediaClip, textClip } from './timeline/ops.js';
+import { reviewCuts } from './timeline/review.js';
 import { runPlan } from './timeline/run-plan.js';
+import { analyzeSilence, DEFAULT_SENSITIVITY, SensitivitySchema } from './timeline/silence.js';
+import {
+  clipWords,
+  findRetakes,
+  planWordCut,
+  storedTranscriptForClip,
+  transcribeClip,
+} from './timeline/transcript.js';
 import { DEFAULT_VERB_TRACK as DEFAULT_TRACK, ensureTrack, trackEnd } from './timeline/verbs.js';
 import { ingest } from './tools/ingest.js';
 import { getWorkspace, newOutputPath, resolveInput } from './workspace.js';
@@ -35,13 +53,19 @@ const TIMELINE_HELP = `clip timeline — build and export a non-destructive comp
   clip timeline move <clipId> <startSec> [--track T]
   clip timeline split <clipId> <atSec>
   clip timeline remove <clipId>
+  clip timeline silence <clipId> [--sensitivity 0..1] [--dry-run]
+  clip timeline check [--sheet <output.jpg>]
+  clip timeline transcribe <clipId> [--model <model.bin>] [--language <code>]
+  clip timeline cut-words <clipId> <fromIndex> <toIndex> [--transcript <id>]
+  clip timeline remove-retakes <clipId> [--dry-run] [--transcript <id>]
+  clip timeline captions [<clipId>] [--words N] [--track T] [--font N --color C --anchor A --background C|none] [--dry-run]
   clip timeline show
   clip timeline at <atSec>
   clip timeline frame <atSec> [<output>]
   clip timeline undo
   clip timeline redo
   clip timeline log
-  clip timeline export [<output>]
+  clip timeline export [<output>] [--format mp4|fcpxml|xmeml]
 `;
 
 interface Parsed {
@@ -49,12 +73,17 @@ interface Parsed {
   flags: Record<string, string>;
 }
 
+/** Flags that take no value, so they don't swallow the next argument. */
+const BOOLEAN_FLAGS = new Set(['dry-run']);
+
 function parseArgs(args: string[]): Parsed {
   const positional: string[] = [];
   const flags: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
     const a = args[i] ?? '';
-    if (a.startsWith('--')) {
+    if (a.startsWith('--') && BOOLEAN_FLAGS.has(a.slice(2))) {
+      flags[a.slice(2)] = 'true';
+    } else if (a.startsWith('--')) {
       flags[a.slice(2)] = args[i + 1] ?? '';
       i++;
     } else {
@@ -240,6 +269,139 @@ export async function runTimeline(args: string[]): Promise<void> {
       return;
     }
 
+    case 'silence': {
+      const [clipId] = positional;
+      if (!clipId) {
+        throw new Error('Usage: clip timeline silence <clipId> [--sensitivity 0..1] [--dry-run]');
+      }
+      const parsed = SensitivitySchema.safeParse(num(flags.sensitivity, DEFAULT_SENSITIVITY));
+      if (!parsed.success) {
+        throw new Error(`--sensitivity must be between 0 and 1, got "${flags.sensitivity}".`);
+      }
+      const sensitivity = parsed.data;
+      const comp = await readComposition();
+      const cut = await analyzeSilence(comp, clipId, { media: await buildMediaMap(), sensitivity });
+      const report = {
+        clipId,
+        sensitivity,
+        silenceCount: cut.silenceCount,
+        removedSec: cut.removedSec,
+        keepRegions: cut.keepRegions,
+      };
+      if (cut.op?.op !== 'silenceCut') {
+        out({ ...report, applied: false, message: 'No silence to remove at this sensitivity.' });
+        return;
+      }
+      if (flags['dry-run']) {
+        out({ ...report, applied: false, dryRun: true });
+        return;
+      }
+      // Analysis read `comp` outside the write lock; reject if the doc moved since.
+      const doc = await mutateComposition([cut.op], { expectedBaseRev: comp.rev });
+      out({ ...report, applied: true, clipIds: [clipId, ...cut.op.newClipIds], rev: doc.rev });
+      return;
+    }
+
+    case 'check': {
+      const comp = await readComposition();
+      const media = await buildMediaMap();
+      const sheetPath = flags.sheet ? resolveInput(flags.sheet) : newOutputPath('cut-sheet', 'jpg');
+      out(await reviewCuts(comp, media, sheetPath, getWorkspace()));
+      return;
+    }
+
+    case 'transcribe': {
+      const [clipId] = positional;
+      if (!clipId) {
+        throw new Error(
+          'Usage: clip timeline transcribe <clipId> [--model <model.bin>] [--language <code>]',
+        );
+      }
+      const comp = await readComposition();
+      out(
+        await transcribeClip(comp, clipId, await buildMediaMap(), {
+          model: flags.model ? resolveInput(flags.model) : undefined,
+          language: flags.language || undefined,
+        }),
+      );
+      return;
+    }
+
+    case 'cut-words':
+    case 'remove-retakes': {
+      const [clipId, from, to] = positional;
+      const isCutWords = sub === 'cut-words';
+      if (!clipId || (isCutWords && (from === undefined || to === undefined))) {
+        throw new Error(
+          isCutWords
+            ? 'Usage: clip timeline cut-words <clipId> <fromIndex> <toIndex>'
+            : 'Usage: clip timeline remove-retakes <clipId> [--dry-run]',
+        );
+      }
+      const comp = await readComposition();
+      const media = await buildMediaMap();
+      const { clip, transcript } = await storedTranscriptForClip(
+        comp,
+        clipId,
+        media,
+        flags.transcript || undefined,
+      );
+      const ranges = isCutWords
+        ? [{ fromIndex: num(from, 0), toIndex: num(to, 0) }]
+        : findRetakes(clipWords(transcript, clip));
+      const op = planWordCut(comp, clip, transcript, ranges, { media });
+      if (!op) {
+        out({ clipId, applied: false, ranges, message: 'Nothing to cut in this clip.' });
+        return;
+      }
+      if (flags['dry-run']) {
+        out({ clipId, applied: false, dryRun: true, ranges });
+        return;
+      }
+      // The transcript was read outside the write lock; reject if the doc moved since.
+      const doc = await mutateComposition([op], { expectedBaseRev: comp.rev });
+      out({ clipId, applied: true, ranges, rev: doc.rev });
+      return;
+    }
+
+    case 'captions': {
+      const [clipId] = positional;
+      const maxWords = num(flags.words, DEFAULT_CAPTION_WORDS);
+      if (!Number.isInteger(maxWords) || maxWords < 1 || maxWords > 12) {
+        throw new CaptionError(
+          `--words must be a whole number from 1 to 12, got "${flags.words}".`,
+        );
+      }
+      const style: Partial<TextStyle> = {};
+      if (flags.font) style.fontSize = num(flags.font, 48);
+      if (flags.color) style.color = flags.color;
+      if (flags.background)
+        style.background = flags.background === 'none' ? null : flags.background;
+      if (flags.anchor) style.anchor = AnchorSchema.parse(flags.anchor);
+      const comp = await readComposition();
+      const media = await buildMediaMap();
+      const plan = await planCaptions(
+        comp,
+        {
+          clipId,
+          transcriptId: flags.transcript || undefined,
+          maxWords,
+          track: flags.track,
+          style,
+        },
+        (id, transcriptId) => storedTranscriptForClip(comp, id, media, transcriptId),
+      );
+      const report = { captions: plan.captions, clipIds: plan.clipIds, track: plan.track };
+      if (flags['dry-run'] || plan.ops.length === 0) {
+        out({ ...report, applied: false, ...(flags['dry-run'] ? { dryRun: true } : {}) });
+        return;
+      }
+      // The transcripts were read outside the write lock; reject if the doc moved since.
+      const doc = await mutateComposition(plan.ops, { expectedBaseRev: comp.rev });
+      out({ ...report, applied: true, rev: doc.rev });
+      return;
+    }
+
     case 'show': {
       const comp = await readComposition();
       const { exportable, blockers } = checkExportable(comp, await buildMediaMap(), getWorkspace());
@@ -344,6 +506,28 @@ export async function runTimeline(args: string[]): Promise<void> {
 
     case 'export': {
       const [output] = positional;
+      const format = flags.format || (output && interchangeFormatFor(output)) || 'mp4';
+      if (format !== 'mp4') {
+        const parsed = InterchangeFormatSchema.safeParse(format);
+        if (!parsed.success) {
+          throw new Error(`--format must be mp4, fcpxml or xmeml, got "${format}".`);
+        }
+        const target = output
+          ? resolveInput(output)
+          : newOutputPath('timeline-export', interchangeExtension(parsed.data));
+        const result = await exportInterchange(await readComposition(), await buildMediaRefs(), {
+          format: parsed.data,
+          output: target,
+        });
+        out({
+          exported: target,
+          format: result.format,
+          files: result.files.map((f) => f.path),
+          durationSec: result.durationSec,
+          notes: result.notes,
+        });
+        return;
+      }
       const comp = await readComposition();
       const media = await buildMediaMap();
       const finalOutput = output ? resolveInput(output) : newOutputPath('timeline-export', 'mp4');

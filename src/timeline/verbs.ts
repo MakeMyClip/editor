@@ -1,13 +1,25 @@
 import { z } from 'zod';
+import { DEFAULT_CAPTION_TRACK, DEFAULT_CAPTION_WORDS, planCaptions } from './captions.js';
+import type { MediaInfo } from './compile.js';
 import {
   AnchorSchema,
   type Composition,
   clipEndSec,
+  type MediaClip,
   makeClipId,
+  type TextStyle,
   TransitionKindSchema,
 } from './composition.js';
 import { applyOps, type CompositionOp, colorClip, mediaClip, textClip, videoTrack } from './ops.js';
 import type { MediaId } from './schema.js';
+import { SensitivitySchema, type SilenceCut } from './silence.js';
+import {
+  clipWords,
+  findRetakes,
+  planWordCut,
+  type Transcript,
+  TranscriptError,
+} from './transcript.js';
 
 /**
  * The VERB layer — a small, natural-language-shaped editing vocabulary that the
@@ -110,6 +122,82 @@ const EDITABLE_VERB_SCHEMAS = [
   }),
   z.object({ verb: z.literal('remove'), clipId: z.string() }),
   z.object({
+    verb: z.literal('remove_silence'),
+    clipId: z
+      .string()
+      .describe(
+        'Media clip to cut the pauses out of. It is split into back-to-back sub-clips that keep the speech, and later clips on its track move up.',
+      ),
+    sensitivity: SensitivitySchema.optional(),
+  }),
+  z.object({
+    verb: z.literal('cut_words'),
+    clipId: z.string().describe('Media clip to cut the words out of.'),
+    fromIndex: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe('First word to cut: its `index` from timeline_transcript.'),
+    toIndex: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe('Last word to cut (inclusive). Later clips on the track move up.'),
+    transcriptId: z
+      .string()
+      .describe(
+        'The `transcriptId` from the timeline_transcript call the indices came from; the cut is refused if the clip was transcribed again since.',
+      ),
+  }),
+  z.object({
+    verb: z.literal('remove_retakes'),
+    clipId: z
+      .string()
+      .describe(
+        'Media clip to cut repeated takes from: each phrase said twice in a row loses its earlier take (see `retakes` in timeline_transcript).',
+      ),
+    transcriptId: z
+      .string()
+      .optional()
+      .describe('Optional `transcriptId` the retakes were read from; refused if it changed.'),
+  }),
+  z.object({
+    verb: z.literal('caption_speech'),
+    clipId: z
+      .string()
+      .optional()
+      .describe(
+        'Media clip to caption. Default: every media clip whose source has a transcript, replacing the whole caption track.',
+      ),
+    transcriptId: z
+      .string()
+      .optional()
+      .describe(
+        'Optional `transcriptId` (with clipId) the words were read from; refused if it changed.',
+      ),
+    maxWords: z
+      .number()
+      .int()
+      .min(1)
+      .max(12)
+      .optional()
+      .describe(
+        `Most words per caption (default ${DEFAULT_CAPTION_WORDS}); 1 shows one word at a time. A pause or a sentence end also starts a new caption.`,
+      ),
+    track: z
+      .string()
+      .optional()
+      .describe(`Caption track id (default "${DEFAULT_CAPTION_TRACK}"), kept above the video.`),
+    fontSize: z.number().int().positive().optional(),
+    color: z.string().optional().describe('Text color (default white).'),
+    background: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Box color behind the text (default black@0.6), or null for none.'),
+    anchor: AnchorSchema.optional().describe('Where captions sit (default bottom-center).'),
+  }),
+  z.object({
     verb: z.literal('transition'),
     afterClipId: z
       .string()
@@ -153,6 +241,16 @@ export type CompositionVerbKind = CompositionVerb['verb'];
 export interface VerbContext {
   /** Register a media file and report its id + duration (wraps the ingest tool). */
   ingest: (path: string) => Promise<{ mediaId: MediaId; durationSec: number }>;
+  /** Plan a silence cut for a media clip (runs FFmpeg's silencedetect). */
+  analyzeSilence: (comp: Composition, clipId: string, sensitivity?: number) => Promise<SilenceCut>;
+  /** A media clip, its source's STORED transcript (the one whose word indices
+   *  the caller saw) and the media the timeline uses; throws if it hasn't been
+   *  transcribed. */
+  transcript: (
+    comp: Composition,
+    clipId: string,
+    transcriptId?: string,
+  ) => Promise<{ clip: MediaClip; transcript: Transcript; media: Map<MediaId, MediaInfo> }>;
   /** Track a clip is placed on when the verb doesn't say. */
   defaultTrack: string;
 }
@@ -252,6 +350,61 @@ export async function lowerVerb(
       return [{ op: 'splitClip', clipId: verb.clipId, atSec: verb.atSec, newClipId: makeClipId() }];
     case 'remove':
       return [{ op: 'removeClip', clipId: verb.clipId }];
+    case 'remove_silence': {
+      // Nothing to cut lowers to an empty batch, which is a true no-op.
+      const cut = await ctx.analyzeSilence(comp, verb.clipId, verb.sensitivity);
+      return cut.op ? [cut.op] : [];
+    }
+    case 'cut_words': {
+      const { clip, transcript, media } = await ctx.transcript(
+        comp,
+        verb.clipId,
+        verb.transcriptId,
+      );
+      const op = planWordCut(
+        comp,
+        clip,
+        transcript,
+        [{ fromIndex: verb.fromIndex, toIndex: verb.toIndex }],
+        { media },
+      );
+      if (!op) {
+        throw new TranscriptError(
+          `Words ${verb.fromIndex}..${verb.toIndex} aren't inside clip "${verb.clipId}".`,
+        );
+      }
+      return [op];
+    }
+    case 'remove_retakes': {
+      const { clip, transcript, media } = await ctx.transcript(
+        comp,
+        verb.clipId,
+        verb.transcriptId,
+      );
+      const op = planWordCut(comp, clip, transcript, findRetakes(clipWords(transcript, clip)), {
+        media,
+      });
+      return op ? [op] : [];
+    }
+    case 'caption_speech': {
+      const style: Partial<TextStyle> = {};
+      if (verb.fontSize !== undefined) style.fontSize = verb.fontSize;
+      if (verb.color !== undefined) style.color = verb.color;
+      if (verb.background !== undefined) style.background = verb.background;
+      if (verb.anchor !== undefined) style.anchor = verb.anchor;
+      const plan = await planCaptions(
+        comp,
+        {
+          clipId: verb.clipId,
+          transcriptId: verb.transcriptId,
+          maxWords: verb.maxWords,
+          track: verb.track,
+          style,
+        },
+        (clipId, transcriptId) => ctx.transcript(comp, clipId, transcriptId),
+      );
+      return plan.ops;
+    }
     case 'transition':
       return [
         {

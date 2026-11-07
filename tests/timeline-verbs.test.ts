@@ -11,13 +11,25 @@ import {
   readDocOpLog,
   undoLastDocOp,
 } from '../src/timeline/document-store.js';
-import { applyOps, type CompositionOp, videoTrack } from '../src/timeline/ops.js';
+import { applyOps, type CompositionOp, mediaClip, videoTrack } from '../src/timeline/ops.js';
 import type { MediaId } from '../src/timeline/schema.js';
-import { lowerVerb, lowerVerbs, type VerbContext } from '../src/timeline/verbs.js';
+import { type Transcript, TranscriptError } from '../src/timeline/transcript.js';
+import {
+  EditableVerbSchema,
+  lowerVerb,
+  lowerVerbs,
+  type VerbContext,
+} from '../src/timeline/verbs.js';
 
 const M = 'm_aaaaaaaaaaaa' as MediaId;
 const ctx = (durationSec = 10): VerbContext => ({
   ingest: async () => ({ mediaId: M, durationSec }),
+  analyzeSilence: async () => {
+    throw new Error('not used');
+  },
+  transcript: async () => {
+    throw new Error('not used');
+  },
   defaultTrack: 'v0',
 });
 
@@ -105,6 +117,144 @@ describe('lowerVerb', () => {
     ).toEqual([{ op: 'setTransform', clipId: 'c1', transform: { scale: 2, opacity: 0.5 } }]);
     const split = await lowerVerb(empty, { verb: 'split', clipId: 'c1', atSec: 2 }, ctx());
     expect(split[0]).toMatchObject({ op: 'splitClip', clipId: 'c1', atSec: 2 });
+  });
+});
+
+describe('cut_words / remove_retakes', () => {
+  const clip = mediaClip({ id: 'c1', mediaId: M, sourceOutSec: 3, startSec: 0 });
+  const transcript: Transcript = {
+    version: 1,
+    mediaId: M,
+    language: 'en',
+    source: 'whisper-cpp',
+    model: 'ggml-tiny.en.bin',
+    modelKey: '',
+    requestedLanguage: 'auto',
+    sourceSize: 0,
+    sourceMtimeMs: 0,
+    words: ['go', 'now', 'go', 'now', 'please'].map((text, i) => ({
+      text,
+      startSec: i * 0.5,
+      endSec: i * 0.5 + 0.5,
+    })),
+  };
+  const seenIds: (string | undefined)[] = [];
+  const words = (): VerbContext => ({
+    ...ctx(),
+    transcript: async (_comp, _clipId, transcriptId) => {
+      seenIds.push(transcriptId);
+      return { clip, transcript, media: new Map() };
+    },
+  });
+
+  it('cut_words lowers to a silenceCut keeping the rest of the clip', async () => {
+    const ops = await lowerVerb(
+      emptyComposition(),
+      { verb: 'cut_words', clipId: 'c1', fromIndex: 1, toIndex: 2, transcriptId: 't1' },
+      words(),
+    );
+    expect(ops).toEqual([
+      {
+        op: 'silenceCut',
+        clipId: 'c1',
+        keepRegions: [
+          { sourceInSec: 0, sourceOutSec: 0.5 },
+          { sourceInSec: 1.5, sourceOutSec: 3 },
+        ],
+        newClipIds: [expect.any(String)],
+      },
+    ]);
+    expect(seenIds.at(-1)).toBe('t1');
+  });
+
+  it('cut_words refuses words outside the clip', async () => {
+    const short: VerbContext = {
+      ...ctx(),
+      transcript: async () => ({
+        clip: { ...clip, sourceOutSec: 1 },
+        transcript,
+        media: new Map(),
+      }),
+    };
+    await expect(
+      lowerVerb(
+        emptyComposition(),
+        { verb: 'cut_words', clipId: 'c1', fromIndex: 3, toIndex: 4, transcriptId: 't1' },
+        short,
+      ),
+    ).rejects.toBeInstanceOf(TranscriptError);
+  });
+
+  it('remove_retakes cuts the earlier take, and lowers to nothing without one', async () => {
+    const ops = await lowerVerb(
+      emptyComposition(),
+      { verb: 'remove_retakes', clipId: 'c1' },
+      words(),
+    );
+    expect(ops[0]).toMatchObject({
+      keepRegions: [{ sourceInSec: 1, sourceOutSec: 3 }],
+      newClipIds: [],
+    });
+    const noRepeat: VerbContext = {
+      ...ctx(),
+      transcript: async () => ({
+        clip,
+        transcript: { ...transcript, words: transcript.words.slice(1, 3) },
+        media: new Map(),
+      }),
+    };
+    expect(
+      await lowerVerb(emptyComposition(), { verb: 'remove_retakes', clipId: 'c1' }, noRepeat),
+    ).toEqual([]);
+  });
+});
+
+describe('remove_silence', () => {
+  const cutOp: CompositionOp = {
+    op: 'silenceCut',
+    clipId: 'c1',
+    keepRegions: [
+      { sourceInSec: 0, sourceOutSec: 1.6 },
+      { sourceInSec: 2.9, sourceOutSec: 4.6 },
+    ],
+    newClipIds: ['c1b'],
+  };
+  const silenceCtx = (op: CompositionOp | null, seen: unknown[] = []): VerbContext => ({
+    ...ctx(),
+    analyzeSilence: async (_comp, clipId, sensitivity) => {
+      seen.push({ clipId, sensitivity });
+      return { clipId, silenceCount: op ? 2 : 0, keepRegions: [], removedSec: 0, op };
+    },
+  });
+
+  it('lowers to the planned silenceCut, passing the clip and sensitivity through', async () => {
+    const seen: unknown[] = [];
+    const ops = await lowerVerb(
+      emptyComposition(),
+      { verb: 'remove_silence', clipId: 'c1', sensitivity: 0.7 },
+      silenceCtx(cutOp, seen),
+    );
+    expect(ops).toEqual([cutOp]);
+    expect(seen).toEqual([{ clipId: 'c1', sensitivity: 0.7 }]);
+  });
+
+  it('lowers to nothing when no pause was found', async () => {
+    const ops = await lowerVerb(
+      emptyComposition(),
+      { verb: 'remove_silence', clipId: 'c1' },
+      silenceCtx(null),
+    );
+    expect(ops).toEqual([]);
+  });
+
+  it('is an editable verb with sensitivity bounded to 0..1', () => {
+    expect(EditableVerbSchema.parse({ verb: 'remove_silence', clipId: 'c1' })).toEqual({
+      verb: 'remove_silence',
+      clipId: 'c1',
+    });
+    expect(() =>
+      EditableVerbSchema.parse({ verb: 'remove_silence', clipId: 'c1', sensitivity: 1.5 }),
+    ).toThrow();
   });
 });
 
@@ -203,6 +353,12 @@ describe('applyVerbs (op-aware + undoable)', () => {
     });
     const barrierCtx: VerbContext = {
       defaultTrack: 'v0',
+      analyzeSilence: async () => {
+        throw new Error('not used');
+      },
+      transcript: async () => {
+        throw new Error('not used');
+      },
       ingest: async () => {
         if (arrived < N) {
           arrived++;

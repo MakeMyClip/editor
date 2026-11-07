@@ -28,6 +28,15 @@ const SAMPLES: Record<CompositionOpKind, CompositionOp> = {
   setTrim: { op: 'setTrim', clipId: 'c1', sourceInSec: 1, sourceOutSec: 3 },
   setDuration: { op: 'setDuration', clipId: 't1', durationSec: 5 },
   splitClip: { op: 'splitClip', clipId: 'c1', atSec: 2, newClipId: 'c1b' },
+  silenceCut: {
+    op: 'silenceCut',
+    clipId: 'c1',
+    keepRegions: [
+      { sourceInSec: 0, sourceOutSec: 1.5 },
+      { sourceInSec: 2, sourceOutSec: 4 },
+    ],
+    newClipIds: ['c1b'],
+  },
   addEffect: { op: 'addEffect', clipId: 'c1', effect: { type: 'speed', factor: 2 }, index: 0 },
   removeEffect: { op: 'removeEffect', clipId: 'c1', index: 0 },
   setTransform: { op: 'setTransform', clipId: 'c1', transform: { scale: 2, x: 0.25 } },

@@ -52,10 +52,12 @@ describe('MCP server', () => {
     try {
       const { tools } = await client.listTools();
       expect(tools.map((t) => t.name).sort()).toEqual([
+        'timeline_check',
         'timeline_edit',
         'timeline_export',
         'timeline_redo',
         'timeline_show',
+        'timeline_transcript',
         'timeline_undo',
       ]);
     } finally {
@@ -141,6 +143,25 @@ describe('MCP server', () => {
         arguments: { verbs: [{ verb: 'set_transform', clipId: 'c1', scale: 2 }] },
       });
       expect((res as { isError?: boolean }).isError).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it('exports to an editor file only inside the workspace, and refuses an empty timeline', async () => {
+    const { client, close } = await connect();
+    try {
+      const outside = payload(
+        await client.callTool({
+          name: 'timeline_export',
+          arguments: { format: 'fcpxml', output: join(tmpdir(), 'escape.fcpxml') },
+        }),
+      );
+      expect(String(outside.error)).toMatch(/outside the workspace/);
+      const empty = payload(
+        await client.callTool({ name: 'timeline_export', arguments: { format: 'xmeml' } }),
+      );
+      expect(String(empty.error)).toMatch(/Nothing to export/);
     } finally {
       await close();
     }

@@ -106,3 +106,21 @@ function parseAudioStream(stderr: string): AudioStream | null {
   }
   return null;
 }
+
+/**
+ * The start timecode a camera wrote into a file (`01:00:00:00`, `;` before the
+ * frames for drop-frame), or null when it has none. Reads only the header —
+ * ffmpeg exits 1 for want of an output, which is expected here — so it costs
+ * no decode, unlike `probe`.
+ */
+export async function probeTimecode(inputPath: string): Promise<string | null> {
+  const { stderr } = await execa(ffmpegPath, ['-hide_banner', '-i', inputPath], {
+    reject: false,
+    env: { ...process.env, LC_ALL: 'C' },
+  });
+  return parseTimecode(stderr);
+}
+
+export function parseTimecode(stderr: string): string | null {
+  return stderr.match(/\btimecode\s*:\s*(\d{2}:\d{2}:\d{2}[:;.]\d{2})/)?.[1] ?? null;
+}

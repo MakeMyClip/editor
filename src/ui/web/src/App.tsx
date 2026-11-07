@@ -57,14 +57,17 @@ export function App() {
     setVerbError(null);
   }
 
-  async function handleApplyVerbs(verbs: Verb[]): Promise<void> {
+  /** Resolves to the number of ops applied, or null if the edit failed. */
+  async function handleApplyVerbs(verbs: Verb[]): Promise<number | null> {
     setVerbBusy(true);
     setVerbError(null);
     try {
-      await applyTimelineVerbs(verbs);
+      const { applied } = await applyTimelineVerbs(verbs);
       await Promise.all([refreshTimeline(), refresh()]);
+      return applied;
     } catch (err) {
       setVerbError(err instanceof Error ? err.message : String(err));
+      return null;
     } finally {
       setVerbBusy(false);
     }
@@ -225,7 +228,8 @@ export function App() {
                 hasNext={nextClipOnTrack(selected.track, selected.clip) !== null}
                 busy={verbBusy}
                 error={verbError}
-                onApply={(verbs) => void handleApplyVerbs(verbs)}
+                onApply={handleApplyVerbs}
+                onSeek={setPlayheadSec}
                 onClose={() => setSelectedClipId(null)}
               />
             ) : (
@@ -244,6 +248,8 @@ export function App() {
         exporting={verbBusy}
         onUndo={() => void handleTimelineHistory('undo')}
         onRedo={() => void handleTimelineHistory('redo')}
+        onApply={handleApplyVerbs}
+        verbError={verbError}
       />
       <ToolPickerModal
         open={pickerOpen}

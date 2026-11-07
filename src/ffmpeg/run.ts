@@ -54,6 +54,34 @@ export function listFilters(): Promise<Set<string>> {
   return filterList;
 }
 
+/** The major version from `ffmpeg -version` ("ffmpeg version 6.0", "n7.0.2"),
+ *  or null for a build that doesn't say (a git snapshot). */
+export function parseFfmpegMajor(stdout: string): number | null {
+  const match = /^ffmpeg version n?(\d+)\./m.exec(stdout);
+  return match ? Number(match[1]) : null;
+}
+
+let graphOption: Promise<string> | undefined;
+
+/**
+ * The option that reads a filtergraph from a file: `-/filter_complex` since
+ * FFmpeg 7 (which deprecates the old one), `-filter_complex_script` before. A
+ * build that doesn't name its version (a git snapshot) gets the old option
+ * while its help still lists it.
+ */
+export function filterGraphFileOption(): Promise<string> {
+  graphOption ??= (async () => {
+    const major = parseFfmpegMajor((await runFfmpeg(['-hide_banner', '-version'])).stdout);
+    if (major !== null) return major < 7 ? '-filter_complex_script' : '-/filter_complex';
+    const help = (await runFfmpeg(['-hide_banner', '-h', 'full'])).stdout;
+    return help.includes('-filter_complex_script') ? '-filter_complex_script' : '-/filter_complex';
+  })().catch((err: unknown) => {
+    graphOption = undefined;
+    throw err;
+  });
+  return graphOption;
+}
+
 /**
  * Fail before rendering text when FFmpeg can't draw it. Since FFmpeg 6.1
  * drawtext needs libharfbuzz as well as libfreetype; the Linux binary

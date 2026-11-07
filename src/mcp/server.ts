@@ -1,10 +1,17 @@
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { readFile, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { CompileError, checkExportable, compileTimeline } from '../timeline/compile.js';
+import {
+  buildFrameAtPlan,
+  CompileError,
+  checkExportable,
+  compileTimeline,
+} from '../timeline/compile.js';
 import type { Composition } from '../timeline/composition.js';
 import {
   applyVerbs,
@@ -12,15 +19,32 @@ import {
   redoDocOp,
   undoLastDocOp,
 } from '../timeline/document-store.js';
+import {
+  exportInterchange,
+  InterchangeError,
+  InterchangeFormatSchema,
+  interchangeExtension,
+} from '../timeline/interchange.js';
 import { buildMediaMap } from '../timeline/media-registry.js';
+import { reviewCuts } from '../timeline/review.js';
 import { runPlan } from '../timeline/run-plan.js';
+import { transcribeClip } from '../timeline/transcript.js';
 import { EditableVerbSchema } from '../timeline/verbs.js';
+import { WhisperLanguageSchema } from '../transcribe/whisper.js';
 import {
   type CompositionSummary,
+  confinedMediaMap,
+  confinedMediaRefs,
   makeVerbContext,
   summarizeComposition,
 } from '../ui/timeline-tools.js';
-import { ensureWorkspace, getWorkspace, newOutputPath } from '../workspace.js';
+import {
+  ensureWorkspace,
+  getWorkspace,
+  newOutputPath,
+  resolveInWorkspace,
+  WorkspaceBoundaryError,
+} from '../workspace.js';
 
 const MCP_NAME = 'makemyclip-editor';
 
@@ -59,6 +83,13 @@ function jsonResult(value: unknown): { content: { type: 'text'; text: string }[]
   return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
 }
 
+/** A JPEG on disk as MCP image content, so the client's model can look at it. */
+async function jpegContent(
+  path: string,
+): Promise<{ type: 'image'; data: string; mimeType: 'image/jpeg' }> {
+  return { type: 'image', data: (await readFile(path)).toString('base64'), mimeType: 'image/jpeg' };
+}
+
 /**
  * The document summary plus whether it can render — the SAME renderability signal
  * the CLI `timeline show` and the `clip ui` give, so the MCP agent isn't blind to
@@ -87,9 +118,70 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Show the timeline',
       description:
-        'Read the current timeline document — tracks, clips, timings, and whether it can render (exportable + any blockers). Call this to ground yourself BEFORE editing and to VERIFY a change AFTER.',
+        'Read the current timeline document — tracks, clips, timings, and whether it can render (exportable + any blockers). Pass atSec to also get the rendered frame at that time as an image. Call this to ground yourself BEFORE editing and to VERIFY a change AFTER.',
+      inputSchema: {
+        atSec: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe(
+            'Also return the frame export would render at this timeline time, as an image.',
+          ),
+      },
     },
-    async () => jsonResult(await describeComposition(await readComposition())),
+    async ({ atSec }) => {
+      const comp = await readComposition();
+      const summary = jsonResult(await describeComposition(comp));
+      if (atSec === undefined) return summary;
+      const output = newOutputPath('mcp-frame', 'jpg');
+      try {
+        const plan = buildFrameAtPlan(
+          comp,
+          {
+            media: await confinedMediaMap(comp),
+            dir: getWorkspace(),
+            output,
+            tag: `mcp${randomBytes(4).toString('hex')}`,
+          },
+          atSec,
+        );
+        await runPlan(plan);
+        return { content: [...summary.content, await jpegContent(output)] };
+      } catch (err) {
+        if (!(err instanceof CompileError)) throw err;
+        const frameError = {
+          type: 'text' as const,
+          text: JSON.stringify({ frameError: err.message }),
+        };
+        return { content: [...summary.content, frameError] };
+      } finally {
+        await unlink(output).catch(() => undefined);
+      }
+    },
+  );
+
+  server.registerTool(
+    'timeline_check',
+    {
+      title: 'Check the cuts',
+      description:
+        "Review every hard cut (abutting clips with no transition). Reports cuts whose audio is loud right at the edge, which usually means a clipped word or a click, and returns a contact sheet image: one row per cut, the outgoing clip's last frame then the incoming clip's first. Run it after cutting (e.g. remove_silence) and before exporting.",
+    },
+    async () => {
+      const comp = await readComposition();
+      const media = await confinedMediaMap(comp);
+      const output = newOutputPath('cut-sheet', 'jpg');
+      try {
+        const { sheet, ...review } = await reviewCuts(comp, media, output, getWorkspace());
+        const summary = jsonResult({
+          ...review,
+          sheet: sheet ? { cuts: sheet.cuts, truncated: sheet.truncated } : null,
+        });
+        return sheet ? { content: [...summary.content, await jpegContent(sheet.path)] } : summary;
+      } finally {
+        await unlink(output).catch(() => undefined);
+      }
+    },
   );
 
   server.registerTool(
@@ -97,12 +189,31 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Edit the timeline',
       description:
-        'Apply one or more editing verbs to the document as ONE undoable change. Verbs: add_media, add_text, add_color, trim, move, split, remove, transition. Batch related verbs into a single call. Media paths must be inside the workspace. Returns the updated document summary, including whether it can now render.',
+        'Apply one or more editing verbs to the document as ONE undoable change. Verbs: add_media, add_text, add_color, trim, move, split, remove, remove_silence, cut_words, remove_retakes, caption_speech, transition. remove_silence cuts the pauses out of a media clip (sensitivity 0–1, default 0.5) and moves later clips on its track up; it applies nothing when no pause is found. cut_words cuts words fromIndex..toIndex out of a clip, sending the transcriptId from the timeline_transcript call they came from; remove_retakes cuts the earlier take of each phrase said twice in a row. caption_speech turns stored transcripts into captions on a track above the video (short phrases, or one word at a time with maxWords 1), replacing captions already there; export burns them in. Captions do not move with later cuts, so caption after cutting, or run it again after a cut. Batch related verbs into a single call. Media paths must be inside the workspace. Returns the updated document summary, including whether it can now render.',
       inputSchema: { verbs: z.array(EditableVerbSchema).min(1) },
     },
     async ({ verbs }) => {
       const { doc, ops } = await applyVerbs(verbs, makeVerbContext());
       return jsonResult({ applied: ops.length, document: await describeComposition(doc) });
+    },
+  );
+
+  server.registerTool(
+    'timeline_transcript',
+    {
+      title: 'Transcribe a clip',
+      description:
+        "Transcribe a media clip's speech with the local whisper.cpp and return its words with timeline times. Optional feature: if whisper.cpp or a model isn't set up, the error says how. The first call per source file takes a while; later calls reuse the stored transcript. A word's `index` is stable for its source file.",
+      inputSchema: {
+        clipId: z.string().describe('Media clip to transcribe.'),
+        language: WhisperLanguageSchema.optional(),
+      },
+    },
+    async ({ clipId, language }) => {
+      const comp = await readComposition();
+      return jsonResult(
+        await transcribeClip(comp, clipId, await confinedMediaMap(comp), { language }),
+      );
     },
   );
 
@@ -129,18 +240,55 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Export the timeline',
       description:
-        'Render the current timeline document to an mp4 file in the workspace and return its path.',
+        'Export the current timeline document to a file in the workspace and return its path. format mp4 (default) renders the video. ' +
+        'fcpxml writes an FCPXML project for Final Cut Pro and DaVinci Resolve; xmeml writes Final Cut Pro 7 XML for Premiere Pro (Resolve reads it too), with text as .srt caption files beside it. ' +
+        'Both reference the source media by absolute path, refuse what the editor file cannot hold with the fix to make, and return notes on what is carried only in part.',
+      inputSchema: {
+        format: z
+          .enum(['mp4', 'fcpxml', 'xmeml'])
+          .optional()
+          .describe(`Default mp4. ${InterchangeFormatSchema.description}`),
+        output: z
+          .string()
+          .optional()
+          .describe('Output file inside the workspace (relative paths resolve against it).'),
+      },
     },
-    async () => {
+    async ({ format = 'mp4', output }) => {
       const comp = await readComposition();
-      const media = await buildMediaMap();
-      const output = newOutputPath('timeline-export', 'mp4');
       try {
-        const plan = compileTimeline(comp, { media, dir: getWorkspace(), output });
+        if (format !== 'mp4') {
+          const target = output
+            ? resolveInWorkspace(output)
+            : newOutputPath('timeline-export', interchangeExtension(format));
+          const result = await exportInterchange(comp, await confinedMediaRefs(comp), {
+            format,
+            output: target,
+            confine: resolveInWorkspace,
+          });
+          return jsonResult({
+            exported: target,
+            format,
+            files: result.files.map((f) => f.path),
+            durationSec: result.durationSec,
+            notes: result.notes,
+          });
+        }
+        const media = await buildMediaMap();
+        const target = output
+          ? resolveInWorkspace(output)
+          : newOutputPath('timeline-export', 'mp4');
+        const plan = compileTimeline(comp, { media, dir: getWorkspace(), output: target });
         const result = await runPlan(plan);
         return jsonResult({ exported: result.output, durationSec: plan.durationSec });
       } catch (err) {
-        if (err instanceof CompileError) return jsonResult({ error: err.message });
+        if (
+          err instanceof CompileError ||
+          err instanceof InterchangeError ||
+          err instanceof WorkspaceBoundaryError
+        ) {
+          return jsonResult({ error: err.message });
+        }
         throw err;
       }
     },

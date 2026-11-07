@@ -161,10 +161,24 @@ export {
   colorClip,
   invertOp,
   mediaClip,
+  type SourceRange,
+  SourceRangeSchema,
   type TrackedApply,
   textClip,
   videoTrack,
 } from './timeline/ops.js';
+export {
+  type CutCheck,
+  type CutPoint,
+  type CutReport,
+  type CutReview,
+  type CutSheet,
+  checkCuts,
+  hardCuts,
+  ReviewError,
+  renderCutSheet,
+  reviewCuts,
+} from './timeline/review.js';
 export { type RunPlanResult, runPlan } from './timeline/run-plan.js';
 export {
   AudioStreamSchema,
@@ -177,6 +191,32 @@ export {
   TimecodeSchema,
   VideoStreamSchema,
 } from './timeline/schema.js';
+export {
+  analyzeSilence,
+  DEFAULT_SENSITIVITY,
+  planSilenceCut,
+  SensitivitySchema,
+  type SilenceAnalysisContext,
+  SilenceAnalysisError,
+  type SilenceCut,
+  sensitivityToDetect,
+} from './timeline/silence.js';
+export {
+  type ClipTranscript,
+  type ClipWord,
+  clipWords,
+  findRetakes,
+  planWordCut,
+  type Retake,
+  storedTranscriptForClip,
+  type Transcript,
+  TranscriptError,
+  TranscriptSchema,
+  transcribeClip,
+  transcribeMedia,
+  transcriptForClip,
+  type WordRange,
+} from './timeline/transcript.js';
 export {
   type CompositionVerb,
   type CompositionVerbKind,
@@ -300,3 +340,8 @@ export {
   type ZoomPanResult,
   zoomPan,
 } from './tools/zoom-pan.js';
+export {
+  TranscriptionUnavailableError,
+  WHISPER_MODEL_ENV,
+  WHISPER_PATH_ENV,
+} from './transcribe/whisper.js';
