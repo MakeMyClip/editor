@@ -648,14 +648,33 @@ describe('interchange — FCP7 XML (Premiere)', () => {
     ]);
     // 15 frames at 30 fps, in Premiere ticks.
     expect(text(cross as Element, 'cutPointTicks')).toBe(String(15 * 8467200000));
-    // Edges under transitions are placed by them.
+    // Edges under transitions are placed by them, and in/out take in the
+    // media under the blend: each clip's whole source range.
     expect([text(a as Element, 'start'), text(a as Element, 'end')]).toEqual(['-1', '-1']);
-    expect([text(a as Element, 'in'), text(a as Element, 'out')]).toEqual(['0', '135']);
+    expect([text(a as Element, 'in'), text(a as Element, 'out')]).toEqual(['0', '150']);
     expect([text(b as Element, 'start'), text(b as Element, 'end')]).toEqual(['-1', '270']);
-    expect([text(b as Element, 'in'), text(b as Element, 'out')]).toEqual(['315', '450']);
+    expect([text(b as Element, 'in'), text(b as Element, 'out')]).toEqual(['300', '450']);
     const audio = children(one(root, 'media')).find((e) => e.tagName === 'audio') as Element;
     const audioTransition = one(audio, 'transitionitem');
     expect(text(audioTransition, 'effectid')).toBe('KGAudioTransCrossFade0dB');
+  });
+
+  it('counts a source of another frame rate in its own frames', () => {
+    const film = new Map([
+      [
+        A,
+        source('/footage/a.mov', { video: { codec: 'h264', width: 1920, height: 1080, fps: 24 } }),
+      ],
+    ]);
+    const root = parse(
+      exportAs('xmeml', doc([{ id: 'v0', clips: [media('a', 0, 10, 12)] }]), film).files[0]
+        ?.content ?? '',
+    );
+    const clip = one(one(one(root, 'video'), 'track'), 'clipitem');
+    expect(text(one(clip, 'rate'), 'timebase')).toBe('24');
+    expect([text(clip, 'start'), text(clip, 'end')]).toEqual(['0', '60']);
+    expect([text(clip, 'in'), text(clip, 'out')]).toEqual(['240', '288']);
+    expect(text(clip, 'duration')).toBe('1440');
   });
 
   it('writes text as SRT captions beside the XML, in output time', () => {

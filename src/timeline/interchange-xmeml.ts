@@ -266,11 +266,20 @@ export function writeXmeml(layout: Layout, sequenceName: string): XmemlResult {
   const trackXml = (track: number): string => {
     const transitions = transitionsOn(track);
     // A clip edge under a transition is written as -1: the transition places it.
+    // Across a centered transition the clip's in/out also take in the media
+    // under it, past the edit: `reach` is how far, in sequence frames.
     const startCovered = new Set<number>();
     const endCovered = new Set<number>();
+    const reachBefore = new Map<number, number>();
+    const reachAfter = new Map<number, number>();
     for (const t of transitions) {
-      if (t.alignment !== 'end-black') startCovered.add(t.start + t.cutAt);
-      if (t.alignment !== 'start-black') endCovered.add(t.start + t.cutAt);
+      const cut = t.start + t.cutAt;
+      if (t.alignment !== 'end-black') startCovered.add(cut);
+      if (t.alignment !== 'start-black') endCovered.add(cut);
+      if (t.alignment === 'center') {
+        reachBefore.set(cut, cut - t.start);
+        reachAfter.set(cut, t.end - cut);
+      }
     }
     const entries: TrackEntry[] = transitions.map((t) => ({
       at: t.start,
@@ -283,21 +292,27 @@ export function writeXmeml(layout: Layout, sequenceName: string): XmemlResult {
       const start = startCovered.has(item.offset) ? -1 : item.offset;
       const stop = endCovered.has(end) ? -1 : end;
       const timing = `${tag('start', start)}${tag('end', stop)}`;
+      const head = reachBefore.get(item.offset) ?? 0;
+      const tail = reachAfter.get(end) ?? 0;
       const id = clipId(index, track);
       if (item.kind === 'media') {
         const info = layout.media.get(item.mediaId) as InterchangeMedia;
-        const mediaFrames = Math.ceil((info.durationSec * rate.den) / rate.num);
+        // A media clip counts its source in the source's own frames; only
+        // start/end are sequence frames.
+        const srcRate = (info.video && sourceRate(info.video.fps)) || rate;
+        const toSource = (frames: number): number =>
+          Math.round((frames * rate.num * srcRate.den) / (rate.den * srcRate.num));
         entries.push({
           at: item.offset,
           xml:
             `<clipitem id="${id}">` +
             tag('name', mediaName(info.path)) +
             tag('enabled', 'TRUE') +
-            tag('duration', mediaFrames) +
-            rateXml(rate) +
+            tag('duration', Math.ceil((info.durationSec * srcRate.den) / srcRate.num)) +
+            rateXml(srcRate) +
             timing +
-            tag('in', item.sourceIn) +
-            tag('out', item.sourceIn + item.duration) +
+            tag('in', toSource(item.sourceIn - head)) +
+            tag('out', toSource(item.sourceIn + item.duration + tail)) +
             fileXml(item.mediaId, info) +
             (track === 0
               ? fitScale(info)
@@ -323,8 +338,8 @@ export function writeXmeml(layout: Layout, sequenceName: string): XmemlResult {
           tag('duration', item.duration + 2 * handle) +
           rateXml(rate) +
           timing +
-          tag('in', handle) +
-          tag('out', handle + item.duration) +
+          tag('in', handle - head) +
+          tag('out', handle + item.duration + tail) +
           matteXml(color) +
           '</generatoritem>',
       });
