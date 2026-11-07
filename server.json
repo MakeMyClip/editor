@@ -1,0 +1,61 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.MakeMyClip/editor",
+  "title": "MakeMyClip Editor",
+  "description": "Local video editor: cut silence, edit by transcript, add captions, export to Final Cut or Premiere.",
+  "websiteUrl": "https://github.com/MakeMyClip/editor#readme",
+  "repository": {
+    "url": "https://github.com/MakeMyClip/editor",
+    "source": "github",
+    "id": "1250722349"
+  },
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/MakeMyClip/editor/main/logo.png",
+      "mimeType": "image/png",
+      "sizes": ["1024x1024"]
+    }
+  ],
+  "version": "0.0.0-development",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@makemyclip/editor",
+      "version": "0.0.0-development",
+      "runtimeHint": "npx",
+      "packageArguments": [{ "type": "positional", "value": "mcp" }],
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "MAKEMYCLIP_WORKSPACE",
+          "description": "Folder the editor may read and write; put your videos here. Defaults to a folder in the temp directory.",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "MAKEMYCLIP_WHISPER_MODEL",
+          "description": "Optional: a whisper.cpp model file (e.g. ggml-base.en.bin) for transcripts and captions.",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "MAKEMYCLIP_FFMPEG_PATH",
+          "description": "Optional: an FFmpeg to use instead of the one ffmpeg-static downloads.",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "MAKEMYCLIP_WHISPER_PATH",
+          "description": "Optional: the whisper-cli binary, when it isn't on PATH.",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

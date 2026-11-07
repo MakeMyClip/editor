@@ -19,10 +19,17 @@ When the workflow publishes, it:
 1. Reads commits since the last tag, decides the next version
 2. Updates `CHANGELOG.md` for the release notes
 3. Publishes to npm at `@makemyclip/editor` with provenance attestation
-4. Creates a GitHub Release with auto-generated notes
+4. Creates a GitHub Release with auto-generated notes, with the Claude Desktop extension `makemyclip-editor.mcpb` attached (built by `pnpm build:mcpb`)
 5. Tags the commit as `v<version>`
+6. Lists the version in the official MCP Registry as `io.github.MakeMyClip/editor` (`pnpm registry:publish`, after npm has it and the `.mcpb` is on the release)
 
 The package shows a verified publisher badge on npmjs.com because of provenance.
+
+### MCP Registry
+
+`server.json` holds the listing. At release, `pnpm registry:prepare` stamps it with the version and adds the `.mcpb` (its release URL and SHA-256); that change stays in the release job's checkout. The registry checks that the npm version's `package.json` has `"mcpName": "io.github.MakeMyClip/editor"`, case included, and that the `.mcpb` URL is reachable. The release job logs in with GitHub OIDC (`mcp-publisher login github-oidc`), which grants the `io.github.MakeMyClip/*` namespace; `mcp-publisher` is downloaded and checked against its sigstore signature.
+
+If the registry step fails, npm and the GitHub release are already out, and re-running the job does nothing (semantic-release sees no new commits). List the version by hand from a checkout of the tag (its `package.json` still says `0.0.0-development`, so pass the version): `gh release download v<version> --pattern makemyclip-editor.mcpb --dir release` (the registry entry must match the released file's SHA-256), `pnpm registry:prepare <version>`, then `mcp-publisher login github --token <PAT>` (a token with `read:org`, from an owner of the MakeMyClip organization; the interactive login can't publish to an organization namespace) and `mcp-publisher publish`.
 
 ## First-time setup
 

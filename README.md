@@ -91,7 +91,7 @@ Put your videos in the extension's **Media folder** (by default `Documents/MakeM
 }
 ```
 
-The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The MCP server exposes the timeline tools (show / edit / check / transcribe / undo / redo / export) and a `doctor` setup check over stdio; media stays confined to `MAKEMYCLIP_WORKSPACE`, and `MAKEMYCLIP_WHISPER_MODEL` is only needed for transcription and captions. Everything runs locally and offline — no API key.
+It is listed in the [official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.MakeMyClip/editor) as `io.github.MakeMyClip/editor`, so MCP clients that browse the registry can install it from there. The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The MCP server exposes the timeline tools (show / edit / check / transcribe / undo / redo / export) and a `doctor` setup check over stdio; media stays confined to `MAKEMYCLIP_WORKSPACE`, and `MAKEMYCLIP_WHISPER_MODEL` is only needed for transcription and captions. Everything runs locally and offline — no API key.
 
 **Optional: local transcription** (for editing by transcript, removing retakes, and captions):
 
