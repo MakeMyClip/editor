@@ -300,7 +300,7 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Check the setup',
       description:
-        'Check that this computer has what the editor needs: Node, FFmpeg and its text and stabilization filters, a writable workspace and a caption font, plus the optional local whisper.cpp and model for transcription. Each problem comes with its fix; settings named MAKEMYCLIP_* go in the env of this server in the MCP client config. Run it when the user asks whether their setup works, or when a tool fails with a setup error.',
+        'Check that this computer has what the editor needs: Node, FFmpeg and its text and stabilization filters, a writable workspace and a caption font, plus the optional local whisper.cpp and model for transcription. Each problem comes with its fix, and howToSet says where the MAKEMYCLIP_* settings it names are changed. Run it when the user asks whether their setup works, or when a tool fails with a setup error.',
     },
     async () => jsonResult(await doctor()),
   );

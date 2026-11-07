@@ -123,7 +123,11 @@ describe('whisper.cpp', () => {
     const model = join(workspace, 'ggml-tiny.en.bin');
     await writeFile(model, 'x');
     process.env.MAKEMYCLIP_WHISPER_MODEL = model;
-    expect(resolveWhisper()).toEqual({ binary: 'whisper-cli', model });
+    // An installed whisper-cli resolves to its full path (Homebrew's on a Mac).
+    expect(resolveWhisper()).toEqual({
+      binary: expect.stringMatching(/whisper-cli(\.exe)?$/),
+      model,
+    });
     process.env.MAKEMYCLIP_WHISPER_PATH = '/opt/whisper/bin/whisper-cli';
     expect(resolveWhisper().binary).toBe('/opt/whisper/bin/whisper-cli');
   });

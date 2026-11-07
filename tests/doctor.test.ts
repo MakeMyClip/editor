@@ -47,7 +47,8 @@ function deps(overrides: Partial<DoctorDeps> = {}): DoctorDeps & { calls: string
       if (args.includes('-filters')) return { stdout: FILTERS };
       return { stdout: 'usage: whisper-cli [options] file0 file1 ...\n' };
     },
-    isFile: () => true,
+    isFile: (path) => path.endsWith('.bin'),
+    isExecutable: (path) => path === BUNDLED,
     probeWritable: async () => undefined,
     captionFont: () => '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     ...overrides,
@@ -61,13 +62,38 @@ function check(checks: DoctorCheck[], id: DoctorCheckId): DoctorCheck {
 }
 
 describe('resolveFfmpeg', () => {
-  it('prefers the env override, then the bundled binary, then PATH', () => {
-    expect(resolveFfmpeg({ MAKEMYCLIP_FFMPEG_PATH: '/opt/ffmpeg' }, BUNDLED)).toEqual({
+  const lookup = {
+    env: { PATH: '/usr/bin' },
+    platform: 'darwin' as const,
+    bundled: BUNDLED,
+    isExecutable: (path: string) => path === BUNDLED || path === '/opt/homebrew/bin/ffmpeg',
+  };
+
+  it('prefers the env override, then the bundled binary, then an installed FFmpeg', () => {
+    expect(resolveFfmpeg({ ...lookup, env: { MAKEMYCLIP_FFMPEG_PATH: '/opt/ffmpeg' } })).toEqual({
       path: '/opt/ffmpeg',
       source: 'env',
     });
-    expect(resolveFfmpeg({}, BUNDLED)).toEqual({ path: BUNDLED, source: 'bundled' });
-    expect(resolveFfmpeg({}, null)).toEqual({ path: 'ffmpeg', source: 'system' });
+    expect(resolveFfmpeg(lookup)).toEqual({ path: BUNDLED, source: 'bundled' });
+    expect(resolveFfmpeg({ ...lookup, bundled: null })).toEqual({
+      path: '/opt/homebrew/bin/ffmpeg',
+      source: 'system',
+    });
+  });
+
+  it('skips a bundled binary that is not on disk, and an empty override', () => {
+    const missing = {
+      ...lookup,
+      isExecutable: (path: string) => path === '/opt/homebrew/bin/ffmpeg',
+    };
+    expect(resolveFfmpeg(missing)).toEqual({ path: '/opt/homebrew/bin/ffmpeg', source: 'system' });
+    expect(resolveFfmpeg({ ...lookup, env: { MAKEMYCLIP_FFMPEG_PATH: '' } }).source).toBe(
+      'bundled',
+    );
+    expect(resolveFfmpeg({ ...missing, isExecutable: () => false })).toEqual({
+      path: 'ffmpeg',
+      source: 'system',
+    });
   });
 });
 
@@ -122,7 +148,7 @@ describe('doctor', () => {
     expect(check(result.checks, 'ffmpeg')).toMatchObject({
       status: 'fail',
       detail: "/nope/ffmpeg (MAKEMYCLIP_FFMPEG_PATH) doesn't run: not found.",
-      fix: expect.stringContaining('unset it to use the bundled one'),
+      fix: 'Point MAKEMYCLIP_FFMPEG_PATH at a working ffmpeg binary, or unset it.',
     });
     expect(check(result.checks, 'drawtext').status).toBe('skip');
     expect(check(result.checks, 'vidstab').status).toBe('skip');
@@ -132,7 +158,7 @@ describe('doctor', () => {
     const result = await doctor(
       {},
       deps({
-        isFile: (path) => path !== BUNDLED,
+        isExecutable: () => false,
         run: async () => {
           throw spawnError('ENOENT');
         },
@@ -159,9 +185,47 @@ describe('doctor', () => {
 
     expect(check(result.checks, 'ffmpeg')).toMatchObject({
       status: 'fail',
-      detail: "ffmpeg (ffmpeg on PATH) doesn't run: not found.",
+      detail: "ffmpeg (system) doesn't run: not found.",
       fix: expect.stringContaining('`brew install ffmpeg`'),
     });
+  });
+
+  it("finds Homebrew's FFmpeg and whisper-cli for the Claude Desktop extension", async () => {
+    const homebrew = ['/opt/homebrew/bin/ffmpeg', '/opt/homebrew/bin/whisper-cli'];
+    const d = deps({
+      env: { MAKEMYCLIP_BUNDLE: 'mcpb', PATH: '/usr/bin:/bin', MAKEMYCLIP_WHISPER_MODEL: '' },
+      platform: 'darwin',
+      isExecutable: (path) => homebrew.includes(path),
+    });
+    const result = await doctor({}, d);
+
+    expect(check(result.checks, 'ffmpeg').detail).toBe('7.1.1 (system) /opt/homebrew/bin/ffmpeg');
+    expect(check(result.checks, 'whisper').detail).toBe(
+      '/opt/homebrew/bin/whisper-cli (installed)',
+    );
+    expect(check(result.checks, 'whisper-model').detail).toContain('is not set');
+    expect(result.howToSet).toContain("MakeMyClip Editor extension's settings");
+    expect(d.calls.map((c) => c[0])).toEqual([homebrew[0], homebrew[0], homebrew[1]]);
+  });
+
+  it('tells extension users to install FFmpeg, which the bundle leaves out', async () => {
+    const result = await doctor(
+      {},
+      deps({
+        env: { MAKEMYCLIP_BUNDLE: 'mcpb', MAKEMYCLIP_FFMPEG_PATH: '' },
+        platform: 'win32',
+        isExecutable: () => false,
+        run: async () => {
+          throw spawnError('ENOENT');
+        },
+      }),
+    );
+
+    expect(check(result.checks, 'ffmpeg')).toMatchObject({
+      status: 'fail',
+      fix: expect.stringMatching(/doesn't include FFmpeg.*winget install Gyan\.FFmpeg/),
+    });
+    expect(formatDoctorReport(result)).toContain('FFmpeg is MAKEMYCLIP_FFMPEG_PATH');
   });
 
   it('warns, without failing, when FFmpeg lacks drawtext or vidstab', async () => {

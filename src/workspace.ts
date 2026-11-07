@@ -1,13 +1,20 @@
 import { randomBytes } from 'node:crypto';
 import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { envSetting } from './system-binary.js';
 
 const WORKSPACE_ENV = 'MAKEMYCLIP_WORKSPACE';
 
 export function getWorkspace(): string {
-  return process.env[WORKSPACE_ENV] ?? resolve(tmpdir(), 'makemyclip-editor');
+  const explicit = envSetting(WORKSPACE_ENV);
+  if (explicit !== undefined) return explicit;
+  // Claude Desktop extension users drop their videos into this folder
+  // themselves, so it goes where they can find it rather than the temp dir.
+  if (process.env.MAKEMYCLIP_BUNDLE === 'mcpb')
+    return resolve(homedir(), 'Documents', 'MakeMyClip');
+  return resolve(tmpdir(), 'makemyclip-editor');
 }
 
 export async function ensureWorkspace(): Promise<string> {

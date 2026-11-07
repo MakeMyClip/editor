@@ -55,6 +55,7 @@ export {
 } from './ffmpeg/probe.js';
 export {
   FFMPEG_PATH_ENV,
+  type FfmpegLookup,
   type FfmpegResolution,
   MissingFilterError,
   resolveFfmpeg,
@@ -91,6 +92,11 @@ export {
   type RevisionedStore,
   type RevisionedStoreConfig,
 } from './storage/revisioned-store.js';
+export {
+  envSetting,
+  findSystemBinary,
+  type SystemLookup,
+} from './system-binary.js';
 export {
   buildFrameAtPlan,
   type CompileContext,
@@ -362,4 +368,5 @@ export {
   TranscriptionUnavailableError,
   WHISPER_MODEL_ENV,
   WHISPER_PATH_ENV,
+  whisperBinary,
 } from './transcribe/whisper.js';
