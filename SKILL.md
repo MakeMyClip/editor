@@ -1,8 +1,8 @@
 ---
 name: editor
-description: AI-native video editor for any agent. Use when the user asks to edit, trim, splice, caption, zoom into, add a title card, transition between, remove silence from, chroma-key, stabilize, or render video files, or to export a cut to Final Cut Pro, Premiere Pro or DaVinci Resolve. Wraps FFmpeg in 19 deterministic tools and a session log; runs locally; no generative AI.
+description: Local, open-source video editor that agents drive with FFmpeg and whisper.cpp. Use when the user wants to edit a video file - cut out silence, pauses or dead air; remove repeated takes or cut words using the transcript; add captions or subtitles; trim, split, join or crossfade clips; add text, title cards or zoom; clean up a talking-head video, screen recording, tutorial or podcast; render an mp4; or export the cut to Final Cut Pro, DaVinci Resolve or Premiere Pro (FCPXML / XML). Runs offline with no API key; every timeline edit can be undone; no generative AI.
 license: MIT
-compatibility: Requires Node 24+. FFmpeg is auto-downloaded via ffmpeg-static on first use; override with MAKEMYCLIP_FFMPEG_PATH.
+compatibility: Requires Node 24+. FFmpeg is auto-downloaded via ffmpeg-static on first use; override with MAKEMYCLIP_FFMPEG_PATH. Transcription (transcript cuts, retakes, captions) needs a user-installed whisper.cpp and a model file set in MAKEMYCLIP_WHISPER_MODEL.
 metadata:
   author: makemyclip
   homepage: https://github.com/MakeMyClip/editor
@@ -19,8 +19,11 @@ Drive a local video editor by chatting. When triggered, this skill shells out to
 Trigger this skill when the user asks to:
 
 - Edit, trim, cut, or splice a video file
+- Cut the silence, pauses, or dead air out of a recording ("tighten it up", "remove the gaps")
+- Remove repeated takes or bad takes, or cut a sentence or words by the transcript
+- Clean up a talking-head video, tutorial, lecture, or video podcast
+- Add captions or subtitles timed to the speech, or titles and lower-thirds
 - Zoom, pan, or apply Ken Burns to a region of a clip
-- Add captions, titles, or lower-thirds to footage
 - Assemble multiple clips into one (concat, montage)
 - Render a screen recording into a demo or social clip
 - Hand a cut to Final Cut Pro, Premiere Pro or DaVinci Resolve (FCPXML / XML project export)
