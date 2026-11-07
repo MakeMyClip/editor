@@ -8,10 +8,10 @@
 The open-source AI video editor for Claude Code and any MCP client: remove silence, edit by transcript, add captions, and export to Final Cut Pro, DaVinci Resolve or Premiere Pro. Everything runs on your machine.</p>
 
 <p align="center">
+  <a href="https://skills.sh/makemyclip/editor"><img src="https://skills.sh/b/makemyclip/editor" alt="skills.sh"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="./package.json"><img src="https://img.shields.io/badge/node-%E2%89%A524-brightgreen" alt="Node 24+"></a>
   <a href="https://www.npmjs.com/package/@makemyclip/editor"><img src="https://img.shields.io/npm/v/@makemyclip/editor.svg" alt="npm"></a>
-  <a href="https://skills.sh/makemyclip/editor"><img src="https://skills.sh/b/makemyclip/editor" alt="skills.sh"></a>
   <img src="https://img.shields.io/badge/tests-741%20passing-brightgreen" alt="Tests: 741 passing">
   <img src="https://img.shields.io/badge/telemetry-none-brightgreen" alt="Telemetry: none">
 </p>
