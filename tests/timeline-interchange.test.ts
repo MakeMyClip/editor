@@ -458,7 +458,7 @@ describe('interchange — refusals', () => {
           transitions: [{ afterClipId: 'a', kind: 'wipeleft', durationSec: 1 }],
         },
       ]),
-      /"wipeleft".*clip timeline transition a fade 1/,
+      /"wipeleft".*Change it to fade or dissolve/,
     );
   });
 

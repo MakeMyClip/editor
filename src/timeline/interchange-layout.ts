@@ -449,7 +449,7 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
     if (!CARRIED_TRANSITIONS.has(t.kind)) {
       throw new InterchangeError(
         `Transition after "${span.clip.id}" is "${t.kind}"; interchange export carries fade and dissolve (as a cross dissolve). ` +
-          `Change it to fade (clip timeline transition ${span.clip.id} fade ${t.durationSec}), or export an mp4 instead.`,
+          'Change it to fade or dissolve, or export an mp4 instead.',
       );
     }
     const d = Math.max(1, frames(t.durationSec));

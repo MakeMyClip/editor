@@ -3,6 +3,7 @@ import { clipDuration, clipEndSec, clipLabel, compositionDuration } from '../lib
 import type { Verb } from '../lib/verbs.js';
 import type { Clip, Composition, MediaClip } from '../types.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
+import { ExportButton } from './ExportButton.js';
 
 const PX_PER_SEC = 90;
 const GUTTER = 128; // left lane-label column width (px)
@@ -108,14 +109,7 @@ export function DocTimeline({
         >
           ↷
         </button>
-        <button
-          type="button"
-          className="btn-primary doc-tl-export"
-          onClick={onExport}
-          disabled={exporting || !hasClips}
-        >
-          {exporting ? 'Exporting…' : 'Export ▸'}
-        </button>
+        <ExportButton busy={exporting} disabled={!hasClips} onExportVideo={onExport} />
       </div>
 
       {hasClips ? (
