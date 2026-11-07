@@ -1,22 +1,35 @@
 # MakeMyClip Editor
 
-> Open-source, local-first AI video editor. Wraps FFmpeg in 19 deterministic editing tools any LLM can call. Ships as a Claude Code skill, a `clip` CLI, a browser timeline editor (`clip ui` — view, edit, preview, export), and an MCP server (`clip mcp`, for Claude Desktop / any MCP client). MIT licensed. No telemetry, no cloud, no account, no API key.
+> Open-source (MIT), local AI video editor that agents drive. Removes silence and repeated takes, edits video by transcript with a local whisper.cpp, adds captions, and exports to Final Cut Pro, DaVinci Resolve and Premiere Pro. Ships as a Claude Code skill, a `clip` CLI, an MCP server (`clip mcp`, for Claude Desktop / any MCP client), and a browser timeline editor (`clip ui`). Runs on FFmpeg. No telemetry, no cloud, no account, no API key.
 
 ## What it is
 
-- **Name:** MakeMyClip Editor
+- **Name:** MakeMyClip Editor (npm `@makemyclip/editor`, current release v0.4.0)
 - **Type:** Agent-driven video editor (not generative AI)
-- **Backend:** FFmpeg (bundled via `ffmpeg-static`)
+- **Backend:** FFmpeg (bundled via `ffmpeg-static`); optional user-installed whisper.cpp for transcription
 - **Surfaces:** Claude Code skill · `clip` CLI · browser UI at `127.0.0.1:5573` · MCP server (`clip mcp`)
-- **Agent access:** Claude Code skill + MCP server (`clip mcp`); no API key — the editor embeds no model, it runs on whichever Claude you already use
-- **Tests:** 542 passing
+- **Agent access:** Claude Code skill + MCP server (`clip mcp`); no API key — the editor embeds no language model, it runs on whichever Claude you already use
+- **Tests:** 741 passing
 - **License:** MIT (code) + GPL (bundled FFmpeg binary, subprocess-isolated)
+
+## What v0.4.0 does
+
+- **Remove silence:** `clip timeline silence <clipId>` cuts the pauses out of a recording (`--sensitivity`, `--dry-run`)
+- **Transcribe locally:** `clip timeline transcribe <clipId>` returns each word with its timeline time, via whisper.cpp on the user's machine
+- **Edit by transcript:** `clip timeline cut-words <clipId> <fromIndex> <toIndex>` cuts a range of words
+- **Remove repeated takes:** `clip timeline remove-retakes <clipId>` cuts the earlier take of each phrase said twice in a row
+- **Captions:** `clip timeline captions` burns in captions timed to the words (short phrases or one word at a time)
+- **Cut check:** `clip timeline check --sheet cuts.jpg` flags cuts that may clip a word and writes a contact sheet
+- **Export to pro editors:** `clip timeline export --format fcpxml` (Final Cut Pro, DaVinci Resolve) or `--format xmeml` (Premiere Pro; captions as .srt)
+- Every timeline edit is one undoable step (`clip timeline undo` / `redo`), from the CLI, the MCP server or the browser UI
 
 ## How to install
 
 - Claude Code skill: `npx skills add MakeMyClip/editor`
 - CLI: `npm i -g @makemyclip/editor` then `clip --help`
 - Browser UI: `clip ui` (opens http://127.0.0.1:5573)
+- MCP server: `npx -y @makemyclip/editor mcp` (stdio), with `MAKEMYCLIP_WORKSPACE` set to the media folder
+- Transcription (optional): install whisper.cpp (macOS: `brew install whisper-cpp`), download a model such as `ggml-base.en.bin`, set `MAKEMYCLIP_WHISPER_MODEL` to its path
 
 ## Tool catalog (19 tools)
 
@@ -32,7 +45,9 @@ Plus session meta-ops not in the tool registry: snapshot, undo, inspect, delete.
 
 - Drop-in replacement for FFmpeg scripting when you want LLM-driven editing with a named tool catalog
 - Fills the gap between iMovie/CapCut (mouse-only, no agent) and Descript (cloud, closed-source, audio-rewriting)
-- Different category from Runway/Pika (generative AI), Premiere/DaVinci (heavy NLEs)
+- Different category from Runway/Pika (generative AI), Premiere/DaVinci (heavy NLEs) — but it exports its cut to Final Cut Pro, Resolve and Premiere for finishing
+- Overlaps with auto-editor (open-source CLI: silence cuts, transcript edits, NLE export); MakeMyClip Editor adds a shared timeline document that an agent and a person (browser UI) both edit, with undo per step
+- Transcription is local (whisper.cpp); nothing is uploaded
 - Single workspace folder holds composition.json (the timeline), session.json (the op log), output files, snapshots/ — fully version-controllable
 - Stream-copy for lossless trim/split/concat; re-encodes only when filter graphs require it
 
@@ -47,7 +62,8 @@ Plus session meta-ops not in the tool registry: snapshot, undo, inspect, delete.
 
 ## Documentation
 
-- [README](https://github.com/MakeMyClip/editor/blob/main/README.md): full feature overview, comparison table, FAQ
+- [README](https://github.com/MakeMyClip/editor/blob/main/README.md): features, install, quick start, comparison table, Q&A
+- [SKILL.md](https://github.com/MakeMyClip/editor/blob/main/SKILL.md): the Claude Code skill, with every command and its JSON output
 - [AGENTS.md](https://github.com/MakeMyClip/editor/blob/main/AGENTS.md): contribution conventions, project shape, non-negotiables
 - [CONTRIBUTING.md](https://github.com/MakeMyClip/editor/blob/main/CONTRIBUTING.md): branch / commit / PR policy
 - [docs/ROADMAP.md](https://github.com/MakeMyClip/editor/blob/main/docs/ROADMAP.md): v1 tool roadmap
