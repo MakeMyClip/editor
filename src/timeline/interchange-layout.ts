@@ -375,15 +375,22 @@ function selectTracks(comp: Composition): { picture: Track; overlays: Track[] } 
   return { picture, overlays };
 }
 
-/** The longest fade of a kind on a clip, in frames, clamped to `limit`. */
+/** A clip's fade of a kind, in frames, clamped to `limit` (0 for none). Two
+ *  fades of one kind stack in the mp4 into a curve an editor's single fade
+ *  handle can't draw, so they're refused. */
 function fadeFrames(
   clip: Clip,
   type: 'fadeIn' | 'fadeOut',
   rate: FrameRate,
   limit: number,
 ): number {
-  let sec = 0;
-  for (const e of clip.effects) if (e.type === type) sec = Math.max(sec, e.durationSec);
+  const fades = clip.effects.filter((e) => e.type === type);
+  if (fades.length > 1) {
+    throw new InterchangeError(
+      `Clip "${clip.id}" has ${fades.length} ${type === 'fadeIn' ? 'fade-in' : 'fade-out'} effects, which stack in the mp4 into a curve an editor's fade can't draw. Keep one.`,
+    );
+  }
+  const sec = fades[0]?.type === type ? fades[0].durationSec : 0;
   return Math.min(toFrames(sec, rate), limit);
 }
 
@@ -392,6 +399,10 @@ interface DocSpan {
   start: number;
   end: number;
   shift: number;
+  /** Output frames where the clip finishes fading in from the transition
+   *  before it, and starts fading out into the one after it. */
+  blendInEnd?: number;
+  blendOutStart?: number;
 }
 
 /**
@@ -478,6 +489,7 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
   let cursor = 0;
   let shift = 0;
   let docEnd = 0;
+  let blendInEnd: number | undefined;
 
   spans.forEach((span, i) => {
     const { clip } = span;
@@ -548,7 +560,7 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
     } else {
       spine.push({ ...base, kind: 'title', title: titleSpec(clip, picture.id) });
     }
-    docSpans.push({ start: span.start, end: span.end, shift });
+    docSpans.push({ start: span.start, end: span.end, shift, blendInEnd });
     cursor += visible;
     if (after) {
       const cut = cursor;
@@ -561,6 +573,10 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
         cut,
       });
       shift += after.frames;
+      (docSpans[docSpans.length - 1] as DocSpan).blendOutStart = cut - nextHead;
+      blendInEnd = cut - nextHead + after.frames;
+    } else {
+      blendInEnd = undefined;
     }
     docEnd = span.end;
   });
@@ -571,7 +587,7 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
   for (const track of [...overlays].sort(
     (a, b) => comp.tracks.indexOf(a) - comp.tracks.indexOf(b),
   )) {
-    const laid: Array<LaidTitle & { from: number; to: number }> = [];
+    const laid: LaidTitle[] = [];
     for (const clip of [...track.clips].sort((a, b) => a.startSec - b.startSec)) {
       if (clip.kind !== 'text') continue;
       const from = frames(clip.startSec);
@@ -586,19 +602,35 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
       const spec = titleSpec(clip, track.id);
       // A transition moves a clip earlier in output time than the text's part
       // on the clip before it, so order the parts by output time first.
+      // Text on a clip fades with that clip where a transition blends it in
+      // or out, as the mp4 burns it into the clip's frames.
       const parts = docSpans
-        .map((doc) => ({
-          start: Math.max(from, doc.start) - doc.shift,
-          end: Math.min(to, doc.end) - doc.shift,
-        }))
+        .map((doc) => {
+          const start = Math.max(from, doc.start) - doc.shift;
+          const end = Math.min(to, doc.end) - doc.shift;
+          const fadeIn =
+            doc.blendInEnd !== undefined && start < doc.blendInEnd
+              ? Math.min(end, doc.blendInEnd) - start
+              : 0;
+          const fadeOut =
+            doc.blendOutStart !== undefined && end > doc.blendOutStart
+              ? end - Math.max(start, doc.blendOutStart)
+              : 0;
+          return { start, end, fades: { in: fadeIn, out: fadeOut } };
+        })
         .filter((part) => part.end > part.start)
         .sort((a, b) => a.start - b.start);
-      const pieces: Array<{ start: number; end: number }> = [];
+      const pieces: typeof parts = [];
       for (const part of parts) {
         const last = pieces[pieces.length - 1];
-        // Where both clips show the text (inside a transition), one title covers it.
-        if (last && part.start <= last.end) last.end = Math.max(last.end, part.end);
-        else pieces.push({ ...part });
+        // Where both clips show the text (inside a transition) it holds steady:
+        // one title, fading only where its outermost part does.
+        if (last && part.start <= last.end) {
+          if (part.end >= last.end) last.fades.out = part.fades.out;
+          last.end = Math.max(last.end, part.end);
+        } else {
+          pieces.push({ ...part, fades: { ...part.fades } });
+        }
       }
       for (const piece of pieces) {
         laid.push({
@@ -606,33 +638,23 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
           lane: 0,
           offset: piece.start,
           duration: piece.end - piece.start,
-          fades: { in: 0, out: 0 },
-          from,
-          to,
+          fades: piece.fades,
         });
       }
     }
-    // A transition can make two titles of one track overlap in output time
-    // (the outgoing clip's caption under the incoming clip's): the mp4 fades
-    // one out as the other fades in, so cross-fade them, on separate lanes.
+    // Text a transition makes overlap (the outgoing clip's caption under the
+    // incoming one's) goes on separate lanes; its fades make the cross-fade.
     laid.sort((a, b) => a.offset - b.offset);
     const laneEnds = new Map<number, number>();
     const base = nextLane;
-    laid.forEach((title, i) => {
-      for (const earlier of laid.slice(0, i)) {
-        const overlap = earlier.offset + earlier.duration - title.offset;
-        if (overlap > 0 && earlier.to <= title.from) {
-          earlier.fades.out = Math.max(earlier.fades.out, overlap);
-          title.fades.in = Math.max(title.fades.in, overlap);
-        }
-      }
+    for (const title of laid) {
       let lane = base;
       while ((laneEnds.get(lane) ?? 0) > title.offset) lane++;
       laneEnds.set(lane, title.offset + title.duration);
       title.lane = lane;
       nextLane = Math.max(nextLane, lane + 1);
-    });
-    titles.push(...laid.map(({ from: _from, to: _to, ...title }) => title));
+    }
+    titles.push(...laid);
   }
 
   return {

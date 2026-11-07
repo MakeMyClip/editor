@@ -329,6 +329,36 @@ describe('interchange — FCPXML', () => {
     expect(one(t2 as Element, 'fadeIn').getAttribute('duration')).toBe('1s');
   });
 
+  it('fades a caption with its clip under a transition, and holds one that spans it', () => {
+    const root = fcpxml(
+      doc([
+        {
+          id: 'v0',
+          clips: [media('a', 0, 0, 5), media('b', 5, 0, 5, B)],
+          transitions: [{ afterClipId: 'a', durationSec: 1 }],
+        },
+        {
+          id: 'captions',
+          clips: [
+            textClip({ id: 'alone', text: 'Fading', startSec: 4, durationSec: 1 }),
+            textClip({ id: 'spans', text: 'Steady', startSec: 2, durationSec: 0.5 }),
+          ],
+        },
+        {
+          id: 'titles',
+          clips: [textClip({ id: 'across', text: 'Across', startSec: 3, durationSec: 4 })],
+        },
+      ]),
+    );
+    const byText = (t: string): Element =>
+      all(root, 'title').find((e) => e.getAttribute('name') === t) as Element;
+    // A fades out over 4–5s in output; a caption only on A fades with it.
+    expect(one(byText('Fading'), 'fadeOut').getAttribute('duration')).toBe('1s');
+    expect(all(byText('Steady'), 'adjust-blend')).toHaveLength(0);
+    // On both A and B through the blend: it stays.
+    expect(all(byText('Across'), 'adjust-blend')).toHaveLength(0);
+  });
+
   it('keeps both appearances of text that flashes on either side of a transition', () => {
     const root = fcpxml(
       doc([
@@ -523,6 +553,29 @@ describe('interchange — refusals', () => {
         },
       ]),
       /fades overlap/,
+    );
+  });
+
+  it('refuses two fades of one kind on a clip', () => {
+    refuse(
+      doc([
+        {
+          id: 'v0',
+          clips: [
+            mediaClip({
+              id: 'a',
+              mediaId: A,
+              startSec: 0,
+              sourceOutSec: 6,
+              effects: [
+                { type: 'fadeIn', durationSec: 2 },
+                { type: 'fadeIn', durationSec: 2 },
+              ],
+            }),
+          ],
+        },
+      ]),
+      /2 fade-in effects/,
     );
   });
 
