@@ -1,6 +1,7 @@
 {
   "name": "@makemyclip/editor",
   "version": "0.0.0-development",
+  "mcpName": "io.github.MakeMyClip/editor",
   "description": "Open-source AI video editor for Claude Code and MCP clients: remove silence, edit by transcript with local whisper.cpp, add captions, and export to Final Cut Pro, DaVinci Resolve or Premiere. Runs locally on FFmpeg.",
   "keywords": [
     "video-editing",
@@ -58,6 +59,9 @@
   "scripts": {
     "build": "tsup && pnpm build:ui",
     "build:ui": "vite build --config src/ui/web/vite.config.ts",
+    "build:mcpb": "tsx scripts/build-mcpb.ts",
+    "registry:prepare": "tsx scripts/mcp-registry.ts prepare",
+    "registry:publish": "tsx scripts/mcp-registry.ts publish",
     "dev": "tsx src/cli.ts",
     "dev:ui": "vite --config src/ui/web/vite.config.ts",
     "start": "node dist/cli.js",
@@ -79,6 +83,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@anthropic-ai/mcpb": "2.1.2",
     "@biomejs/biome": "^2.6.4",
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/commit-analyzer": "^13.0.1",

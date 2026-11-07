@@ -6,11 +6,11 @@
 
 - **Name:** MakeMyClip Editor (npm `@makemyclip/editor`, current release v0.4.0)
 - **Type:** Agent-driven video editor (not generative AI)
-- **Backend:** FFmpeg (bundled via `ffmpeg-static`); optional user-installed whisper.cpp for transcription
+- **Backend:** FFmpeg (downloaded by `ffmpeg-static` at npm install; the Claude Desktop extension uses an installed FFmpeg); optional user-installed whisper.cpp for transcription
 - **Surfaces:** Claude Code skill · `clip` CLI · browser UI at `127.0.0.1:5573` · MCP server (`clip mcp`)
 - **Agent access:** Claude Code skill + MCP server (`clip mcp`); no API key — the editor embeds no language model, it runs on whichever Claude you already use
 - **Tests:** 741 passing
-- **License:** MIT (code) + GPL (bundled FFmpeg binary, subprocess-isolated)
+- **License:** MIT (code); FFmpeg runs as a subprocess under its own license (GPLv3 builds from `ffmpeg-static`, except a nonfree Apple Silicon build; the `.mcpb` ships no FFmpeg)
 
 ## What v0.4.0 does
 
@@ -25,11 +25,13 @@
 
 ## How to install
 
-- Claude Code skill: `npx skills add MakeMyClip/editor`
+- Claude Code skill: `npx skills add MakeMyClip/editor`, or as a plugin: `/plugin marketplace add MakeMyClip/editor` then `/plugin install makemyclip-editor@makemyclip`
 - CLI: `npm i -g @makemyclip/editor` then `clip --help`
 - Browser UI: `clip ui` (opens http://127.0.0.1:5573)
 - MCP server: `npx -y @makemyclip/editor mcp` (stdio), with `MAKEMYCLIP_WORKSPACE` set to the media folder
+- Claude Desktop extension: install FFmpeg, then open https://github.com/MakeMyClip/editor/releases/latest/download/makemyclip-editor.mcpb
 - Transcription (optional): install whisper.cpp (macOS: `brew install whisper-cpp`), download a model such as `ggml-base.en.bin`, set `MAKEMYCLIP_WHISPER_MODEL` to its path
+- Setup check: `npx -y @makemyclip/editor doctor` (or the MCP `doctor` tool) lists what's missing and how to fix it
 
 ## Tool catalog (19 tools)
 

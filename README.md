@@ -56,6 +56,13 @@ All of it works from chat (the Claude Code skill or the MCP server), the CLI, an
 npx skills add MakeMyClip/editor
 ```
 
+Or install it as a **Claude Code plugin** from this repo's marketplace, inside Claude Code:
+
+```text
+/plugin marketplace add MakeMyClip/editor
+/plugin install makemyclip-editor@makemyclip
+```
+
 **As a CLI** (for scripts and CI):
 
 ```bash
@@ -68,6 +75,13 @@ clip --help
 ```bash
 clip ui   # opens http://127.0.0.1:5573
 ```
+
+**As a Claude Desktop extension** (one click, no Node or config file):
+
+1. Install FFmpeg: `brew install ffmpeg` on macOS, `winget install Gyan.FFmpeg` on Windows.
+2. Download [`makemyclip-editor.mcpb`](https://github.com/MakeMyClip/editor/releases/latest/download/makemyclip-editor.mcpb) and double-click it, or drag it into Claude Desktop.
+
+Put your videos in the extension's **Media folder** (by default `Documents/MakeMyClip`); the editor reads and writes only there. The extension doesn't include FFmpeg (see [License](#license)): it finds the one Homebrew, MacPorts, winget, Scoop or Chocolatey installed, or you pick it in the extension's settings, along with the optional whisper model.
 
 **As an MCP server** (drive it from Claude Desktop / Cursor / any MCP client — no API key, on your existing Claude):
 
@@ -85,7 +99,7 @@ clip ui   # opens http://127.0.0.1:5573
 }
 ```
 
-The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The MCP server exposes the timeline tools (show / edit / check / transcribe / undo / redo / export) over stdio; media stays confined to `MAKEMYCLIP_WORKSPACE`, and `MAKEMYCLIP_WHISPER_MODEL` is only needed for transcription and captions. Everything runs locally and offline — no API key.
+It is listed in the [official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.MakeMyClip/editor) as `io.github.MakeMyClip/editor`, so MCP clients that browse the registry can install it from there. The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The MCP server exposes the timeline tools (show / edit / check / transcribe / undo / redo / export) and a `doctor` setup check over stdio; media stays confined to `MAKEMYCLIP_WORKSPACE`, and `MAKEMYCLIP_WHISPER_MODEL` is only needed for transcription and captions. Everything runs locally and offline — no API key.
 
 **Optional: local transcription** (for editing by transcript, removing retakes, and captions):
 
@@ -95,6 +109,14 @@ export MAKEMYCLIP_WHISPER_MODEL=/path/to/ggml-base.en.bin
 ```
 
 Download a model such as `ggml-base.en.bin` from [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp), and set `MAKEMYCLIP_WHISPER_PATH` if `whisper-cli` isn't on your `PATH`. The editor never downloads a model itself.
+
+**Check your setup:**
+
+```bash
+npx -y @makemyclip/editor doctor   # add --json for a machine-readable report
+```
+
+It checks Node, which FFmpeg runs and whether it can draw text and captions, the workspace, a caption font, and the optional whisper.cpp and model, and prints the fix for anything missing. In Claude Desktop or another MCP client, ask "is my setup OK?" and Claude runs the same check.
 
 ---
 
@@ -259,7 +281,7 @@ Every edit is undoable (`clip timeline undo` / `redo`, `clip timeline log`), and
 - **Language:** TypeScript (Node 24+) and React 19 (browser UI)
 - **Timeline schema:** [Zod](https://zod.dev/) (shared with the [MakeMyClip.com](https://makemyclip.com) web app)
 - **Subprocess:** [execa](https://github.com/sindresorhus/execa) — args as an array, no shell injection
-- **FFmpeg:** bundled via `ffmpeg-static`, with `MAKEMYCLIP_FFMPEG_PATH` override or system-binary fallback
+- **FFmpeg:** downloaded by `ffmpeg-static` when the npm package installs, with a `MAKEMYCLIP_FFMPEG_PATH` override and an installed FFmpeg as the fallback (the Claude Desktop extension always uses an installed one)
 - **Transcription:** optional, user-installed [whisper.cpp](https://github.com/ggml-org/whisper.cpp), run as a subprocess
 - **MCP:** [`@modelcontextprotocol/sdk`](https://modelcontextprotocol.io/) — the `clip mcp` server (Claude Desktop / any MCP client)
 - **UI:** Hono server + Vite + React, plain CSS
@@ -272,7 +294,7 @@ Every edit is undoable (`clip timeline undo` / `redo`, `clip timeline log`), and
 ### Setup & installation
 
 **Do I need FFmpeg installed separately?**
-No. MakeMyClip Editor bundles FFmpeg via `ffmpeg-static`, so installing the npm package or running `npx skills add MakeMyClip/editor` is all you need. For your own FFmpeg build (LGPL-only, custom codecs, hardware acceleration), set `MAKEMYCLIP_FFMPEG_PATH` to its path and the bundled binary is ignored.
+Not for the npm package, the CLI or the Claude Code skill: `ffmpeg-static` downloads an FFmpeg build for your platform when the package installs. The Claude Desktop extension is the exception: it doesn't include FFmpeg, so install it first (`brew install ffmpeg` or `winget install Gyan.FFmpeg`). For your own FFmpeg build (LGPL-only, custom codecs, hardware acceleration), set `MAKEMYCLIP_FFMPEG_PATH` to its path and the downloaded binary is ignored. `clip doctor` shows which FFmpeg runs.
 
 **What platforms does it run on?**
 macOS, Linux, and Windows — anywhere Node 24+ runs. The browser UI binds to `127.0.0.1` and needs no internet connection.
@@ -318,8 +340,8 @@ Every edit appends to `session.json` and produces a new output file in the works
 **Is it free?**
 Yes — MIT-licensed, free forever for local editing. No paid tier, no signup, no upsell in the editor. Paid AI-generation features (voice synthesis, music, stock footage) will live on [MakeMyClip.com](https://makemyclip.com) when they ship, behind a separate `@makemyclip/generation` package.
 
-**What's the license situation with the bundled FFmpeg?**
-The MakeMyClip Editor source code is [MIT](./LICENSE). The bundled FFmpeg binary (via `ffmpeg-static`) is GPL-licensed because it includes codecs like libx264 and libx265. Subprocess invocation keeps GPL terms confined to the binary, not your application code. For LGPL-only or custom-build requirements (e.g. iOS App Store), set `MAKEMYCLIP_FFMPEG_PATH` to your own binary.
+**What's the license situation with FFmpeg?**
+The MakeMyClip Editor source code is [MIT](./LICENSE). FFmpeg is a separate program the editor runs as a subprocess, so its license covers the binary, not your application code. The build `ffmpeg-static` downloads is GPLv3 on Intel Macs, Windows and Linux. On Apple Silicon it is a build with nonfree parts that FFmpeg marks as not redistributable, so the Claude Desktop extension ships no FFmpeg at all. For LGPL-only or custom-build requirements (e.g. iOS App Store), set `MAKEMYCLIP_FFMPEG_PATH` to your own binary.
 
 **How is this different from running FFmpeg directly?**
 FFmpeg is one binary with a complex CLI; MakeMyClip Editor is 19 named tools with typed inputs, a session log, snapshot/undo, a browser UI, and an agent-callable API. You're still running FFmpeg under the hood — but with a catalog any LLM can call, input validation that prevents bad commands, and a log you can inspect or version-control.
@@ -408,4 +430,9 @@ Built on the work of [FFmpeg](https://ffmpeg.org/), [whisper.cpp](https://github
 
 ## License
 
-[MIT](./LICENSE) for the editor source; GPL for the bundled FFmpeg binary (subprocess-isolated). Use it, fork it, ship it.
+[MIT](./LICENSE) for the editor source. FFmpeg is a separate program, run as a subprocess under its own license:
+
+- **npm package, CLI, Claude Code skill:** `ffmpeg-static` downloads an FFmpeg build from its GitHub releases when the package installs. The Intel macOS, Windows and Linux builds are GPLv3. The Apple Silicon build includes nonfree parts and isn't redistributable.
+- **Claude Desktop extension (`.mcpb`):** includes no FFmpeg. It runs the one you install.
+
+Set `MAKEMYCLIP_FFMPEG_PATH` to use an FFmpeg of your choice. Use it, fork it, ship it.

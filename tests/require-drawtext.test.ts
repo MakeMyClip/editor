@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -128,6 +128,18 @@ describe.skipIf(process.platform === 'win32')('requireDrawtext', () => {
     await runPlan(noText);
 
     expect(await calls()).toEqual([noText.steps[0]?.args]);
+  });
+
+  it('lists filters again when a different FFmpeg resolves', async () => {
+    const { addText, MissingFilterError } = await load(LIST_WITHOUT_DRAWTEXT);
+    const hi = { input: 'in.mp4', text: 'Hi', startSec: 0, endSec: 1 };
+    await expect(addText(hi)).rejects.toThrow(MissingFilterError);
+
+    const other = join(dir, 'other');
+    await mkdir(other);
+    process.env.MAKEMYCLIP_FFMPEG_PATH = await installFakeFfmpeg(other, LIST_WITH_DRAWTEXT);
+
+    await expect(addText(hi)).resolves.toBeDefined();
   });
 
   it('renders text when the filter is there', async () => {

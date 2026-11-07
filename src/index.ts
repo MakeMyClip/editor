@@ -53,7 +53,14 @@ export {
   probe,
   type VideoStream,
 } from './ffmpeg/probe.js';
-export { MissingFilterError, runFfmpeg } from './ffmpeg/run.js';
+export {
+  FFMPEG_PATH_ENV,
+  type FfmpegLookup,
+  type FfmpegResolution,
+  MissingFilterError,
+  resolveFfmpeg,
+  runFfmpeg,
+} from './ffmpeg/run.js';
 export {
   appendOp,
   atomicWriteFile,
@@ -85,6 +92,11 @@ export {
   type RevisionedStore,
   type RevisionedStoreConfig,
 } from './storage/revisioned-store.js';
+export {
+  envSetting,
+  findSystemBinary,
+  type SystemLookup,
+} from './system-binary.js';
 export {
   buildFrameAtPlan,
   type CompileContext,
@@ -273,6 +285,18 @@ export {
   deleteOp,
 } from './tools/delete-op.js';
 export {
+  type DoctorCheck,
+  type DoctorCheckId,
+  type DoctorDeps,
+  DoctorInput,
+  type DoctorInputType,
+  type DoctorResult,
+  type DoctorStatus,
+  defaultDoctorDeps,
+  doctor,
+  formatDoctorReport,
+} from './tools/doctor.js';
+export {
   HighlightReelInput,
   type HighlightReelInputType,
   type HighlightReelResult,
@@ -344,4 +368,5 @@ export {
   TranscriptionUnavailableError,
   WHISPER_MODEL_ENV,
   WHISPER_PATH_ENV,
+  whisperBinary,
 } from './transcribe/whisper.js';

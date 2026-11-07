@@ -7,14 +7,27 @@
         "preset": "angular",
         "releaseRules": [
           { "type": "chore", "scope": "deps", "release": "patch" },
-          { "type": "chore", "scope": "security", "release": "patch" }
+          { "type": "chore", "scope": "security", "release": "patch" },
+          { "type": "feat", "release": "patch" }
         ]
       }
     ],
     "@semantic-release/release-notes-generator",
     ["@semantic-release/changelog", { "changelogFile": "CHANGELOG.md" }],
     ["@semantic-release/npm", { "tarballDir": "release", "npmPublish": false }],
-    ["@semantic-release/exec", { "publishCmd": "npm publish --provenance --access public" }],
-    "@semantic-release/github"
+    [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "pnpm build:mcpb && pnpm registry:prepare",
+        "publishCmd": "npm publish --provenance --access public",
+        "successCmd": "pnpm registry:publish"
+      }
+    ],
+    [
+      "@semantic-release/github",
+      {
+        "assets": [{ "path": "release/*.mcpb", "label": "Claude Desktop extension (.mcpb)" }]
+      }
+    ]
   ]
 }

@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { execa } from 'execa';
 import { z } from 'zod';
+import { envSetting, findSystemBinary, type SystemLookup } from '../system-binary.js';
 
 /**
  * Local speech-to-text through whisper.cpp, run as a subprocess (args as an
@@ -38,6 +39,16 @@ export interface WhisperSetup {
   model: string;
 }
 
+/** The whisper.cpp CLI: `MAKEMYCLIP_WHISPER_PATH`, else an installed `whisper-cli`. */
+export function whisperBinary(lookup: SystemLookup = {}): {
+  path: string;
+  source: 'env' | 'system';
+} {
+  const explicit = envSetting(WHISPER_PATH_ENV, lookup.env);
+  if (explicit !== undefined) return { path: explicit, source: 'env' };
+  return { path: findSystemBinary('whisper-cli', lookup), source: 'system' };
+}
+
 /** Locate whisper.cpp and a model: an explicit model path, then the env vars. */
 export function resolveWhisper(model?: string): WhisperSetup {
   const modelPath = model ?? process.env[WHISPER_MODEL_ENV];
@@ -45,7 +56,7 @@ export function resolveWhisper(model?: string): WhisperSetup {
   if (!existsSync(modelPath)) {
     throw new TranscriptionUnavailableError(`The whisper model ${modelPath} does not exist.`);
   }
-  return { binary: process.env[WHISPER_PATH_ENV] ?? 'whisper-cli', model: modelPath };
+  return { binary: whisperBinary().path, model: modelPath };
 }
 
 export interface WhisperArgs {

@@ -10,6 +10,8 @@
     "includes": [
       "src/**/*",
       "tests/**/*",
+      "scripts/**/*",
+      "mcpb/**/*",
       "*.json",
       "*.md",
       "!dist",
