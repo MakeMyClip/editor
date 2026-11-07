@@ -97,7 +97,7 @@ Each tool lives in `src/tools/<name>.ts` and exports:
 Rules:
 - One tool per file.
 - Zod schema is the single source of input truth.
-- Handlers return a typed result — `{ path, ... }` for tools that write a file (`ingest.ts`, `inspect.ts`, `split.ts`, `undo.ts` and `delete-op.ts` return other shapes) — never raw FFmpeg output.
+- Handlers return a typed result — `{ path, ... }` for tools that write a file (`ingest.ts`, `inspect.ts`, `split.ts`, `undo.ts`, `delete-op.ts` and `doctor.ts` return other shapes) — never raw FFmpeg output.
 - Handlers must be idempotent given the same input + workspace state.
 
 ## FFmpeg
