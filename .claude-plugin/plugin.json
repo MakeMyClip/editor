@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "makemyclip-editor",
+  "displayName": "MakeMyClip Editor",
+  "description": "Edit videos by chatting: remove silence and repeated takes, edit by transcript with a local whisper.cpp, add captions, render an mp4 or export to Final Cut Pro, DaVinci Resolve or Premiere Pro. Runs FFmpeg on your machine; no API key.",
+  "author": {
+    "name": "MakeMyClip",
+    "url": "https://makemyclip.com"
+  },
+  "homepage": "https://github.com/MakeMyClip/editor#readme",
+  "repository": "https://github.com/MakeMyClip/editor",
+  "license": "MIT",
+  "keywords": [
+    "video",
+    "video-editing",
+    "ffmpeg",
+    "captions",
+    "subtitles",
+    "transcription",
+    "silence-removal",
+    "fcpxml"
+  ]
+}

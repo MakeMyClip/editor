@@ -55,6 +55,13 @@ All of it works from chat (the Claude Code skill or the MCP server), the CLI, an
 npx skills add MakeMyClip/editor
 ```
 
+Or install it as a **Claude Code plugin** from this repo's marketplace, inside Claude Code:
+
+```text
+/plugin marketplace add MakeMyClip/editor
+/plugin install makemyclip-editor@makemyclip
+```
+
 **As a CLI** (for scripts and CI):
 
 ```bash

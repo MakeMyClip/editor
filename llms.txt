@@ -25,7 +25,7 @@
 
 ## How to install
 
-- Claude Code skill: `npx skills add MakeMyClip/editor`
+- Claude Code skill: `npx skills add MakeMyClip/editor`, or as a plugin: `/plugin marketplace add MakeMyClip/editor` then `/plugin install makemyclip-editor@makemyclip`
 - CLI: `npm i -g @makemyclip/editor` then `clip --help`
 - Browser UI: `clip ui` (opens http://127.0.0.1:5573)
 - MCP server: `npx -y @makemyclip/editor mcp` (stdio), with `MAKEMYCLIP_WORKSPACE` set to the media folder
