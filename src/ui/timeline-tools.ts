@@ -6,8 +6,8 @@ import {
   compositionDuration,
   findClip,
 } from '../timeline/composition.js';
-import { buildMediaMap } from '../timeline/media-registry.js';
-import type { MediaId } from '../timeline/schema.js';
+import { buildMediaMap, buildMediaRefs } from '../timeline/media-registry.js';
+import type { MediaId, MediaRef } from '../timeline/schema.js';
 import { analyzeSilence } from '../timeline/silence.js';
 import { storedTranscriptForClip } from '../timeline/transcript.js';
 import { DEFAULT_VERB_TRACK, type VerbContext } from '../timeline/verbs.js';
@@ -70,6 +70,21 @@ export async function confinedMediaMap(comp: Composition): Promise<Map<MediaId, 
     }
   }
   return media;
+}
+
+/** The full media references, with every file the document uses re-checked
+ *  against the workspace, as `confinedMediaMap` does for the render path. */
+export async function confinedMediaRefs(comp: Composition): Promise<Map<MediaId, MediaRef>> {
+  const refs = await buildMediaRefs();
+  for (const track of comp.tracks) {
+    for (const clip of track.clips) {
+      const ref = clip.kind === 'media' ? refs.get(clip.mediaId) : undefined;
+      if (clip.kind === 'media' && ref) {
+        refs.set(clip.mediaId, { ...ref, path: resolveInWorkspace(ref.path) });
+      }
+    }
+  }
+  return refs;
 }
 
 export interface CompositionSummary {
