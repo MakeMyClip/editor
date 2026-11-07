@@ -22,8 +22,13 @@ function spawnError(code: string): Error {
   return Object.assign(new Error(`spawn ${code}`), { code });
 }
 
-function exitError(exitCode: number): Error {
-  return Object.assign(new Error(`Command failed with exit code ${exitCode}`), { exitCode });
+function exitError(exitCode: number, stderr: string): Error {
+  return Object.assign(new Error(`Command failed with exit code ${exitCode}`), {
+    shortMessage: `Command failed with exit code ${exitCode}`,
+    exitCode,
+    stdout: '',
+    stderr,
+  });
 }
 
 /** A machine where everything is set up; each test breaks one thing. */
@@ -252,7 +257,7 @@ describe('doctor', () => {
       deps({
         env: { MAKEMYCLIP_WHISPER_PATH: '/bin/whisper', MAKEMYCLIP_WHISPER_MODEL: '/m.bin' },
         run: async (file, args) => {
-          if (file === '/bin/whisper') throw exitError(1);
+          if (file === '/bin/whisper') throw exitError(1, '\nusage: whisper-cli [options] file0\n');
           return deps().run(file, args);
         },
       }),
@@ -261,6 +266,29 @@ describe('doctor', () => {
     expect(check(result.checks, 'whisper')).toMatchObject({
       status: 'ok',
       detail: '/bin/whisper (MAKEMYCLIP_WHISPER_PATH)',
+    });
+  });
+
+  it('warns about a whisper.cpp that exits without printing help', async () => {
+    const result = await doctor(
+      {},
+      deps({
+        run: async (file, args) => {
+          if (file === 'whisper-cli') {
+            throw exitError(
+              127,
+              'whisper-cli: error while loading shared libraries: libwhisper.so.1',
+            );
+          }
+          return deps().run(file, args);
+        },
+      }),
+    );
+
+    expect(check(result.checks, 'whisper')).toMatchObject({
+      status: 'warn',
+      detail: expect.stringContaining('libwhisper.so.1'),
+      fix: expect.stringContaining('reinstall whisper.cpp'),
     });
   });
 

@@ -60,7 +60,7 @@ export interface DoctorDeps {
   bundledFfmpeg: string | null;
   workspace: string;
   /** Run a binary to completion. Rejects like execa: `code` 'ENOENT' when it
-   *  isn't found, `exitCode` set when it ran and exited non-zero. */
+   *  isn't found; `exitCode`, `stdout` and `stderr` set when it exited non-zero. */
   run(file: string, args: string[]): Promise<{ stdout: string }>;
   isFile(path: string): boolean;
   /** Create the folder if needed, then write and remove a file in it. */
@@ -270,9 +270,9 @@ async function checkWhisper(deps: DoctorDeps): Promise<DoctorCheck> {
   try {
     await deps.run(binary, ['--help']);
   } catch (err) {
-    // It started and exited non-zero: some builds do that for --help.
-    const ran = typeof (err as { exitCode?: unknown }).exitCode === 'number';
-    if (!ran) {
+    // Some builds exit non-zero after printing help; one that can't load its
+    // libraries exits non-zero too, but prints no usage line.
+    if (!printedHelp(err)) {
       const install =
         deps.platform === 'darwin'
           ? '`brew install whisper-cpp`'
@@ -283,12 +283,17 @@ async function checkWhisper(deps: DoctorDeps): Promise<DoctorCheck> {
         detail: `${binary} (${where}) doesn't run: ${reason(err)}. ${WHISPER_PURPOSE}`,
         fix:
           explicit === undefined
-            ? `Install whisper.cpp (${install}). If whisper-cli isn't on PATH, set ${WHISPER_PATH_ENV} to it.`
+            ? `Install or reinstall whisper.cpp (${install}). If whisper-cli isn't on PATH, set ${WHISPER_PATH_ENV} to it.`
             : `Point ${WHISPER_PATH_ENV} at the whisper-cli binary, or unset it to use whisper-cli on PATH.`,
       };
     }
   }
   return { ...base, status: 'ok', detail: `${binary} (${where})` };
+}
+
+function printedHelp(err: unknown): boolean {
+  const e = (err ?? {}) as { exitCode?: unknown; stdout?: unknown; stderr?: unknown };
+  return typeof e.exitCode === 'number' && /usage:/i.test(`${e.stdout ?? ''}\n${e.stderr ?? ''}`);
 }
 
 function checkWhisperModel(deps: DoctorDeps): DoctorCheck {
@@ -315,11 +320,20 @@ function checkWhisperModel(deps: DoctorDeps): DoctorCheck {
 }
 
 function reason(err: unknown): string {
-  const e = (err ?? {}) as { code?: unknown; shortMessage?: unknown; message?: unknown };
+  const e = (err ?? {}) as {
+    code?: unknown;
+    shortMessage?: unknown;
+    message?: unknown;
+    stderr?: unknown;
+  };
   if (e.code === 'ENOENT') return 'not found';
   if (e.code === 'EACCES') return 'permission denied';
   const text = typeof e.shortMessage === 'string' ? e.shortMessage : (e.message ?? String(err));
-  return String(text).split('\n')[0] ?? '';
+  const firstLine = String(text).split('\n')[0] ?? '';
+  // A binary that starts and dies says why on stderr (a missing shared library).
+  const said =
+    typeof e.stderr === 'string' ? e.stderr.split('\n').find((l) => l.trim()) : undefined;
+  return said ? `${firstLine} (${said.trim()})` : firstLine;
 }
 
 const MARKS: Record<DoctorStatus, string> = { ok: '✓', warn: '!', fail: '✗', skip: '-' };
