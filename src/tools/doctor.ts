@@ -6,7 +6,7 @@ import ffmpegStatic from 'ffmpeg-static';
 import { z } from 'zod';
 import { fontFileFor } from '../ffmpeg/font.js';
 import { FFMPEG_PATH_ENV, parseFilterList, resolveFfmpeg } from '../ffmpeg/run.js';
-import { isFile } from '../system-binary.js';
+import { envSetting, isFile } from '../system-binary.js';
 import { WHISPER_MODEL_ENV, WHISPER_PATH_ENV, whisperBinary } from '../transcribe/whisper.js';
 import { getWorkspace } from '../workspace.js';
 
@@ -236,7 +236,7 @@ function checkVidstab(filters: Set<string> | null): DoctorCheck {
 
 async function checkWorkspace(deps: DoctorDeps): Promise<DoctorCheck> {
   const base = { id: 'workspace', label: 'Workspace' } as const;
-  const where = deps.env[WORKSPACE_ENV] === undefined ? 'default' : WORKSPACE_ENV;
+  const where = envSetting(WORKSPACE_ENV, deps.env) === undefined ? 'default' : WORKSPACE_ENV;
   try {
     await deps.probeWritable(deps.workspace);
     return { ...base, status: 'ok', detail: `${deps.workspace} (${where})` };

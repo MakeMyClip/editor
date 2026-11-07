@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendOp } from '../src/session/store.js';
@@ -8,7 +8,12 @@ import { applyOps, mediaClip, videoTrack } from '../src/timeline/ops.js';
 import type { MediaId } from '../src/timeline/schema.js';
 import { makeVerbContext } from '../src/ui/timeline-tools.js';
 import { TOOL_REGISTRY } from '../src/ui/tool-registry.js';
-import { resolveInput, resolveInWorkspace, WorkspaceBoundaryError } from '../src/workspace.js';
+import {
+  getWorkspace,
+  resolveInput,
+  resolveInWorkspace,
+  WorkspaceBoundaryError,
+} from '../src/workspace.js';
 
 const M = 'm_aaaaaaaaaaaa' as MediaId;
 let workspace: string;
@@ -24,6 +29,23 @@ afterEach(async () => {
   if (saved === undefined) delete process.env.MAKEMYCLIP_WORKSPACE;
   else process.env.MAKEMYCLIP_WORKSPACE = saved;
   await rm(workspace, { recursive: true, force: true });
+});
+
+describe('getWorkspace', () => {
+  it('falls back to the default for an empty MAKEMYCLIP_WORKSPACE', () => {
+    process.env.MAKEMYCLIP_WORKSPACE = '';
+    expect(getWorkspace()).toBe(resolve(tmpdir(), 'makemyclip-editor'));
+  });
+
+  it('defaults to Documents/MakeMyClip in the Claude Desktop extension', () => {
+    process.env.MAKEMYCLIP_WORKSPACE = '';
+    process.env.MAKEMYCLIP_BUNDLE = 'mcpb';
+    try {
+      expect(getWorkspace()).toBe(resolve(homedir(), 'Documents', 'MakeMyClip'));
+    } finally {
+      delete process.env.MAKEMYCLIP_BUNDLE;
+    }
+  });
 });
 
 describe('resolveInWorkspace (untrusted-input confinement)', () => {

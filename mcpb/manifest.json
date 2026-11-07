@@ -1,0 +1,119 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/dist/mcpb-manifest-v0.3.schema.json",
+  "manifest_version": "0.3",
+  "name": "makemyclip-editor",
+  "display_name": "MakeMyClip Editor",
+  "version": "0.0.0-development",
+  "description": "Local video editor: remove silence, edit by transcript, add captions, export to Final Cut Pro, Resolve or Premiere.",
+  "long_description": "MakeMyClip Editor is an open-source (MIT) video editor that Claude drives through a timeline you can undo. Ask Claude to cut the pauses or repeated takes out of a recording, cut words using its transcript, add captions, and render an mp4 or export a project for Final Cut Pro, DaVinci Resolve or Premiere Pro. Everything runs on your computer, with no account and no API key.\n\n**Needs FFmpeg.** This extension doesn't include FFmpeg. Install it with `brew install ffmpeg` (macOS) or `winget install Gyan.FFmpeg` (Windows); the extension finds it on its own, or pick the program in the FFmpeg setting. Transcripts and captions also need a local whisper.cpp and a model file. Ask Claude \"is my setup OK?\" and it runs the editor's setup check, with the fix for anything missing.\n\nThe editor only reads and writes files inside the media folder you choose.",
+  "author": {
+    "name": "MakeMyClip",
+    "url": "https://makemyclip.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MakeMyClip/editor"
+  },
+  "homepage": "https://github.com/MakeMyClip/editor",
+  "documentation": "https://github.com/MakeMyClip/editor#readme",
+  "support": "https://github.com/MakeMyClip/editor/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/cli.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/cli.js", "mcp"],
+      "env": {
+        "MAKEMYCLIP_BUNDLE": "mcpb",
+        "MAKEMYCLIP_WORKSPACE": "${user_config.workspace}",
+        "MAKEMYCLIP_FFMPEG_PATH": "${user_config.ffmpeg_path}",
+        "MAKEMYCLIP_WHISPER_MODEL": "${user_config.whisper_model}",
+        "MAKEMYCLIP_WHISPER_PATH": "${user_config.whisper_path}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "timeline_show",
+      "description": "Read the timeline (tracks, clips, timings, whether it can render) and optionally the frame at a time."
+    },
+    {
+      "name": "timeline_edit",
+      "description": "Apply editing verbs as one undoable change: add media, text or color, trim, move, split, remove, remove silence, cut words or retakes, caption speech, transition."
+    },
+    {
+      "name": "timeline_check",
+      "description": "Review every hard cut for clipped words or clicks, with a contact sheet of the frames around each cut."
+    },
+    {
+      "name": "timeline_transcript",
+      "description": "Transcribe a clip with the local whisper.cpp and return its words with timeline times."
+    },
+    {
+      "name": "timeline_undo",
+      "description": "Undo the most recent timeline edit."
+    },
+    {
+      "name": "timeline_redo",
+      "description": "Redo the most recently undone timeline edit."
+    },
+    {
+      "name": "timeline_export",
+      "description": "Export the timeline as an mp4, an FCPXML project (Final Cut Pro, DaVinci Resolve) or FCP7 XML (Premiere Pro)."
+    },
+    {
+      "name": "doctor",
+      "description": "Check the setup (FFmpeg and its filters, the media folder, a caption font, the optional whisper.cpp) and say how to fix what's missing."
+    }
+  ],
+  "keywords": [
+    "video",
+    "video-editing",
+    "ffmpeg",
+    "captions",
+    "transcription",
+    "silence-removal",
+    "fcpxml",
+    "final-cut-pro",
+    "davinci-resolve",
+    "premiere-pro"
+  ],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": ["darwin", "win32"],
+    "runtimes": {
+      "node": ">=24.0.0"
+    }
+  },
+  "user_config": {
+    "workspace": {
+      "type": "directory",
+      "title": "Media folder",
+      "description": "The editor reads and writes files only inside this folder: put the videos you want to edit here, and exports land here too. Leave blank for a MakeMyClip folder in your Documents.",
+      "required": false,
+      "default": ""
+    },
+    "ffmpeg_path": {
+      "type": "file",
+      "title": "FFmpeg",
+      "description": "Optional: the ffmpeg program to use. Leave blank to use an installed FFmpeg (Homebrew, MacPorts, winget, Scoop, Chocolatey, or on PATH).",
+      "required": false,
+      "default": ""
+    },
+    "whisper_model": {
+      "type": "file",
+      "title": "Whisper model",
+      "description": "Optional, for transcripts, retake removal and captions: a whisper.cpp model file such as ggml-base.en.bin.",
+      "required": false,
+      "default": ""
+    },
+    "whisper_path": {
+      "type": "file",
+      "title": "whisper-cli",
+      "description": "Optional: the whisper.cpp whisper-cli program. Leave blank to use an installed one (Homebrew, or on PATH).",
+      "required": false,
+      "default": ""
+    }
+  }
+}
