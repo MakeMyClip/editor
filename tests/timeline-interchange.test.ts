@@ -486,6 +486,23 @@ describe('interchange — refusals', () => {
     );
   });
 
+  it('refuses transitions that would overlap around a short clip', () => {
+    const around = (sec: number): Composition =>
+      doc([
+        {
+          id: 'v0',
+          clips: [media('a', 0, 0, 3), media('b', 3, 0, 1), media('c', 4, 0, 3)],
+          transitions: [
+            { afterClipId: 'a', durationSec: sec },
+            { afterClipId: 'b', durationSec: sec },
+          ],
+        },
+      ]);
+    refuse(around(0.9), /"b" is shorter than the transitions on both sides/);
+    // Two half-second blends exactly fill the 1s clip: they meet, not overlap.
+    expect(() => exportAs('fcpxml', around(0.5))).not.toThrow();
+  });
+
   it('refuses overlaps, audio tracks and media on two tracks', () => {
     refuse(doc([{ id: 'v0', clips: [media('a', 0, 0, 3), media('b', 2, 0, 3)] }]), /overlap/);
     refuse(
@@ -658,6 +675,27 @@ describe('interchange — caption files and placement', () => {
       '/out/My Cut.a_b.srt',
       '/out/My Cut.a_b-2.srt',
     ]);
+  });
+
+  it('never names a caption file like the main output', () => {
+    const out = buildInterchange(captionTracks('captions'), MEDIA, {
+      format: 'xmeml',
+      output: '/out/cut.SRT',
+    });
+    expect(out.files.map((f) => f.path)).toEqual(['/out/cut.SRT', '/out/cut-2.srt']);
+  });
+
+  it('reports the background color lost behind letterboxed clips', () => {
+    const fourThree = new Map([
+      [
+        A,
+        source('/footage/a.mov', { video: { codec: 'h264', width: 1440, height: 1080, fps: 30 } }),
+      ],
+    ]);
+    const comp = (background: string): Composition =>
+      doc([{ id: 'v0', clips: [media('a', 0, 0, 2)] }], { background });
+    expect(exportAs('fcpxml', comp('navy'), fourThree).notes.join(' ')).toMatch(/black bars/);
+    expect(exportAs('xmeml', comp('black'), fourThree).notes).toEqual([]);
   });
 
   it('vets every file it writes, caption files included, before writing any', async () => {

@@ -485,6 +485,14 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
     const after = blend[i] ?? null;
     const head = before ? Math.ceil(before.frames / 2) : 0;
     const tail = after ? Math.floor(after.frames / 2) : 0;
+    // A clip between two transitions must outlast both, or their blends would
+    // overlap into a three-way blend no editor timeline holds.
+    if (before && after && before.frames + after.frames > span.end - span.start) {
+      throw new InterchangeError(
+        `Clip "${clip.id}" is shorter than the transitions on both sides of it together, so they would overlap. ` +
+          'Shorten one of the transitions or lengthen the clip.',
+      );
+    }
     // ≥ 1: each transition is shorter than both clips it joins.
     const visible = span.end - span.start - head - tail;
     // The mp4 export drops a clip's own fade where a transition blends that edge.

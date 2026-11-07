@@ -26,7 +26,10 @@ import type { MediaId } from './schema.js';
  * Resolve 18+ both import. One library → event → project, the picture track as
  * the primary storyline, and text over it as Basic Title clips connected on
  * lanes above. Element names, effect ids and parameter keys are the ones Final
- * Cut writes itself.
+ * Cut writes itself, and so is the transition layout: Final Cut's own exports
+ * keep the spine's clips end to end (each offset is the previous one's end) and
+ * start a transition about half its length before the edit, reaching into the
+ * media past each clip's range rather than shortening the spine.
  */
 
 const VERSION = '1.10';

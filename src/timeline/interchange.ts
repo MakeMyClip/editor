@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { probeTimecode } from '../ffmpeg/probe.js';
 import type { Composition } from './composition.js';
 import { writeFcpxml } from './interchange-fcpxml.js';
-import { buildLayout, type InterchangeMedia } from './interchange-layout.js';
+import { buildLayout, type InterchangeMedia, type Layout } from './interchange-layout.js';
 import { writeXmeml } from './interchange-xmeml.js';
 import type { MediaId, MediaRef } from './schema.js';
 
@@ -66,31 +66,45 @@ export function buildInterchange(
   const layout = buildLayout(comp, media);
   const name = basename(options.output, extname(options.output));
   const durationSec = (layout.duration * layout.rate.num) / layout.rate.den;
-  if (options.format === 'fcpxml') {
-    const { content, notes } = writeFcpxml(layout, name);
-    return { format: 'fcpxml', files: [{ path: options.output, content }], durationSec, notes };
-  }
-  const { content, captions, notes } = writeXmeml(layout, name);
+  const written =
+    options.format === 'fcpxml'
+      ? { ...writeFcpxml(layout, name), captions: [] }
+      : writeXmeml(layout, name);
+  const notes = [...written.notes, ...letterboxNote(layout)];
   const dir = dirname(options.output);
-  // Track ids are free text: keep only filename-safe characters, and number
-  // any two that end up alike.
-  const taken = new Set<string>();
-  const sidecars = captions.map(({ trackId, srt }) => {
-    let suffix = '';
-    if (captions.length > 1) {
-      const safe = trackId.replace(/[^A-Za-z0-9_-]+/g, '_') || 'text';
-      suffix = `.${safe}`;
-      for (let n = 2; taken.has(suffix); n++) suffix = `.${safe}-${n}`;
-      taken.add(suffix);
-    }
-    return { path: join(dir, `${name}${suffix}.srt`), content: srt };
+  // Track ids are free text: keep only filename-safe characters, and never
+  // reuse a name — the main file's included (case-blind, as macOS is).
+  const taken = new Set([options.output.toLowerCase()]);
+  const sidecars = written.captions.map(({ trackId, srt }) => {
+    const safe = trackId.replace(/[^A-Za-z0-9_-]+/g, '_') || 'text';
+    const stem = written.captions.length > 1 ? `${name}.${safe}` : name;
+    let path = join(dir, `${stem}.srt`);
+    for (let n = 2; taken.has(path.toLowerCase()); n++) path = join(dir, `${stem}-${n}.srt`);
+    taken.add(path.toLowerCase());
+    return { path, content: srt };
   });
   return {
-    format: 'xmeml',
-    files: [{ path: options.output, content }, ...sidecars],
+    format: options.format,
+    files: [{ path: options.output, content: written.content }, ...sidecars],
     durationSec,
     notes,
   };
+}
+
+/** The mp4 export pads a clip of another shape with the timeline background;
+ *  editors letterbox it in black. Say so when that changes the picture. */
+function letterboxNote(layout: Layout): string[] {
+  const { r, g, b } = layout.background;
+  if (r + g + b === 0) return [];
+  const canvas = layout.width / layout.height;
+  const letterboxed = [...layout.media.values()].some(
+    (info) => info.video && Math.abs(info.video.width / info.video.height - canvas) > 1e-3,
+  );
+  return letterboxed
+    ? [
+        "Clips of another shape than the canvas show black bars in the editor; the timeline's background color behind them isn't carried.",
+      ]
+    : [];
 }
 
 /**
