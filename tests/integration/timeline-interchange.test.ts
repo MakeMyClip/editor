@@ -70,6 +70,14 @@ describe.skipIf(!IS_CI)('interchange export over MCP against real FFmpeg', () =>
           { verb: 'add_media', id: 'a', path, sourceInSec: 0, sourceOutSec: 2.5 },
           { verb: 'add_media', id: 'b', path, sourceInSec: 3, sourceOutSec: 6 },
           { verb: 'transition', afterClipId: 'a', kind: 'fade', durationSec: 0.5 },
+        ],
+      });
+      // Render before the caption goes on: text doesn't change the length, and
+      // the CI build of FFmpeg has no drawtext to burn it in.
+      const mp4 = await call('timeline_export', {});
+      expect(mp4.error).toBeUndefined();
+      await call('timeline_edit', {
+        verbs: [
           { verb: 'add_text', text: 'Hello', durationSec: 1, startSec: 0.5, track: 'captions' },
         ],
       });
@@ -94,8 +102,6 @@ describe.skipIf(!IS_CI)('interchange export over MCP against real FFmpeg', () =>
       expect(seq.getElementsByTagName('string')[1]?.textContent).toBe('01:00:00:00');
 
       // The editor files run exactly as long as the rendered mp4.
-      const mp4 = await call('timeline_export', {});
-      expect(mp4.error).toBeUndefined();
       expect(fcp.durationSec).toBeCloseTo(mp4.durationSec ?? 0, 6);
       expect(premiere.durationSec).toBeCloseTo(mp4.durationSec ?? 0, 6);
     } finally {
