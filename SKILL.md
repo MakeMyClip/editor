@@ -1,6 +1,6 @@
 ---
 name: editor
-description: AI-native video editor for any agent. Use when the user asks to edit, trim, splice, caption, zoom into, add a title card, transition between, remove silence from, chroma-key, stabilize, or render video files. Wraps FFmpeg in 19 deterministic tools and a session log; runs locally; no generative AI.
+description: AI-native video editor for any agent. Use when the user asks to edit, trim, splice, caption, zoom into, add a title card, transition between, remove silence from, chroma-key, stabilize, or render video files, or to export a cut to Final Cut Pro, Premiere Pro or DaVinci Resolve. Wraps FFmpeg in 19 deterministic tools and a session log; runs locally; no generative AI.
 license: MIT
 compatibility: Requires Node 24+. FFmpeg is auto-downloaded via ffmpeg-static on first use; override with MAKEMYCLIP_FFMPEG_PATH.
 metadata:
@@ -23,6 +23,7 @@ Trigger this skill when the user asks to:
 - Add captions, titles, or lower-thirds to footage
 - Assemble multiple clips into one (concat, montage)
 - Render a screen recording into a demo or social clip
+- Hand a cut to Final Cut Pro, Premiere Pro or DaVinci Resolve (FCPXML / XML project export)
 
 Do **not** invoke for: pure transcription (use a speech-to-text skill), thumbnail-only image work, or live streaming.
 
@@ -309,6 +310,7 @@ npx -y @makemyclip/editor timeline add-media demo.mp4
 npx -y @makemyclip/editor timeline transition <afterClipId> fade 0.5
 npx -y @makemyclip/editor timeline show                      # read tracks, clips, timings
 npx -y @makemyclip/editor timeline export final.mp4          # compile the document to a render
+npx -y @makemyclip/editor timeline export cut.fcpxml         # or hand it to Final Cut / Resolve (cut.xml: Premiere)
 ```
 
 Prefer the timeline over chaining single-file tools whenever the user is *assembling* a video (multiple clips, transitions, a final render): edits are non-destructive and reversible (`timeline undo` / `redo`, `timeline log`), and `timeline at <sec>` / `timeline frame <sec>` give you read-only eyes on the current document before you change it. Run `npx -y @makemyclip/editor timeline --help` for the full subcommand list.
@@ -323,6 +325,8 @@ To cut by words, use the `index` values from `timeline transcribe`: `timeline cu
 
 To caption speech, run `timeline captions` once the cuts are done: it turns the stored transcripts into text clips on a `captions` track above the video, timed to the words, and export burns them in. With no clip id it captions every transcribed clip and replaces the whole caption track; `timeline captions <clipId>` replaces only the captions over that clip. Captions are short phrases (up to 7 words, broken at pauses and sentence ends); `--words 1` shows one word at a time. Style with `--font <size> --color <color> --anchor <position> --background <color|none>` (default white on a dark box, bottom center). Captions don't move with later cuts, so run it again after one. It's one edit that `timeline undo` reverses, and `timeline frame <sec>` shows a captioned frame. Text outside Latin (Cyrillic, Chinese, Japanese, Korean) is drawn with an installed font that has its glyphs; if none does, export says which characters are missing — install a font (for CJK, Noto Sans CJK) or set `MAKEMYCLIP_FALLBACK_FONT` to a font file. Nothing is downloaded.
 
+To hand the cut to an editor app, export the timeline as an editor project instead of a render. `timeline export cut.fcpxml` (or `--format fcpxml`) writes FCPXML 1.10 for Final Cut Pro and DaVinci Resolve; `timeline export cut.xml` (or `--format xmeml`) writes Final Cut Pro 7 XML for Premiere Pro, which Resolve reads too. Premiere doesn't import FCPXML, so use `xmeml` for it. Both reference the source files by absolute path (nothing is copied, so keep the sources where they are), place camera files by their start timecode, and keep the mp4's timing: clips, gaps, fades, volume, fade/dissolve transitions (as cross dissolves) and black or colored cards. Text over the picture becomes titles in FCPXML; in the Premiere XML it goes to `.srt` caption files next to the XML, since Premiere drops that format's titles. What the file can't hold — speed, color adjustments, chroma key, transforms, wipe/slide/circle transitions, audio-only tracks, media on two tracks, a frame rate editors don't offer — is refused with the fix to make; what it holds only in part (text styling, caption boxes) is listed in the output's `notes`.
+
 ### Open the local UI (implemented)
 
 ```bash
@@ -331,7 +335,7 @@ npx -y @makemyclip/editor ui
 
 Starts a tiny local server on `http://127.0.0.1:5573` and opens your browser. The UI renders the session log (every op the agent has run), shows result paths and timestamps, and lets the user click an op to play its output. Useful as a companion to the chat-driven workflow — the user can watch the session evolve in real time and check outputs without touching the terminal.
 
-Local-only. The UI is a dark timeline editor: drag-drop import, a monitor (the composited frame at the playhead), an editable timeline (select a clip to trim / split / move / transition / remove), captions from transcripts (the timeline's Captions button), one-click export, timeline undo/redo, and snapshot — so the user can take over visually whenever the agent goes off-script.
+Local-only. The UI is a dark timeline editor: drag-drop import, a monitor (the composited frame at the playhead), an editable timeline (select a clip to trim / split / move / transition / remove), captions from transcripts (the timeline's Captions button), one-click export (the Export caret also writes a project for Final Cut Pro, Resolve or Premiere), timeline undo/redo, and snapshot — so the user can take over visually whenever the agent goes off-script.
 
 ### Session safety — snapshot, undo, inspect, delete (implemented)
 

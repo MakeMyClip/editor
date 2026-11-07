@@ -19,6 +19,12 @@ import {
   redoDocOp,
   undoLastDocOp,
 } from '../timeline/document-store.js';
+import {
+  exportInterchange,
+  InterchangeError,
+  InterchangeFormatSchema,
+  interchangeExtension,
+} from '../timeline/interchange.js';
 import { buildMediaMap } from '../timeline/media-registry.js';
 import { reviewCuts } from '../timeline/review.js';
 import { runPlan } from '../timeline/run-plan.js';
@@ -28,10 +34,17 @@ import { WhisperLanguageSchema } from '../transcribe/whisper.js';
 import {
   type CompositionSummary,
   confinedMediaMap,
+  confinedMediaRefs,
   makeVerbContext,
   summarizeComposition,
 } from '../ui/timeline-tools.js';
-import { ensureWorkspace, getWorkspace, newOutputPath } from '../workspace.js';
+import {
+  ensureWorkspace,
+  getWorkspace,
+  newOutputPath,
+  resolveInWorkspace,
+  WorkspaceBoundaryError,
+} from '../workspace.js';
 
 const MCP_NAME = 'makemyclip-editor';
 
@@ -227,18 +240,55 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Export the timeline',
       description:
-        'Render the current timeline document to an mp4 file in the workspace and return its path.',
+        'Export the current timeline document to a file in the workspace and return its path. format mp4 (default) renders the video. ' +
+        'fcpxml writes an FCPXML project for Final Cut Pro and DaVinci Resolve; xmeml writes Final Cut Pro 7 XML for Premiere Pro (Resolve reads it too), with text as .srt caption files beside it. ' +
+        'Both reference the source media by absolute path, refuse what the editor file cannot hold with the fix to make, and return notes on what is carried only in part.',
+      inputSchema: {
+        format: z
+          .enum(['mp4', 'fcpxml', 'xmeml'])
+          .optional()
+          .describe(`Default mp4. ${InterchangeFormatSchema.description}`),
+        output: z
+          .string()
+          .optional()
+          .describe('Output file inside the workspace (relative paths resolve against it).'),
+      },
     },
-    async () => {
+    async ({ format = 'mp4', output }) => {
       const comp = await readComposition();
-      const media = await buildMediaMap();
-      const output = newOutputPath('timeline-export', 'mp4');
       try {
-        const plan = compileTimeline(comp, { media, dir: getWorkspace(), output });
+        if (format !== 'mp4') {
+          const target = output
+            ? resolveInWorkspace(output)
+            : newOutputPath('timeline-export', interchangeExtension(format));
+          const result = await exportInterchange(comp, await confinedMediaRefs(comp), {
+            format,
+            output: target,
+            confine: resolveInWorkspace,
+          });
+          return jsonResult({
+            exported: target,
+            format,
+            files: result.files.map((f) => f.path),
+            durationSec: result.durationSec,
+            notes: result.notes,
+          });
+        }
+        const media = await buildMediaMap();
+        const target = output
+          ? resolveInWorkspace(output)
+          : newOutputPath('timeline-export', 'mp4');
+        const plan = compileTimeline(comp, { media, dir: getWorkspace(), output: target });
         const result = await runPlan(plan);
         return jsonResult({ exported: result.output, durationSec: plan.durationSec });
       } catch (err) {
-        if (err instanceof CompileError) return jsonResult({ error: err.message });
+        if (
+          err instanceof CompileError ||
+          err instanceof InterchangeError ||
+          err instanceof WorkspaceBoundaryError
+        ) {
+          return jsonResult({ error: err.message });
+        }
         throw err;
       }
     },

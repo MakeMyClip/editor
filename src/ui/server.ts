@@ -30,6 +30,12 @@ import {
   redoDocOp,
   undoLastDocOp,
 } from '../timeline/document-store.js';
+import {
+  exportInterchange,
+  InterchangeError,
+  InterchangeFormatSchema,
+  interchangeExtension,
+} from '../timeline/interchange.js';
 import { buildMediaMap } from '../timeline/media-registry.js';
 import { CompositionOpError } from '../timeline/ops.js';
 import { runPlan } from '../timeline/run-plan.js';
@@ -46,9 +52,10 @@ import {
   ensureWorkspace,
   getWorkspace,
   newOutputPath,
+  resolveInWorkspace,
   WorkspaceBoundaryError,
 } from '../workspace.js';
-import { clipConfinedMedia, makeVerbContext } from './timeline-tools.js';
+import { clipConfinedMedia, confinedMediaRefs, makeVerbContext } from './timeline-tools.js';
 
 /** Errors about the clip or its setup, not the server: silence removal or
  *  transcription can't work on this clip, or whisper.cpp isn't set up. */
@@ -337,14 +344,51 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   /**
    * POST /api/timeline/export — compile the whole document to a rendered file and
    * log it to the session so it appears in Outputs and is playable. Returns the
-   * op id + output path.
+   * op id + output path. With `{ format: 'fcpxml' | 'xmeml' }` it writes an editor
+   * project instead (optionally to `output`, confined to the workspace) and
+   * returns its files and notes; a project isn't playable, so it isn't logged.
    */
   app.post('/api/timeline/export', async (c) => {
+    const parsed = z
+      .object({
+        format: z.union([z.literal('mp4'), InterchangeFormatSchema]).default('mp4'),
+        output: z.string().min(1).optional(),
+      })
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json({ error: 'Validation failed', issues: parsed.error.issues }, 400);
+    }
+    const { format, output } = parsed.data;
+    if (format !== 'mp4') {
+      try {
+        const target = output
+          ? resolveInWorkspace(output)
+          : newOutputPath('timeline-export', interchangeExtension(format));
+        const comp = await readComposition();
+        const result = await exportInterchange(comp, await confinedMediaRefs(comp), {
+          format,
+          output: target,
+          confine: resolveInWorkspace,
+        });
+        return c.json({
+          format,
+          output: target,
+          files: result.files.map((f) => f.path),
+          durationSec: result.durationSec,
+          notes: result.notes,
+        });
+      } catch (err) {
+        if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
+        if (err instanceof InterchangeError) return c.json({ error: err.message }, 422);
+        const message = err instanceof Error ? err.message : String(err);
+        return c.json({ error: message }, 500);
+      }
+    }
     const comp = await readComposition();
     const media = await buildMediaMap();
-    const output = newOutputPath('timeline-export', 'mp4');
     try {
-      const plan = compileTimeline(comp, { media, dir: getWorkspace(), output });
+      const target = output ? resolveInWorkspace(output) : newOutputPath('timeline-export', 'mp4');
+      const plan = compileTimeline(comp, { media, dir: getWorkspace(), output: target });
       const result = await runPlan(plan);
       const entry = await appendOp({
         tool: 'timeline_export',
@@ -353,6 +397,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       });
       return c.json({ id: entry.id, output: result.output, durationSec: plan.durationSec });
     } catch (err) {
+      if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
       if (err instanceof CompileError) return c.json({ error: err.message }, 422);
       // A render failure (not a bad document) — clean retryable error, not a raw 500.
       const message = err instanceof Error ? err.message : String(err);

@@ -20,7 +20,13 @@ import {
   resetComposition,
   undoLastDocOp,
 } from './timeline/document-store.js';
-import { buildMediaMap } from './timeline/media-registry.js';
+import {
+  exportInterchange,
+  InterchangeFormatSchema,
+  interchangeExtension,
+  interchangeFormatFor,
+} from './timeline/interchange.js';
+import { buildMediaMap, buildMediaRefs } from './timeline/media-registry.js';
 import { colorClip, mediaClip, textClip } from './timeline/ops.js';
 import { reviewCuts } from './timeline/review.js';
 import { runPlan } from './timeline/run-plan.js';
@@ -59,7 +65,7 @@ const TIMELINE_HELP = `clip timeline — build and export a non-destructive comp
   clip timeline undo
   clip timeline redo
   clip timeline log
-  clip timeline export [<output>]
+  clip timeline export [<output>] [--format mp4|fcpxml|xmeml]
 `;
 
 interface Parsed {
@@ -500,6 +506,28 @@ export async function runTimeline(args: string[]): Promise<void> {
 
     case 'export': {
       const [output] = positional;
+      const format = flags.format || (output && interchangeFormatFor(output)) || 'mp4';
+      if (format !== 'mp4') {
+        const parsed = InterchangeFormatSchema.safeParse(format);
+        if (!parsed.success) {
+          throw new Error(`--format must be mp4, fcpxml or xmeml, got "${format}".`);
+        }
+        const target = output
+          ? resolveInput(output)
+          : newOutputPath('timeline-export', interchangeExtension(parsed.data));
+        const result = await exportInterchange(await readComposition(), await buildMediaRefs(), {
+          format: parsed.data,
+          output: target,
+        });
+        out({
+          exported: target,
+          format: result.format,
+          files: result.files.map((f) => f.path),
+          durationSec: result.durationSec,
+          notes: result.notes,
+        });
+        return;
+      }
       const comp = await readComposition();
       const media = await buildMediaMap();
       const finalOutput = output ? resolveInput(output) : newOutputPath('timeline-export', 'mp4');
