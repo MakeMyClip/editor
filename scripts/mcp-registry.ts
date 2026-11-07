@@ -1,10 +1,11 @@
 /**
  * List a release in the official MCP Registry (registry.modelcontextprotocol.io).
  *
- *   prepare  Stamp server.json for the version in package.json (which
- *            semantic-release has just written) and add the Claude Desktop
- *            extension as an `mcpb` package: its release URL and SHA-256.
- *            Run after `pnpm build:mcpb`.
+ *   prepare [version]
+ *            Stamp server.json for `version`, by default the one in
+ *            package.json (which semantic-release has just written), and
+ *            add the Claude Desktop extension as an `mcpb` package: its
+ *            release URL and the SHA-256 of release/makemyclip-editor.mcpb.
  *   publish  `mcp-publisher login github-oidc`, then `mcp-publisher publish`.
  *            Retried, since the registry reads the new npm version, which
  *            can take a minute to appear. Needs `mcp-publisher` on PATH and
@@ -39,10 +40,10 @@ interface ServerJson {
   [key: string]: unknown;
 }
 
-async function prepare(): Promise<void> {
-  const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as {
-    version: string;
-  };
+async function prepare(versionArg?: string): Promise<void> {
+  const version =
+    versionArg ??
+    (JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { version: string }).version;
   const server = JSON.parse(await readFile(serverJsonPath, 'utf8')) as ServerJson;
   const sha256 = createHash('sha256')
     .update(await readFile(bundlePath))
@@ -78,10 +79,11 @@ async function publish(): Promise<void> {
   }
 }
 
-const command = process.argv[2];
-const run = command === 'prepare' ? prepare : command === 'publish' ? publish : undefined;
+const [command, version] = process.argv.slice(2);
+const run =
+  command === 'prepare' ? () => prepare(version) : command === 'publish' ? publish : undefined;
 if (!run) {
-  process.stderr.write('Usage: tsx scripts/mcp-registry.ts prepare|publish\n');
+  process.stderr.write('Usage: tsx scripts/mcp-registry.ts prepare [version] | publish\n');
   process.exit(1);
 }
 run().catch((err: unknown) => {
