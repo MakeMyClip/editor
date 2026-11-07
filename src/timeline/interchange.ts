@@ -72,10 +72,19 @@ export function buildInterchange(
   }
   const { content, captions, notes } = writeXmeml(layout, name);
   const dir = dirname(options.output);
-  const sidecars = captions.map(({ trackId, srt }) => ({
-    path: join(dir, captions.length === 1 ? `${name}.srt` : `${name}.${trackId}.srt`),
-    content: srt,
-  }));
+  // Track ids are free text: keep only filename-safe characters, and number
+  // any two that end up alike.
+  const taken = new Set<string>();
+  const sidecars = captions.map(({ trackId, srt }) => {
+    let suffix = '';
+    if (captions.length > 1) {
+      const safe = trackId.replace(/[^A-Za-z0-9_-]+/g, '_') || 'text';
+      suffix = `.${safe}`;
+      for (let n = 2; taken.has(suffix); n++) suffix = `.${safe}-${n}`;
+      taken.add(suffix);
+    }
+    return { path: join(dir, `${name}${suffix}.srt`), content: srt };
+  });
   return {
     format: 'xmeml',
     files: [{ path: options.output, content }, ...sidecars],
@@ -86,12 +95,14 @@ export function buildInterchange(
 
 /**
  * Read the start timecode of each source the timeline uses (editors match media
- * by it), build the export and write its files.
+ * by it), build the export and write its files. `confine` vets every path
+ * written, caption sidecars included — untrusted surfaces pass
+ * `resolveInWorkspace`.
  */
 export async function exportInterchange(
   comp: Composition,
   refs: Map<MediaId, MediaRef>,
-  options: { format: InterchangeFormat; output: string },
+  options: { format: InterchangeFormat; output: string; confine?: (path: string) => string },
 ): Promise<InterchangeExport> {
   const used = new Set<MediaId>();
   for (const track of comp.tracks) {
@@ -103,7 +114,9 @@ export async function exportInterchange(
     if (!ref) continue;
     media.set(id, { ...ref, timecode: ref.video ? await probeTimecode(ref.path) : null });
   }
-  const result = buildInterchange(comp, media, options);
-  for (const file of result.files) await writeFile(file.path, file.content);
-  return result;
+  const built = buildInterchange(comp, media, options);
+  const confine = options.confine ?? ((path: string) => path);
+  const files = built.files.map((file) => ({ ...file, path: confine(file.path) }));
+  for (const file of files) await writeFile(file.path, file.content);
+  return { ...built, files };
 }

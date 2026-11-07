@@ -264,6 +264,7 @@ export function buildMcpServer(): McpServer {
           const result = await exportInterchange(comp, await confinedMediaRefs(comp), {
             format,
             output: target,
+            confine: resolveInWorkspace,
           });
           return jsonResult({
             exported: target,

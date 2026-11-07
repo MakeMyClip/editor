@@ -368,6 +368,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         const result = await exportInterchange(comp, await confinedMediaRefs(comp), {
           format,
           output: target,
+          confine: resolveInWorkspace,
         });
         return c.json({
           format,

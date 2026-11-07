@@ -245,6 +245,16 @@ export function writeXmeml(layout: Layout, sequenceName: string): XmemlResult {
       )
       .join('');
 
+  /** Premiere places a clip at 100% whatever its size; scale it to fit the
+   *  canvas, keeping its aspect, as the mp4 export does. */
+  const fitScale = (info: InterchangeMedia): string => {
+    if (!info.video) return '';
+    const { width, height } = info.video;
+    if (width === layout.width && height === layout.height) return '';
+    const scale = Math.round(Math.min(layout.width / width, layout.height / height) * 1e6) / 1e4;
+    return `<filter><effect>${tag('name', 'Basic Motion')}${tag('effectid', 'basic')}${tag('effectcategory', 'motion')}${tag('effecttype', 'motion')}${tag('mediatype', 'video')}<parameter authoringApp="PremierePro">${tag('parameterid', 'scale')}${tag('name', 'Scale')}${tag('valuemin', 0)}${tag('valuemax', 1000)}${tag('value', scale)}</parameter></effect></filter>`;
+  };
+
   const audioLevels = (gain: number): string =>
     gain === 1
       ? ''
@@ -290,7 +300,7 @@ export function writeXmeml(layout: Layout, sequenceName: string): XmemlResult {
             tag('out', item.sourceIn + item.duration) +
             fileXml(item.mediaId, info) +
             (track === 0
-              ? ''
+              ? fitScale(info)
               : `<sourcetrack>${tag('mediatype', 'audio')}${tag('trackindex', track)}</sourcetrack>${audioLevels(item.gain)}`) +
             linksXml(index, item) +
             '</clipitem>',

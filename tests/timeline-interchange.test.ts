@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DOMParser, type Element } from '@xmldom/xmldom';
@@ -13,6 +13,7 @@ import {
 } from '../src/timeline/composition.js';
 import {
   buildInterchange,
+  exportInterchange,
   InterchangeError,
   type InterchangeMedia,
   interchangeFormatFor,
@@ -636,6 +637,68 @@ describe('interchange — FCP7 XML (Premiere)', () => {
       '1\n00:00:00,500 --> 00:00:01,800\nFirst line\n\n2\n00:00:05,000 --> 00:00:07,000\nAfter the blend\n',
     );
     expect(out.notes.join(' ')).toMatch(/SRT/);
+  });
+});
+
+describe('interchange — caption files and placement', () => {
+  const captionTracks = (...ids: string[]): Composition =>
+    doc([
+      { id: 'v0', clips: [media('a', 0, 0, 5)] },
+      ...ids.map((id, i) => ({
+        id,
+        clips: [textClip({ id: `t${i}`, text: `Line ${i}`, startSec: i, durationSec: 1 })],
+      })),
+    ]);
+
+  it('names caption files from track ids it makes filename-safe and distinct', () => {
+    const out = exportAs('xmeml', captionTracks('x/../../escape', 'a b', 'a/b'));
+    expect(out.files.map((f) => f.path)).toEqual([
+      '/out/My Cut.xml',
+      '/out/My Cut.x_escape.srt',
+      '/out/My Cut.a_b.srt',
+      '/out/My Cut.a_b-2.srt',
+    ]);
+  });
+
+  it('vets every file it writes, caption files included, before writing any', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'interchange-confine-'));
+    const comp = doc([
+      { id: 'v0', clips: [textClip({ id: 'card', text: 'Title', startSec: 0, durationSec: 2 })] },
+    ]);
+    const output = join(dir, 'cut.xml');
+    await expect(
+      exportInterchange(comp, new Map(), {
+        format: 'xmeml',
+        output,
+        confine: (path) => {
+          if (path.endsWith('.srt')) throw new Error(`refused ${path}`);
+          return path;
+        },
+      }),
+    ).rejects.toThrow(/refused .*cut\.srt/);
+    expect(existsSync(output)).toBe(false);
+  });
+
+  it('scales a source of another size to fit the Premiere canvas', () => {
+    const root = parse(
+      exportAs(
+        'xmeml',
+        doc([{ id: 'v0', clips: [media('a', 0, 0, 2), media('b', 2, 0, 2, B)] }]),
+        new Map([
+          [A, source('/footage/a.mov')],
+          [
+            B,
+            source('/footage/b.mov', {
+              video: { codec: 'h264', width: 1920, height: 1080, fps: 30 },
+            }),
+          ],
+        ]),
+      ).files[0]?.content ?? '',
+    );
+    const [a, b] = all(one(one(root, 'video'), 'track'), 'clipitem');
+    expect(text(one(a as Element, 'filter'), 'effectid')).toBe('basic');
+    expect(text(one(a as Element, 'filter'), 'value')).toBe('50');
+    expect(all(b as Element, 'filter')).toHaveLength(0);
   });
 });
 
