@@ -9,6 +9,7 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import getPort from 'get-port';
 import { Hono } from 'hono';
+import { csrf } from 'hono/csrf';
 import open from 'open';
 import { ZodError, z } from 'zod';
 import { buildThumbnailArgs } from '../ffmpeg/args/preview.js';
@@ -86,6 +87,19 @@ function findStaticDir(): string | null {
   return null;
 }
 
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost']);
+
+/** Any port is fine: the Vite dev proxy forwards the browser's own Host
+ *  (`localhost:5173`). Only the name matters for DNS rebinding. */
+function isLoopbackHost(host: string | undefined): boolean {
+  if (!host) return false;
+  try {
+    return LOOPBACK_HOSTNAMES.has(new URL(`http://${host}`).hostname);
+  } catch {
+    return false;
+  }
+}
+
 export interface UiServerOptions {
   /** Preferred port. Auto-picks a free port if this one is taken. */
   port?: number;
@@ -128,6 +142,19 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   const app = new Hono();
 
   // ─── API ────────────────────────────────────────────────────────────
+
+  // Keep web pages the user visits from driving the API. A DNS-rebinding page
+  // is same-origin to the browser, so only the Host name gives it away;
+  // `csrf()` rejects cross-site writes that skip the CORS preflight
+  // (text/plain, form, or no Content-Type), which the JSON-parsing handlers
+  // would otherwise accept.
+  app.use('/api/*', async (c, next) => {
+    if (!isLoopbackHost(c.req.header('host'))) {
+      return c.json({ error: 'Forbidden: clip ui only answers to 127.0.0.1 or localhost.' }, 403);
+    }
+    await next();
+  });
+  app.use('/api/*', csrf());
 
   app.get('/api/workspace', async (c) => {
     return c.json({ path: getWorkspace() });
