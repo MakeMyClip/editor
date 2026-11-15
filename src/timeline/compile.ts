@@ -322,6 +322,7 @@ interface FadeSuppression {
 function effectFilters(
   clip: Clip,
   outDur: number,
+  fps: number,
   suppress: FadeSuppression = { in: false, out: false },
 ): FilterChains {
   const video: string[] = [];
@@ -343,7 +344,10 @@ function effectFilters(
   if (clip.kind === 'media') {
     const f = speedFactor(clip.effects);
     if (f !== 1) {
-      video.push(`setpts=PTS/${f}`);
+      // Back to the canvas rate right away: retimed frames otherwise reach the
+      // encoder off its frame grid, and which ones it drops or repeats varies,
+      // so a frame preview couldn't show the frame export plays.
+      video.push(`setpts=PTS/${f}`, `fps=${fps}`);
       audio.push(atempoChain(f));
     }
   }
@@ -415,7 +419,7 @@ function clipChains(
 ): { chain: string; audio: string[]; textFiles: StepSideFile[] } {
   const outDur = outputDuration(clip);
   const { width, height, fps, background } = comp;
-  const { video: fx, audio } = effectFilters(clip, outDur, fadeSuppress);
+  const { video: fx, audio } = effectFilters(clip, outDur, fps, fadeSuppress);
   const textFiles: StepSideFile[] = [];
 
   if (clip.kind === 'text') {
@@ -472,14 +476,11 @@ function buildSegmentStep(
   const outDur = outputDuration(clip);
   const { width, height, fps, background } = comp;
   const out = segPath(ctx.dir, index, clip.id, ctx.tag);
-  const { chain: videoChain, audio: afx, textFiles } = clipChains(
-    comp,
-    clip,
-    index,
-    ctx,
-    overlays,
-    fadeSuppress,
-  );
+  const {
+    chain: videoChain,
+    audio: afx,
+    textFiles,
+  } = clipChains(comp, clip, index, ctx, overlays, fadeSuppress);
 
   const inputArgs: string[] = [];
   let videoSource: string; // filtergraph input label feeding the video chain, e.g. [0:v]
