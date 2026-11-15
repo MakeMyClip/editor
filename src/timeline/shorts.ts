@@ -20,10 +20,14 @@ import type { Transcript } from './transcript.js';
  * person picks the words; nothing here scores highlights.
  */
 
-/** Kept before a range's first word, so its attack isn't clipped. */
-export const SHORT_LEAD_SEC = 0.1;
-/** Kept after a range's last word, so its release and the breath after it aren't clipped. */
-export const SHORT_TAIL_SEC = 0.25;
+/**
+ * Kept before a range's first word. whisper.cpp hands each pause to the word
+ * before it, so the next word tends to start late: on test speech its first
+ * words started up to 0.35 s after the voice did. 0.25 s left 3 of 29 sentence
+ * starts short by at most 0.1 s. A range ends where its last word does, with no
+ * padding: that word already runs on through the pause after it.
+ */
+export const SHORT_LEAD_SEC = 0.25;
 /** Loudness a short is normalized to unless asked otherwise: the vertical platforms' -14 LUFS. */
 export const DEFAULT_SHORT_LUFS = -14;
 
@@ -248,10 +252,9 @@ export async function planShort(
 }
 
 /**
- * The source window a range plays: its first word's start minus the lead to its
- * last word's end plus the tail. Each side stops at the neighboring word's edge,
- * so the padding never takes in part of a word outside the range, and at the
- * start of the file.
+ * The source window a range plays: its first word's start minus the lead, to
+ * its last word's end. The lead stops halfway into the word before (whisper.cpp
+ * words abut, so that word also holds the pause) and at the start of the file.
  */
 function wordWindow(transcript: Transcript, range: ShortRange, clip: MediaClip): WordWindow {
   const first = transcript.words[range.fromIndex];
@@ -263,19 +266,18 @@ function wordWindow(transcript: Transcript, range: ShortRange, clip: MediaClip):
     );
   }
   const before = transcript.words[range.fromIndex - 1];
-  const after = transcript.words[range.toIndex + 1];
   const start = Math.min(
     first.startSec,
-    Math.max(first.startSec - SHORT_LEAD_SEC, before?.endSec ?? 0, 0),
-  );
-  const end = Math.max(
-    last.endSec,
-    Math.min(last.endSec + SHORT_TAIL_SEC, after?.startSec ?? Number.POSITIVE_INFINITY),
+    Math.max(
+      first.startSec - SHORT_LEAD_SEC,
+      before ? (before.startSec + before.endSec) / 2 : 0,
+      0,
+    ),
   );
   return {
     mediaId: clip.mediaId,
     start: roundMs(start),
-    end: roundMs(end),
+    end: last.endSec,
     speechStart: first.startSec,
     speechEnd: last.endSec,
   };

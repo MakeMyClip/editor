@@ -111,13 +111,13 @@ const addedClips = (ops: CompositionOp[]): AddClipOp['clip'][] =>
 describe('planShort: edges', () => {
   const whole = sourceOf([clipOf('c1', 0, 30, 0)]);
 
-  it('pads a range 0.10 s before its first word and 0.25 s after its last', async () => {
+  it('starts a range 0.25 s before its first word and ends it with its last', async () => {
     const short = await plan(whole, { ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 4 }] });
-    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 2.9, sourceOutSec: 5.75 }]);
-    expect(short.durationSec).toBe(2.85);
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 2.75, sourceOutSec: 5.5 }]);
+    expect(short.durationSec).toBe(2.75);
   });
 
-  it('stops the padding at the neighboring words and at the start of the file', async () => {
+  it('stops the lead halfway into the word before, and at the start of the file', async () => {
     const tight = transcriptOf(M, [
       [0.03, 0.3],
       [0.32, 0.6],
@@ -129,21 +129,21 @@ describe('planShort: edges', () => {
       { ranges: [{ clipId: 'c1', fromIndex: 1, toIndex: 2 }] },
       { transcripts: [tight] },
     );
-    expect(middle.pieces).toEqual([{ mediaId: M, sourceInSec: 0.3, sourceOutSec: 0.95 }]);
+    expect(middle.pieces).toEqual([{ mediaId: M, sourceInSec: 0.165, sourceOutSec: 0.9 }]);
 
     const first = await plan(
       whole,
       { ranges: [{ clipId: 'c1', fromIndex: 0, toIndex: 0 }] },
       { transcripts: [tight] },
     );
-    expect(first.pieces).toEqual([{ mediaId: M, sourceInSec: 0, sourceOutSec: 0.32 }]);
+    expect(first.pieces).toEqual([{ mediaId: M, sourceInSec: 0, sourceOutSec: 0.3 }]);
   });
 
   it('stops at the end of the source clip', async () => {
-    const short = await plan(sourceOf([clipOf('c1', 0, 5.6, 0)]), {
+    const short = await plan(sourceOf([clipOf('c1', 0, 5.3, 0)]), {
       ranges: [{ clipId: 'c1', fromIndex: 3, toIndex: 4 }],
     });
-    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 3.9, sourceOutSec: 5.6 }]);
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 3.75, sourceOutSec: 5.3 }]);
   });
 
   it('refuses word indices outside the transcript', async () => {
@@ -165,12 +165,12 @@ describe('planShort: cut from the source timeline', () => {
     ]);
     const short = await plan(cut, { ranges: [{ clipId: 'c2', fromIndex: 2, toIndex: 6 }] });
     expect(short.pieces).toEqual([
-      { mediaId: M, sourceInSec: 2.9, sourceOutSec: 3.7 },
+      { mediaId: M, sourceInSec: 2.75, sourceOutSec: 3.7 },
       { mediaId: M, sourceInSec: 3.9, sourceOutSec: 5.7 },
-      { mediaId: M, sourceInSec: 5.9, sourceOutSec: 7.75 },
+      { mediaId: M, sourceInSec: 5.9, sourceOutSec: 7.5 },
     ]);
-    expect(addedClips(short.ops).map((c) => c.startSec)).toEqual([0, 0.8, 2.6]);
-    expect(short.durationSec).toBe(4.45);
+    expect(addedClips(short.ops).map((c) => c.startSec)).toEqual([0, 0.95, 2.75]);
+    expect(short.durationSec).toBe(4.35);
   });
 
   it('refuses words that were cut out of the source timeline', async () => {
@@ -181,10 +181,10 @@ describe('planShort: cut from the source timeline', () => {
   });
 
   it('leaves out a sliver that holds only padding', async () => {
-    // The tail padding of word 4 (ends 5.5) reaches 5.75, just into c2.
-    const cut = sourceOf([clipOf('c1', 0, 5.6, 0), clipOf('c2', 5.7, 12, 5.6)]);
-    const short = await plan(cut, { ranges: [{ clipId: 'c1', fromIndex: 3, toIndex: 4 }] });
-    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 3.9, sourceOutSec: 5.6 }]);
+    // The lead of word 3 (starts 4.0) reaches back to 3.75, just into the end of c1.
+    const cut = sourceOf([clipOf('c1', 0, 3.8, 0), clipOf('c2', 3.85, 12, 3.8)]);
+    const short = await plan(cut, { ranges: [{ clipId: 'c2', fromIndex: 3, toIndex: 4 }] });
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 3.85, sourceOutSec: 5.5 }]);
   });
 
   it('refuses words cut out exactly, where only padding touches them', async () => {
@@ -198,7 +198,7 @@ describe('planShort: cut from the source timeline', () => {
   it('keeps the lead padding across a split at the first word', async () => {
     const split = sourceOf([clipOf('c1', 0, 3, 0), clipOf('c2', 3, 30, 3)]);
     const short = await plan(split, { ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 2 }] });
-    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 2.9, sourceOutSec: 3.75 }]);
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 2.75, sourceOutSec: 3.5 }]);
   });
 
   it('plays two ranges of neighboring words straight through, without replaying padding', async () => {
@@ -218,7 +218,7 @@ describe('planShort: cut from the source timeline', () => {
       },
       { transcripts: [close] },
     );
-    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 0.9, sourceOutSec: 2.45 }]);
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 0.75, sourceOutSec: 2.2 }]);
 
     const repeated = await plan(
       whole,
@@ -231,8 +231,8 @@ describe('planShort: cut from the source timeline', () => {
       { transcripts: [close] },
     );
     expect(repeated.pieces).toEqual([
-      { mediaId: M, sourceInSec: 1.6, sourceOutSec: 2.45 },
-      { mediaId: M, sourceInSec: 0.9, sourceOutSec: 2.45 },
+      { mediaId: M, sourceInSec: 1.45, sourceOutSec: 2.2 },
+      { mediaId: M, sourceInSec: 0.75, sourceOutSec: 2.2 },
     ]);
   });
 
@@ -245,10 +245,10 @@ describe('planShort: cut from the source timeline', () => {
       ],
     });
     expect(short.pieces).toEqual([
-      { mediaId: M, sourceInSec: 6.9, sourceOutSec: 8.75 },
-      { mediaId: M, sourceInSec: 1.9, sourceOutSec: 3.75 },
+      { mediaId: M, sourceInSec: 6.75, sourceOutSec: 8.5 },
+      { mediaId: M, sourceInSec: 1.75, sourceOutSec: 3.5 },
     ]);
-    expect(addedClips(short.ops).map((c) => c.startSec)).toEqual([0, 1.85]);
+    expect(addedClips(short.ops).map((c) => c.startSec)).toEqual([0, 1.75]);
   });
 
   it('cuts ranges from two recordings', async () => {
@@ -273,13 +273,13 @@ describe('planShort: cut from the source timeline', () => {
   it('takes a moment the source plays twice only once', async () => {
     const repeated = sourceOf([clipOf('c1', 0, 10, 0), clipOf('c2', 2, 6, 10)]);
     const short = await plan(repeated, { ranges: [{ clipId: 'c2', fromIndex: 2, toIndex: 4 }] });
-    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 2.9, sourceOutSec: 5.75 }]);
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 2.75, sourceOutSec: 5.5 }]);
   });
 
   it('joins pieces that a split (not a cut) left continuous', async () => {
     const split = sourceOf([clipOf('c1', 0, 4, 0), clipOf('c2', 4, 10, 4)]);
     const short = await plan(split, { ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 4 }] });
-    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 2.9, sourceOutSec: 5.75 }]);
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 2.75, sourceOutSec: 5.5 }]);
   });
 
   it('keeps color and volume, and drops the fades of the source clip', async () => {
@@ -330,8 +330,8 @@ describe('planShort: the edit', () => {
         clip: mediaClip({
           id: 's1',
           mediaId: M,
-          sourceInSec: 2.9,
-          sourceOutSec: 5.75,
+          sourceInSec: 2.75,
+          sourceOutSec: 5.5,
           startSec: 0,
         }),
       },
@@ -344,8 +344,8 @@ describe('planShort: the edit', () => {
         clip: textClip({
           id: 's2',
           text: 'w2 w3 w4',
-          startSec: 0.1,
-          durationSec: 2.75,
+          startSec: 0.25,
+          durationSec: 2.5,
           style: { fontSize: 54, color: 'white', background: 'black@0.6', anchor: 'bottom-center' },
         }),
       },

@@ -246,7 +246,6 @@ export {
   DEFAULT_SHORT_LUFS,
   planShort,
   SHORT_LEAD_SEC,
-  SHORT_TAIL_SEC,
   ShortError,
   type ShortPiece,
   type ShortPlan,

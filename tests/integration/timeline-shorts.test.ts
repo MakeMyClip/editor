@@ -125,11 +125,11 @@ describe.skipIf(!IS_CI)('shorts against real FFmpeg', () => {
       ...(HAS_DRAWTEXT ? [] : ['--no-captions']),
     ]);
     expect(short.pieces).toEqual([
-      expect.objectContaining({ sourceInSec: 540.1, sourceOutSec: 545.2 }),
-      expect.objectContaining({ sourceInSec: 547.7, sourceOutSec: 552.95 }),
-      expect.objectContaining({ sourceInSec: 100.1, sourceOutSec: 105.95 }),
+      expect.objectContaining({ sourceInSec: 539.95, sourceOutSec: 545.2 }),
+      expect.objectContaining({ sourceInSec: 547.7, sourceOutSec: 552.7 }),
+      expect.objectContaining({ sourceInSec: 99.95, sourceOutSec: 105.7 }),
     ]);
-    expect(short.durationSec).toBe(16.2);
+    expect(short.durationSec).toBe(16);
     expect(short.canvas).toEqual({ width: 720, height: 1280, fit: 'cover' });
     if (HAS_DRAWTEXT) expect(short.captions).toBeGreaterThan(0);
 
