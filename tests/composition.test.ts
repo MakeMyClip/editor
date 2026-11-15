@@ -20,8 +20,47 @@ describe('CompositionSchema', () => {
       height: 1080,
       fps: 30,
       background: 'black',
+      fit: 'contain',
     });
     expect(comp.tracks).toEqual([]);
+  });
+
+  it('reads a document written before `fit` existed as contain', () => {
+    const comp = CompositionSchema.parse({ version: 1, width: 1080, height: 1920, tracks: [] });
+    expect(comp.fit).toBe('contain');
+  });
+
+  it('keeps a per-clip fit and leaves it out when unset', () => {
+    const comp = CompositionSchema.parse({
+      version: 1,
+      tracks: [
+        {
+          id: 'v0',
+          kind: 'video',
+          clips: [
+            {
+              kind: 'media',
+              id: 'a',
+              mediaId: M1,
+              sourceOutSec: 2,
+              startSec: 0,
+              transform: { fit: 'cover' },
+            },
+            {
+              kind: 'media',
+              id: 'b',
+              mediaId: M1,
+              sourceOutSec: 2,
+              startSec: 2,
+              transform: { x: 0 },
+            },
+          ],
+        },
+      ],
+    });
+    const [a, b] = comp.tracks[0]?.clips ?? [];
+    expect(a?.transform?.fit).toBe('cover');
+    expect(b?.transform && 'fit' in b.transform).toBe(false);
   });
 
   it('honors a custom canvas', () => {

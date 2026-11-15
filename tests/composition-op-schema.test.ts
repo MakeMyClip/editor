@@ -15,7 +15,14 @@ const M = 'm_aaaaaaaaaaaa' as MediaId;
 // until a sample exists, which the parse test below then exercises — so the
 // runtime schema can never silently fall behind the hand-written union.
 const SAMPLES: Record<CompositionOpKind, CompositionOp> = {
-  setCanvas: { op: 'setCanvas', width: 1280, height: 720, fps: 24, background: 'white' },
+  setCanvas: {
+    op: 'setCanvas',
+    width: 1280,
+    height: 720,
+    fps: 24,
+    background: 'white',
+    fit: 'cover',
+  },
   addTrack: { op: 'addTrack', track: videoTrack({ id: 'v0' }), index: 1 },
   removeTrack: { op: 'removeTrack', trackId: 'v0' },
   addClip: {
@@ -39,7 +46,11 @@ const SAMPLES: Record<CompositionOpKind, CompositionOp> = {
   },
   addEffect: { op: 'addEffect', clipId: 'c1', effect: { type: 'speed', factor: 2 }, index: 0 },
   removeEffect: { op: 'removeEffect', clipId: 'c1', index: 0 },
-  setTransform: { op: 'setTransform', clipId: 'c1', transform: { scale: 2, x: 0.25 } },
+  setTransform: {
+    op: 'setTransform',
+    clipId: 'c1',
+    transform: { fit: 'cover', scale: 2, x: 0.25 },
+  },
   clearTransform: { op: 'clearTransform', clipId: 'c1' },
   addTransition: {
     op: 'addTransition',

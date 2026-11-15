@@ -603,24 +603,51 @@ describe('interchange — refusals', () => {
     );
   });
 
-  it('refuses a transform', () => {
-    refuse(
+  it('refuses a zoom, rotation or opacity', () => {
+    const transformed = (transform: Record<string, number>): Composition =>
       doc([
         {
           id: 'v0',
-          clips: [
-            mediaClip({
-              id: 'a',
-              mediaId: A,
-              startSec: 0,
-              sourceOutSec: 3,
-              transform: { scale: 2 },
-            }),
-          ],
+          clips: [mediaClip({ id: 'a', mediaId: A, startSec: 0, sourceOutSec: 3, transform })],
         },
-      ]),
-      /transform/,
-    );
+      ]);
+    refuse(transformed({ scale: 2 }), /reframed \(contain, zoom 2/);
+    refuse(transformed({ rotationDeg: 90 }), /rotated or partly transparent/);
+    refuse(transformed({ opacity: 0.5 }), /rotated or partly transparent/);
+  });
+
+  it('refuses framing that crops or moves a clip of another shape', () => {
+    const one = (canvas: Partial<Composition>, transform?: Record<string, number>): Composition =>
+      doc(
+        [
+          {
+            id: 'v0',
+            clips: [mediaClip({ id: 'a', mediaId: A, startSec: 0, sourceOutSec: 3, transform })],
+          },
+        ],
+        canvas,
+      );
+    refuse(one({ width: 1080, height: 1920, fit: 'cover' }), /Clip "a" is reframed \(cover/);
+    refuse(one({ width: 1080, height: 1920 }, { x: 0 }), /reframed/);
+  });
+
+  it('carries a clip whole and centered, and refuses cover even on the same shape', () => {
+    const one = (canvas: Partial<Composition>, transform?: Record<string, number>): Composition =>
+      doc(
+        [
+          {
+            id: 'v0',
+            clips: [mediaClip({ id: 'a', mediaId: A, startSec: 0, sourceOutSec: 3, transform })],
+          },
+        ],
+        canvas,
+      );
+    // A 9:16 canvas showing the 16:9 source whole and centered is what editors do.
+    expect(() => exportAs('xmeml', one({ width: 1080, height: 1920 }))).not.toThrow();
+    expect(() => exportAs('fcpxml', one({ fit: 'contain' }, { fit: 'contain' }))).not.toThrow();
+    // The probed size is the coded one: a rotated phone clip of this "shape"
+    // would be cropped by cover in the mp4 but fitted whole by the editor.
+    refuse(one({ fit: 'cover' }), /reframed \(cover.*--fit contain/);
   });
 
   it('refuses transitions other than fade and dissolve, naming the fix', () => {

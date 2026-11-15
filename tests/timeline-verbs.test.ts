@@ -258,6 +258,43 @@ describe('remove_silence', () => {
   });
 });
 
+describe('reframe and set_framing', () => {
+  const picture = applyOps(emptyComposition(), [
+    { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+    {
+      op: 'addClip',
+      trackId: 'v0',
+      clip: mediaClip({ id: 'c1', mediaId: M, sourceOutSec: 4, startSec: 0 }),
+    },
+  ]);
+
+  it('reframe lowers to the canvas change and clip positions', async () => {
+    expect(await lowerVerb(picture, { verb: 'reframe', aspect: '9:16', x: 0.2 }, ctx())).toEqual([
+      { op: 'setCanvas', width: 1080, height: 1920, fit: 'cover' },
+      { op: 'setTransform', clipId: 'c1', transform: { x: 0.2 } },
+    ]);
+  });
+
+  it('set_framing lowers to a transform on one media clip', async () => {
+    expect(
+      await lowerVerb(picture, { verb: 'set_framing', clipId: 'c1', scale: 1.3, y: 0 }, ctx()),
+    ).toEqual([{ op: 'setTransform', clipId: 'c1', transform: { scale: 1.3, y: 0 } }]);
+  });
+
+  it('are editable verbs with bounded positions and zoom', () => {
+    expect(EditableVerbSchema.parse({ verb: 'reframe', aspect: '4:5' })).toEqual({
+      verb: 'reframe',
+      aspect: '4:5',
+    });
+    expect(() => EditableVerbSchema.parse({ verb: 'reframe', aspect: '3:2' })).toThrow();
+    expect(() => EditableVerbSchema.parse({ verb: 'reframe', aspect: '9:16', x: 2 })).toThrow();
+    expect(() =>
+      EditableVerbSchema.parse({ verb: 'set_framing', clipId: 'c1', scale: 8 }),
+    ).toThrow();
+    expect(() => EditableVerbSchema.parse({ verb: 'set_transform', clipId: 'c1' })).toThrow();
+  });
+});
+
 describe('lowerVerbs (state threads between verbs)', () => {
   it('the default append point shifts as earlier verbs add clips', async () => {
     const ops = await lowerVerbs(

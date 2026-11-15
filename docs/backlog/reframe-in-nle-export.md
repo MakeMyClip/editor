@@ -1,0 +1,3 @@
+# Reframe in the editor-project export
+
+The FCPXML and FCP7 XML exports refuse any media clip that isn't whole, centered and unzoomed (cover, a zoom, an off-center position), because the sequence holds each clip fitted and centered. Carry it instead: FCPXML `adjust-crop` / `adjust-transform` on the asset clip, and position and scale in the xmeml Basic Motion filter (`fitScale` in `src/timeline/interchange-xmeml.ts`). Check the units against a real Final Cut, Resolve and Premiere import before shipping. Even `cover` on a source of the canvas's shape is refused today, because `probe` reports the coded size and ignores the rotation tag on phone footage; reading the display rotation in `probe` first would let a same-shape cover carry.

@@ -35,7 +35,7 @@ function num(value: string): number | undefined {
  * Edit a selected clip by emitting verbs through the shared verb layer (the same
  * path the agent + CLI use). Numeric trim/move, split at the playhead, add a
  * transition into the next clip, remove. `set_transform` is intentionally absent
- * — the compiler rejects a non-identity transform, so the UI must not author one.
+ * — it can rotate a clip or make it partly transparent, which export refuses.
  * Remounted per clip (keyed by id) so the inputs reset to the selected clip.
  */
 export function ClipInspector({

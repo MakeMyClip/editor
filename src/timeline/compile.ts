@@ -9,6 +9,7 @@ import {
   clipDuration,
   clipEndSec,
   type Effect,
+  type Fit,
   type TextClip,
   type Track,
 } from './composition.js';
@@ -30,10 +31,11 @@ import type { MediaId } from './schema.js';
  * v1 scope is a single video-track sequence of abutting clips, plus text-only
  * tracks above it (captions, titles over the picture), which each segment burns
  * in for the stretch of timeline it covers. Constructs that need true
- * compositing — a second track of media/color clips, audio tracks, a
- * non-identity per-clip transform, chromaKey (which needs a background layer),
- * or gaps/overlaps on the picture track — throw a clear `CompileError` rather
- * than emitting a wrong graph.
+ * compositing — a second track of media/color clips, audio tracks, a rotated
+ * or partly transparent clip, chromaKey (which needs a background layer), or
+ * gaps/overlaps on the picture track — throw a clear `CompileError` rather than
+ * emitting a wrong graph. Media clips are framed onto the canvas by fit, zoom and
+ * position (see `clipFraming`).
  *
  * Text outside Latin is drawn with a font file that has its glyphs (see
  * `ffmpeg/font.ts`); that lookup reads font files, once per process, unless the
@@ -117,10 +119,34 @@ const VIDEO_ENCODE = [
 const AUDIO_ENCODE = ['-c:a', 'aac', '-ar', '48000'] as const;
 const SAMPLE_RATE = 48000;
 
-function isIdentityTransform(clip: Clip): boolean {
+/** How a clip's picture sits on the canvas, with every default filled in. */
+export interface Framing {
+  fit: Fit;
+  scale: number;
+  /** Alignment in [0,1]: 0 = left/top edges together, 1 = right/bottom. */
+  x: number;
+  y: number;
+}
+
+/**
+ * The framing export applies to a clip: its transform's values over the
+ * defaults. The canvas `fit` applies to media clips only — text and color clips
+ * are generated at canvas size, so captions and title cards don't change when
+ * the canvas is set to cover.
+ */
+export function clipFraming(comp: Composition, clip: Clip): Framing {
   const t = clip.transform;
-  if (!t) return true;
-  return t.scale === 1 && t.x === 0.5 && t.y === 0.5 && t.rotationDeg === 0 && t.opacity === 1;
+  return {
+    fit: clip.kind === 'media' ? (t?.fit ?? comp.fit) : 'contain',
+    scale: t?.scale ?? 1,
+    x: t?.x ?? 0.5,
+    y: t?.y ?? 0.5,
+  };
+}
+
+/** Whole picture, centered, unzoomed: the plain fit-and-pad export has always used. */
+export function isDefaultFraming(f: Framing): boolean {
+  return f.fit === 'contain' && f.scale === 1 && f.x === 0.5 && f.y === 0.5;
 }
 
 /** Net speed multiplier from the effect stack (1 when none). */
@@ -212,9 +238,21 @@ function selectLayers(comp: Composition): { track: Track; overlays: TextClip[] }
 }
 
 function assertCompilable(clip: Clip): void {
-  if (!isIdentityTransform(clip)) {
+  const t = clip.transform;
+  if (t && (t.rotationDeg !== 0 || t.opacity !== 1)) {
     throw new CompileError(
-      `Clip "${clip.id}" has a non-identity transform — per-clip transform is not supported in export yet.`,
+      `Clip "${clip.id}" is rotated or partly transparent — rotation and opacity are not supported in export yet (fit, zoom and position are).`,
+    );
+  }
+  if (t && (t.x < 0 || t.x > 1 || t.y < 0 || t.y > 1)) {
+    throw new CompileError(
+      `Clip "${clip.id}" has position x=${t.x}, y=${t.y}; both must be between 0 and 1 (0 = left/top, 0.5 = center, 1 = right/bottom).`,
+    );
+  }
+  if (clip.kind !== 'media' && t && (t.scale !== 1 || t.x !== 0.5 || t.y !== 0.5)) {
+    throw new CompileError(
+      `${clip.kind === 'text' ? 'Text' : 'Color'} clip "${clip.id}" has a zoom or position — export frames media clips only. ` +
+        'Place text with its anchor.',
     );
   }
   if (clip.effects.some((e) => e.type === 'chromaKey')) {
@@ -424,11 +462,10 @@ function buildSegmentStep(
     fx.push(drawtextFilter(textfile, overlay, fontFor(ctx, overlay, true), window));
   }
 
-  // Geometry first: fit to canvas, pad, square pixels, lock fps. (No-op-ish for
-  // generated sources that are already canvas-sized, but keeps the chain uniform.)
+  // Geometry first: frame onto the canvas, square pixels, lock fps. (No-op-ish
+  // for generated sources that are already canvas-sized, but keeps the chain uniform.)
   const geometry = [
-    `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
-    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=${quoteColor(background)}`,
+    ...framingFilters(clipFraming(comp, clip), width, height, background),
     'setsar=1',
     `fps=${fps}`,
     'format=yuv420p',
@@ -462,6 +499,41 @@ function buildSegmentStep(
   ];
 
   return { label: `segment:${clip.id}`, args, output: out, textFiles };
+}
+
+/**
+ * Scale, crop and pad a picture onto a `width`x`height` canvas. The default
+ * framing keeps the plain fit-and-center chain. Otherwise: scale to fit
+ * (contain) or cover the canvas times the zoom, crop whatever overflows at the
+ * alignment, then pad whatever falls short at the same alignment — so one chain
+ * handles crop and bars on either axis.
+ */
+function framingFilters(
+  framing: Framing,
+  width: number,
+  height: number,
+  background: string,
+): string[] {
+  const pad = `color=${quoteColor(background)}`;
+  if (isDefaultFraming(framing)) {
+    return [
+      `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
+      `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:${pad}`,
+    ];
+  }
+  const { x, y } = framing;
+  const mode = framing.fit === 'cover' ? 'increase' : 'decrease';
+  return [
+    `scale=${even(width * framing.scale)}:${even(height * framing.scale)}:force_original_aspect_ratio=${mode}:force_divisible_by=2`,
+    `crop=w=${quoteFilterArg(`min(iw,${width})`)}:h=${quoteFilterArg(`min(ih,${height})`)}` +
+      `:x=${quoteFilterArg(`(iw-ow)*${x}`)}:y=${quoteFilterArg(`(ih-oh)*${y}`)}`,
+    `pad=${width}:${height}:x=${quoteFilterArg(`(ow-iw)*${x}`)}:y=${quoteFilterArg(`(oh-ih)*${y}`)}:${pad}`,
+  ];
+}
+
+/** Nearest even size of at least 2: x264 needs even sides, and scale=0 means "keep". */
+function even(size: number): number {
+  return Math.max(2, Math.round(size / 2) * 2);
 }
 
 const CENTER_POS = { x: '(w-text_w)/2', y: '(h-text_h)/2' };

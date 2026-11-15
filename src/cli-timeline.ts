@@ -1,6 +1,11 @@
 import { appendOp } from './session/store.js';
 import { CaptionError, DEFAULT_CAPTION_WORDS, planCaptions } from './timeline/captions.js';
-import { buildFrameAtPlan, checkExportable, compileTimeline } from './timeline/compile.js';
+import {
+  buildFrameAtPlan,
+  checkExportable,
+  clipFraming,
+  compileTimeline,
+} from './timeline/compile.js';
 import {
   AnchorSchema,
   type Clip,
@@ -9,6 +14,9 @@ import {
   clipsAtTime,
   compositionDuration,
   emptyComposition,
+  type Fit,
+  FitSchema,
+  findClip,
   makeClipId,
   type TextStyle,
 } from './timeline/composition.js';
@@ -28,6 +36,14 @@ import {
 } from './timeline/interchange.js';
 import { buildMediaMap, buildMediaRefs } from './timeline/media-registry.js';
 import { colorClip, mediaClip, textClip } from './timeline/ops.js';
+import {
+  AspectSchema,
+  type FramingFit,
+  FramingFitSchema,
+  ownFraming,
+  planFraming,
+  planReframe,
+} from './timeline/reframe.js';
 import { reviewCuts } from './timeline/review.js';
 import { runPlan } from './timeline/run-plan.js';
 import { analyzeSilence, DEFAULT_SENSITIVITY, SensitivitySchema } from './timeline/silence.js';
@@ -44,7 +60,7 @@ import { getWorkspace, newOutputPath, resolveInput } from './workspace.js';
 
 const TIMELINE_HELP = `clip timeline — build and export a non-destructive composition
 
-  clip timeline new [--width W --height H --fps F --background C]
+  clip timeline new [--width W --height H --fps F --background C --fit contain|cover]
   clip timeline add-media <path> [<inSec> <outSec>] [--start S] [--track T]
   clip timeline add-text <text> <durationSec> [--start S] [--track T] [--font N --color C --anchor A --background C]
   clip timeline add-color <durationSec> [--color C] [--start S] [--track T]
@@ -59,6 +75,8 @@ const TIMELINE_HELP = `clip timeline — build and export a non-destructive comp
   clip timeline cut-words <clipId> <fromIndex> <toIndex> [--transcript <id>]
   clip timeline remove-retakes <clipId> [--dry-run] [--transcript <id>]
   clip timeline captions [<clipId>] [--words N] [--track T] [--font N --color C --anchor A --background C|none] [--dry-run]
+  clip timeline reframe <9:16|1:1|4:5|16:9|WxH> [--fit cover|contain] [--x 0..1] [--y 0..1] [--dry-run]
+  clip timeline framing <clipId> [--fit cover|contain|inherit] [--scale 0.1..4] [--x 0..1] [--y 0..1] [--reset]
   clip timeline show
   clip timeline at <atSec>
   clip timeline frame <atSec> [<output>]
@@ -74,7 +92,7 @@ interface Parsed {
 }
 
 /** Flags that take no value, so they don't swallow the next argument. */
-const BOOLEAN_FLAGS = new Set(['dry-run']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'reset']);
 
 function parseArgs(args: string[]): Parsed {
   const positional: string[] = [];
@@ -102,6 +120,28 @@ function num(value: string | undefined, fallback: number): number {
   const n = Number(value);
   if (Number.isNaN(n)) throw new Error(`Expected a number, got "${value}".`);
   return n;
+}
+
+/** A number flag, or undefined when the flag wasn't given. */
+function optionalNum(name: string, value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const n = Number(value);
+  if (value.trim() === '' || Number.isNaN(n)) throw new Error(`--${name} needs a number.`);
+  return n;
+}
+
+function fitFlag(value: string | undefined): Fit | undefined {
+  if (value === undefined) return undefined;
+  const parsed = FitSchema.safeParse(value);
+  if (!parsed.success) throw new Error(`--fit must be cover or contain, got "${value}".`);
+  return parsed.data;
+}
+
+function framingFitFlag(value: string | undefined): FramingFit | undefined {
+  if (value === undefined) return undefined;
+  const parsed = FramingFitSchema.safeParse(value);
+  if (!parsed.success) throw new Error(`--fit must be cover, contain or inherit, got "${value}".`);
+  return parsed.data;
 }
 
 /** A short, human-readable label for a clip (for `show` / `at`). */
@@ -134,9 +174,10 @@ export async function runTimeline(args: string[]): Promise<void> {
           height: flags.height ? num(flags.height, 1080) : undefined,
           fps: flags.fps ? num(flags.fps, 30) : undefined,
           background: flags.background,
+          fit: fitFlag(flags.fit),
         }),
       );
-      out({ created: true, width: comp.width, height: comp.height, fps: comp.fps });
+      out({ created: true, width: comp.width, height: comp.height, fps: comp.fps, fit: comp.fit });
       return;
     }
 
@@ -302,6 +343,68 @@ export async function runTimeline(args: string[]): Promise<void> {
       return;
     }
 
+    case 'reframe': {
+      const [shape] = positional;
+      if (!shape) {
+        throw new Error(
+          'Usage: clip timeline reframe <9:16|1:1|4:5|16:9|WxH> [--fit cover|contain] [--x 0..1] [--y 0..1] [--dry-run]',
+        );
+      }
+      const aspect = AspectSchema.safeParse(shape);
+      const size = /^(\d+)x(\d+)$/.exec(shape);
+      if (!aspect.success && !size) {
+        throw new Error(`Unknown shape "${shape}": use 9:16, 1:1, 4:5, 16:9 or WIDTHxHEIGHT.`);
+      }
+      const comp = await readComposition();
+      const plan = planReframe(comp, {
+        ...(aspect.success
+          ? { aspect: aspect.data }
+          : { width: Number(size?.[1]), height: Number(size?.[2]) }),
+        fit: fitFlag(flags.fit),
+        x: optionalNum('x', flags.x),
+        y: optionalNum('y', flags.y),
+      });
+      const report = { canvas: plan.canvas, clipIds: plan.clipIds };
+      if (flags['dry-run'] || plan.ops.length === 0) {
+        out({ ...report, applied: false, ...(flags['dry-run'] ? { dryRun: true } : {}) });
+        return;
+      }
+      const doc = await mutateComposition(plan.ops, { expectedBaseRev: comp.rev });
+      out({ ...report, applied: true, rev: doc.rev });
+      return;
+    }
+
+    case 'framing': {
+      const [clipId] = positional;
+      if (!clipId) {
+        throw new Error(
+          'Usage: clip timeline framing <clipId> [--fit cover|contain|inherit] [--scale 0.1..4] [--x 0..1] [--y 0..1] [--reset]',
+        );
+      }
+      const comp = await readComposition();
+      const ops = planFraming(comp, {
+        clipId,
+        fit: framingFitFlag(flags.fit),
+        scale: optionalNum('scale', flags.scale),
+        x: optionalNum('x', flags.x),
+        y: optionalNum('y', flags.y),
+        reset: flags.reset === 'true',
+      });
+      if (ops.length === 0) {
+        out({ clipId, applied: false, message: 'Nothing to change.' });
+        return;
+      }
+      const doc = await mutateComposition(ops, { expectedBaseRev: comp.rev });
+      const framed = findClip(doc, clipId);
+      out({
+        clipId,
+        applied: true,
+        framing: framed ? clipFraming(doc, framed.clip) : undefined,
+        rev: doc.rev,
+      });
+      return;
+    }
+
     case 'check': {
       const comp = await readComposition();
       const media = await buildMediaMap();
@@ -408,21 +511,25 @@ export async function runTimeline(args: string[]): Promise<void> {
       out({
         rev: comp.rev,
         durationSec: compositionDuration(comp),
-        canvas: { width: comp.width, height: comp.height, fps: comp.fps },
+        canvas: { width: comp.width, height: comp.height, fps: comp.fps, fit: comp.fit },
         exportable,
         blockers,
         tracks: comp.tracks.map((t) => ({
           id: t.id,
           kind: t.kind,
           muted: t.muted,
-          clips: t.clips.map((c) => ({
-            id: c.id,
-            kind: c.kind,
-            startSec: c.startSec,
-            endSec: clipEndSec(c),
-            durationSec: clipDuration(c),
-            label: clipLabel(c),
-          })),
+          clips: t.clips.map((c) => {
+            const framing = ownFraming(comp, c);
+            return {
+              id: c.id,
+              kind: c.kind,
+              startSec: c.startSec,
+              endSec: clipEndSec(c),
+              durationSec: clipDuration(c),
+              label: clipLabel(c),
+              ...(framing ? { framing } : {}),
+            };
+          }),
           transitions: t.transitions.map((tr) => ({
             afterClipId: tr.afterClipId,
             kind: tr.kind,
