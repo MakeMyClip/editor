@@ -21,11 +21,24 @@ export interface Session {
 
 export type ClipKind = 'media' | 'text' | 'color';
 
+export type Fit = 'contain' | 'cover';
+
+/** A clip's placement. Absent fields are the defaults: the canvas fit, zoom 1,
+ *  centered (x/y align the picture: 0 = left/top edges together, 1 = right/bottom). */
+export interface Transform {
+  fit?: Fit;
+  scale?: number;
+  x?: number;
+  y?: number;
+  rotationDeg?: number;
+  opacity?: number;
+}
+
 interface ClipBase {
   id: string;
   startSec: number;
   effects?: unknown[];
-  transform?: unknown;
+  transform?: Transform;
 }
 export interface MediaClip extends ClipBase {
   kind: 'media';
@@ -68,5 +81,7 @@ export interface Composition {
   height: number;
   fps: number;
   background: string;
+  /** How media fill the canvas unless a clip's transform says otherwise. */
+  fit: Fit;
   tracks: Track[];
 }

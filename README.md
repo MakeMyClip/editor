@@ -183,7 +183,7 @@ Same registry, same session log, same output.
 
 Plus four meta-ops not in the registry: `snapshot`, `undo`, `inspect`, `delete`.
 
-The browser UI is a dark timeline editor: drag-drop import, a monitor (the composited frame at the playhead), an editable timeline (select a clip to trim / split / move / transition / remove, cut its silences, or cut words and retakes from its transcript), captions from transcripts, one-click export (an mp4, or a project for Final Cut Pro, DaVinci Resolve or Premiere Pro), timeline undo/redo, snapshot, and keyboard shortcuts.
+The browser UI is a dark timeline editor: drag-drop import, a monitor (the composited frame at the playhead), an editable timeline (select a clip to trim / split / move / transition / remove, frame it (fill, zoom, position), cut its silences, or cut words and retakes from its transcript), the output shape (16:9, 9:16, 1:1 or 4:5), captions from transcripts, one-click export (an mp4, or a project for Final Cut Pro, DaVinci Resolve or Premiere Pro), timeline undo/redo, snapshot, and keyboard shortcuts.
 
 ---
 
