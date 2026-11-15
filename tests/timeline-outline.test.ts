@@ -147,6 +147,33 @@ describe('timelineOutline', () => {
     expect(outline.nextFromSec).toBeUndefined();
   });
 
+  it('keeps a word the timeline plays twice as two, where a clip replays the source', async () => {
+    const hello = transcriptOf(M, spoken(['Hello.', 'and', 'so']));
+    const transcribe = transcribeFrom(hello);
+    const twice = timelineOf([
+      mediaClip({ id: 'c1', mediaId: M, sourceOutSec: 0.4, startSec: 0 }),
+      mediaClip({ id: 'c2', mediaId: M, sourceOutSec: 0.4, startSec: 0.4 }),
+    ]);
+    expect(
+      (await timelineOutline(twice, MEDIA, { transcribe })).sentences.map((s) => [
+        s.clipId,
+        s.startSec,
+        s.endSec,
+      ]),
+    ).toEqual([
+      ['c1', 0, 0.4],
+      ['c2', 0.4, 0.8],
+    ]);
+
+    const andAgain = timelineOf([
+      mediaClip({ id: 'c1', mediaId: M, sourceInSec: 0.4, sourceOutSec: 0.8, startSec: 0 }),
+      mediaClip({ id: 'c2', mediaId: M, sourceInSec: 0.4, sourceOutSec: 1.2, startSec: 0.4 }),
+    ]);
+    expect(
+      (await timelineOutline(andAgain, MEDIA, { transcribe })).sentences.map((s) => s.text),
+    ).toEqual(['and', 'and so']);
+  });
+
   it('reads each source once, skips one without sound, and breaks sentences between sources', async () => {
     const guest = transcriptOf(O, spoken(['Hello', 'world']));
     const calls: MediaId[] = [];

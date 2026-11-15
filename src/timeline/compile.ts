@@ -614,6 +614,10 @@ function seconds(sec: number): string {
   return String(Math.round(sec * 1000) / 1000);
 }
 
+function floorUs(sec: number): number {
+  return Math.floor(sec * 1e6 + 1e-6) / 1e6;
+}
+
 /** The font file for a text clip, with a missing font reported against the clip.
  *  Text over the picture always gets a file: see `ffmpeg/font.ts`. */
 function fontFor(ctx: CompileContext, clip: TextClip, always: boolean): string | undefined {
@@ -777,14 +781,16 @@ export function buildFrameAtPlan(
     }
     // Seconds into the clip's source. The chain's speed `setpts` divides the
     // offset back into segment time, which is what its fades and text read.
-    const local = Math.round(clamped * speedFactor(clip.effects) * 1000) / 1000;
+    // Rounded down, to the microsecond: rounding up could seek past the clip's
+    // last frame (no image) or past its out-point.
+    const local = floorUs(clamped * speedFactor(clip.effects));
     const { chain, textFiles } = clipChains(comp, clip, index, ctx, overlays);
     const frameStep: FfmpegStep = {
       label,
       args: [
         '-y',
         '-ss',
-        seconds(clip.sourceInSec + local),
+        String(floorUs(clip.sourceInSec + local)),
         '-i',
         info.path,
         '-filter_complex',

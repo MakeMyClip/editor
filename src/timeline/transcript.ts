@@ -352,7 +352,7 @@ export function outlineSentences(words: OutlineWord[]): OutlineSentence[] {
       prev &&
       (endsSentence(prev.text) ||
         word.startSec - prev.endSec > PAUSE_SEC ||
-        word.index < prev.index ||
+        word.index <= prev.index ||
         current.length >= MAX_SENTENCE_WORDS)
     ) {
       groups.push(current);
@@ -419,6 +419,7 @@ export async function timelineOutline(
   const sentences: OutlineSentence[] = [];
   let run: OutlineWord[] = [];
   let runMedia: MediaId | undefined;
+  let prevClip: MediaClip | undefined;
   for (const clip of clips) {
     let transcript = transcripts.get(clip.mediaId);
     if (transcript === undefined) {
@@ -435,13 +436,21 @@ export async function timelineOutline(
       run = [];
       runMedia = clip.mediaId;
     }
+    // A clip that carries on later in the source than the one before it (a cut
+    // between them), rather than playing part of it again.
+    const continues =
+      prevClip?.mediaId === clip.mediaId && clip.sourceInSec >= prevClip.sourceOutSec - 1e-6;
     for (const word of clipWords(transcript, clip)) {
       // A word a cut runs through shows in the clips on both sides of it: one
       // word, from its start in the first to its end in the last.
       const last = run[run.length - 1];
-      if (last?.index === word.index) run[run.length - 1] = { ...last, endSec: word.endSec };
-      else run.push({ ...word, clipId: clip.id });
+      if (continues && last?.index === word.index) {
+        run[run.length - 1] = { ...last, endSec: word.endSec };
+      } else {
+        run.push({ ...word, clipId: clip.id });
+      }
     }
+    prevClip = clip;
   }
   sentences.push(...outlineSentences(run));
 

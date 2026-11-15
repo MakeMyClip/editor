@@ -110,8 +110,9 @@ describe('buildFrameAtPlan', () => {
     ]);
     const near = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 7.999).steps[0];
     // 30 fps: the last frame starts at 8 - 1/30 s.
-    expect(near?.args.slice(1, 3)).toEqual(['-ss', '107.967']);
-    expect(graphOf(near?.args)).toMatch(/^\[0:v\]setpts=PTS-STARTPTS\+7\.967\/TB,/);
+    // Rounded down, never past that frame or the clip's out-point.
+    expect(near?.args.slice(1, 3)).toEqual(['-ss', '107.966666']);
+    expect(graphOf(near?.args)).toMatch(/^\[0:v\]setpts=PTS-STARTPTS\+7\.966666\/TB,/);
   });
 
   it('frames the picture the way export does (fit, zoom, position)', () => {

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -140,6 +140,13 @@ describe.skipIf(!IS_CI)('frame preview from a short window, against real FFmpeg'
 
       expect(await psnr(full, windowFrame), name).toBeGreaterThanOrEqual(40);
     }
+
+    // The very end of a clip that ends with its source: the seek must not pass
+    // the last frame, or there is no image.
+    const whole = vertical(mediaClip({ id: 'c1', mediaId: M, sourceOutSec: 20, startSec: 0 }));
+    const last = join(workspace, 'last.jpg');
+    await runPlan(buildFrameAtPlan(whole, { media, dir: workspace, output: last }, 19.999));
+    expect((await stat(last)).size).toBeGreaterThan(0);
   }, 180_000);
 
   it('renders a frame near the end of a 10-minute clip in under a second', async () => {
