@@ -55,7 +55,7 @@ export class NoTimelineError extends Error {
   constructor(timeline: string) {
     super(
       `No timeline "${timeline}" in the workspace. List them with \`clip timeline list\` ` +
-        `(timeline_show reports them too). make_short creates a short's timeline.`,
+        '(timeline_show reports them too). A short gets its timeline from make_short (`clip timeline short`).',
     );
     this.name = 'NoTimelineError';
     this.timeline = timeline;
@@ -493,7 +493,7 @@ export async function listTimelines(): Promise<TimelineListing[]> {
         id,
         width: doc.width,
         height: doc.height,
-        durationSec: compositionDuration(doc),
+        durationSec: Math.round(compositionDuration(doc) * 1000) / 1000,
         rev: doc.rev,
       });
     } catch (err) {

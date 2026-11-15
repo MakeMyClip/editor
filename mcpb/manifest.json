@@ -40,7 +40,7 @@
     },
     {
       "name": "timeline_edit",
-      "description": "Apply editing verbs as one undoable change: add media, text or color, trim, move, split, remove, remove silence, cut words or retakes, caption speech, reframe to 9:16 / 1:1 / 4:5, frame a clip, set loudness, transition."
+      "description": "Apply editing verbs as one undoable change: add media, text or color, trim, move, split, remove, remove silence, cut words or retakes, caption speech, reframe to 9:16 / 1:1 / 4:5, frame a clip, set loudness, make a vertical short from transcript words, transition."
     },
     {
       "name": "timeline_check",

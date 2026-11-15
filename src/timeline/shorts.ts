@@ -136,7 +136,7 @@ export async function planShort(
   if (request.ranges.length === 0) throw new ShortError('Give at least one word range.');
   if (!request.replace && target.tracks.some((t) => t.clips.length > 0)) {
     throw new ShortError(
-      'That timeline already holds a short. Pass replace to rebuild it, or pick a new timeline id.',
+      'That timeline already holds a short. Pass replace (`--replace`) to rebuild it, or pick a new timeline id.',
     );
   }
   const picture = videoLayers(source).picture;
