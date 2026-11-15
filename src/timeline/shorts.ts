@@ -1,16 +1,22 @@
-import { planCaptions } from './captions.js';
+import {
+  DEFAULT_CAPTION_TRACK,
+  DEFAULT_CAPTION_WORDS,
+  defaultCaptionStyle,
+  groupCaptions,
+} from './captions.js';
 import { speedFactor, videoLayers } from './compile.js';
 import {
   type Clip,
   type Composition,
+  clipEndSec,
   type Effect,
   type MediaClip,
   makeClipId,
 } from './composition.js';
-import { applyOps, type CompositionOp, mediaClip, videoTrack } from './ops.js';
+import { applyOps, type CompositionOp, mediaClip, textClip, videoTrack } from './ops.js';
 import { type Aspect, canvasFor, planReframe } from './reframe.js';
 import { MAIN_TIMELINE, type MediaId } from './schema.js';
-import type { Transcript } from './transcript.js';
+import { clipWords, type Transcript } from './transcript.js';
 
 /**
  * Shorts: a vertical clip cut out of a longer timeline by transcript word ranges,
@@ -109,6 +115,7 @@ export function checkShortTimelines(target: string, source: string = MAIN_TIMELI
 
 interface WordWindow {
   mediaId: MediaId;
+  transcript: Transcript;
   /** The range's words, by index into its transcript. */
   fromIndex: number;
   toIndex: number;
@@ -126,6 +133,9 @@ interface Piece extends ShortPiece {
   /** The source clip's speed, refused only if the piece is played. */
   speed: number;
   sourceClipId: string;
+  transcript: Transcript;
+  /** The word ranges the piece plays, which are what it captions. */
+  asked: { fromIndex: number; toIndex: number }[];
 }
 
 /**
@@ -195,23 +205,21 @@ export async function planShort(
     { op: 'addTrack', track: videoTrack({ id: SHORT_TRACK }) },
   );
   let at = 0;
-  for (const piece of joined) {
-    ops.push({
-      op: 'addClip',
-      trackId: SHORT_TRACK,
-      clip: mediaClip({
-        id: mintId(),
-        mediaId: piece.mediaId,
-        sourceInSec: piece.sourceInSec,
-        sourceOutSec: piece.sourceOutSec,
-        // Rounded to the microsecond: clean numbers, far inside the export's
-        // abutting tolerance.
-        startSec: Math.round(at * 1e6) / 1e6,
-        effects: piece.effects,
-      }),
+  const placed = joined.map((piece) => {
+    const clip = mediaClip({
+      id: mintId(),
+      mediaId: piece.mediaId,
+      sourceInSec: piece.sourceInSec,
+      sourceOutSec: piece.sourceOutSec,
+      // Rounded to the microsecond: clean numbers, far inside the export's
+      // abutting tolerance.
+      startSec: Math.round(at * 1e6) / 1e6,
+      effects: piece.effects,
     });
+    ops.push({ op: 'addClip', trackId: SHORT_TRACK, clip });
     at += piece.sourceOutSec - piece.sourceInSec;
-  }
+    return { piece, clip };
+  });
 
   if (request.x !== undefined || request.y !== undefined) {
     const framed = planReframe(applyOps(target, ops), {
@@ -231,24 +239,37 @@ export async function planShort(
 
   let captions = 0;
   if (request.captions !== false) {
-    const built = applyOps(target, ops);
-    // Only the asked-for words: the lead reaches into the word before, which
-    // whisper.cpp stretches over the pause, and it isn't part of the short.
-    const plan = await planCaptions(
-      built,
-      { maxWords: request.maxWords },
-      async (clipId, transcriptId) => {
-        const found = await lookup(built, clipId, transcriptId);
-        const asked = windows.filter((w) => w.mediaId === found.transcript.mediaId);
-        const words = found.transcript.words.filter((_, i) =>
-          asked.some((w) => i >= w.fromIndex && i <= w.toIndex),
-        );
-        return { ...found, transcript: { ...found.transcript, words } };
-      },
-      mintId,
-    );
-    ops.push(...plan.ops);
-    captions = plan.captions;
+    // Each piece captions only its own range's words: the lead reaches into the
+    // word before, which whisper.cpp stretches over the pause, and that word
+    // isn't part of the short even when another range asks for it.
+    const style = defaultCaptionStyle(applyOps(target, ops));
+    const cues = placed.flatMap(({ piece, clip }) => {
+      const words = piece.transcript.words.filter((_, i) =>
+        piece.asked.some((r) => i >= r.fromIndex && i <= r.toIndex),
+      );
+      return groupCaptions(
+        clipWords({ ...piece.transcript, words }, clip),
+        clipEndSec(clip),
+        request.maxWords ?? DEFAULT_CAPTION_WORDS,
+      );
+    });
+    if (cues.length > 0) {
+      ops.push({ op: 'addTrack', track: videoTrack({ id: DEFAULT_CAPTION_TRACK }) });
+      for (const cue of cues) {
+        ops.push({
+          op: 'addClip',
+          trackId: DEFAULT_CAPTION_TRACK,
+          clip: textClip({
+            id: mintId(),
+            text: cue.text,
+            startSec: cue.startSec,
+            durationSec: roundMs(cue.endSec - cue.startSec),
+            style,
+          }),
+        });
+      }
+    }
+    captions = cues.length;
   }
 
   return {
@@ -289,6 +310,7 @@ function wordWindow(transcript: Transcript, range: ShortRange, clip: MediaClip):
   );
   return {
     mediaId: clip.mediaId,
+    transcript,
     fromIndex: range.fromIndex,
     toIndex: range.toIndex,
     words: transcript.words.slice(range.fromIndex, range.toIndex + 1),
@@ -341,6 +363,8 @@ function piecesUnder(clips: readonly Clip[], window: WordWindow): Piece[] {
         effects: clip.effects.filter((e) => e.type === 'adjust' || e.type === 'volume'),
         speed: speedFactor(clip.effects),
         sourceClipId: clip.id,
+        transcript: window.transcript,
+        asked: [{ fromIndex: window.fromIndex, toIndex: window.toIndex }],
       });
       taken.push([a, b]);
     }
@@ -388,7 +412,11 @@ function joinContinuous(pieces: Piece[]): Piece[] {
       prev.speed === piece.speed &&
       JSON.stringify(prev.effects) === JSON.stringify(piece.effects)
     ) {
-      joined[joined.length - 1] = { ...prev, sourceOutSec: piece.sourceOutSec };
+      joined[joined.length - 1] = {
+        ...prev,
+        sourceOutSec: piece.sourceOutSec,
+        asked: [...prev.asked, ...piece.asked],
+      };
     } else {
       joined.push(piece);
     }

@@ -389,6 +389,37 @@ describe('planShort: the edit', () => {
     expect(captions.map((c) => (c.kind === 'text' ? c.text : ''))).toEqual(['w1 w2']);
   });
 
+  it("captions each piece from its own range, even when another range asks for the lead's word", async () => {
+    const abutting = transcriptOf(M, [
+      [0, 1],
+      [1, 2],
+      [2, 3],
+    ]);
+    const short = await planShort(
+      emptyComposition(),
+      whole,
+      {
+        ranges: [
+          { clipId: 'c1', fromIndex: 1, toIndex: 1 },
+          { clipId: 'c1', fromIndex: 0, toIndex: 0 },
+        ],
+      },
+      lookupFor([abutting]),
+      counter(),
+    );
+    expect(short.pieces).toEqual([
+      { mediaId: M, sourceInSec: 0.75, sourceOutSec: 2 },
+      { mediaId: M, sourceInSec: 0, sourceOutSec: 1 },
+    ]);
+    const captions = addedClips(short.ops).flatMap((c) =>
+      c.kind === 'text' ? [{ text: c.text, startSec: c.startSec }] : [],
+    );
+    expect(captions).toEqual([
+      { text: 'w1', startSec: 0.25 },
+      { text: 'w0', startSec: 1.25 },
+    ]);
+  });
+
   it('keeps the source short side: a 720p source makes 720x1280, 1:1 makes a square', async () => {
     const hd = sourceOf([clipOf('c1', 0, 30, 0)], { width: 1280, height: 720, fps: 25 });
     const range = { clipId: 'c1', fromIndex: 2, toIndex: 4 };
