@@ -109,6 +109,10 @@ export function checkShortTimelines(target: string, source: string = MAIN_TIMELI
 
 interface WordWindow {
   mediaId: MediaId;
+  /** The range's words, by index into its transcript. */
+  fromIndex: number;
+  toIndex: number;
+  words: { startSec: number; endSec: number }[];
   /** Padded edges, source seconds. */
   start: number;
   end: number;
@@ -228,10 +232,19 @@ export async function planShort(
   let captions = 0;
   if (request.captions !== false) {
     const built = applyOps(target, ops);
+    // Only the asked-for words: the lead reaches into the word before, which
+    // whisper.cpp stretches over the pause, and it isn't part of the short.
     const plan = await planCaptions(
       built,
       { maxWords: request.maxWords },
-      (clipId, transcriptId) => lookup(built, clipId, transcriptId),
+      async (clipId, transcriptId) => {
+        const found = await lookup(built, clipId, transcriptId);
+        const asked = windows.filter((w) => w.mediaId === found.transcript.mediaId);
+        const words = found.transcript.words.filter((_, i) =>
+          asked.some((w) => i >= w.fromIndex && i <= w.toIndex),
+        );
+        return { ...found, transcript: { ...found.transcript, words } };
+      },
       mintId,
     );
     ops.push(...plan.ops);
@@ -276,6 +289,9 @@ function wordWindow(transcript: Transcript, range: ShortRange, clip: MediaClip):
   );
   return {
     mediaId: clip.mediaId,
+    fromIndex: range.fromIndex,
+    toIndex: range.toIndex,
+    words: transcript.words.slice(range.fromIndex, range.toIndex + 1),
     start: roundMs(start),
     end: last.endSec,
     speechStart: first.startSec,
@@ -334,12 +350,14 @@ function piecesUnder(clips: readonly Clip[], window: WordWindow): Piece[] {
   );
 }
 
-/** Whether a piece plays any of the range's words, not just touches their edge. */
+/** Whether a piece plays any of the range's words, not just touches one's edge
+ *  or the gap between two that were cut. */
 function holdsSpeech(piece: Piece, window: WordWindow): boolean {
-  if (window.speechEnd > window.speechStart) {
-    return piece.sourceOutSec > window.speechStart && piece.sourceInSec < window.speechEnd;
-  }
-  return piece.sourceInSec <= window.speechStart && piece.sourceOutSec >= window.speechEnd;
+  return window.words.some((w) =>
+    w.endSec > w.startSec
+      ? piece.sourceOutSec > w.startSec && piece.sourceInSec < w.endSec
+      : piece.sourceInSec <= w.startSec && piece.sourceOutSec >= w.endSec,
+  );
 }
 
 /** `[lo, hi]` minus the `taken` intervals, in order. */

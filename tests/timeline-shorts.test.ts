@@ -195,6 +195,21 @@ describe('planShort: cut from the source timeline', () => {
     ).rejects.toThrow(/cut out of the source timeline/);
   });
 
+  it('refuses a range whose words were all cut, leaving only the gap between them', async () => {
+    const apart = transcriptOf(M, [
+      [1, 1.5],
+      [4, 4.5],
+    ]);
+    const gapOnly = sourceOf([clipOf('c1', 1.5, 4, 0)]);
+    await expect(
+      plan(
+        gapOnly,
+        { ranges: [{ clipId: 'c1', fromIndex: 0, toIndex: 1 }] },
+        { transcripts: [apart] },
+      ),
+    ).rejects.toThrow(/cut out of the source timeline/);
+  });
+
   it('keeps the lead padding across a split at the first word', async () => {
     const split = sourceOf([clipOf('c1', 0, 3, 0), clipOf('c2', 3, 30, 3)]);
     const short = await plan(split, { ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 2 }] });
@@ -352,6 +367,26 @@ describe('planShort: the edit', () => {
     ]);
     expect(short.captions).toBe(1);
     expect(short.warnings).toEqual([]);
+  });
+
+  it('captions only the asked-for words, not the word the lead reaches into', async () => {
+    // whisper.cpp words abut: w0 runs through the pause before w1.
+    const abutting = transcriptOf(M, [
+      [0, 1],
+      [1, 1.5],
+      [1.5, 2],
+      [2, 3],
+    ]);
+    const short = await planShort(
+      emptyComposition(),
+      whole,
+      { ranges: [{ clipId: 'c1', fromIndex: 1, toIndex: 2 }] },
+      lookupFor([abutting]),
+      counter(),
+    );
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 0.75, sourceOutSec: 2 }]);
+    const captions = addedClips(short.ops).filter((c) => c.kind === 'text');
+    expect(captions.map((c) => (c.kind === 'text' ? c.text : ''))).toEqual(['w1 w2']);
   });
 
   it('keeps the source short side: a 720p source makes 720x1280, 1:1 makes a square', async () => {

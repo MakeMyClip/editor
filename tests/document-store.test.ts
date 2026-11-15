@@ -254,6 +254,35 @@ describe('named timelines', () => {
     expect((await listTimelines()).map((t) => t.id)).toEqual(['main']);
   });
 
+  it('refuses a timeline folder out of the workspace even when its files link back in', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'mmc-outside-'));
+    try {
+      // timelines/ leads out; the files in it link back to documents inside.
+      const kept = join(workspace, 'kept');
+      await mkdir(kept);
+      await writeFile(join(kept, 'composition.json'), JSON.stringify(emptyComposition()));
+      await writeFile(join(kept, 'composition-ops.json'), '{}');
+      await mkdir(join(outside, 'best-1'));
+      for (const file of ['composition.json', 'composition-ops.json']) {
+        await symlink(join(kept, file), join(outside, 'best-1', file));
+      }
+      await symlink(outside, join(workspace, 'timelines'));
+
+      await expect(readComposition('best-1')).rejects.toBeInstanceOf(WorkspaceBoundaryError);
+      await expect(
+        mutateComposition([{ op: 'setCanvas', width: 2 }], { timeline: 'best-1' }),
+      ).rejects.toBeInstanceOf(WorkspaceBoundaryError);
+      await expect(deleteTimeline('best-1')).rejects.toBeInstanceOf(WorkspaceBoundaryError);
+      const { readdir } = await import('node:fs/promises');
+      expect((await readdir(join(outside, 'best-1'))).sort()).toEqual([
+        'composition-ops.json',
+        'composition.json',
+      ]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it('refuses a timelines/ folder that is a symlink out of the workspace', async () => {
     const outside = await mkdtemp(join(tmpdir(), 'mmc-outside-'));
     try {

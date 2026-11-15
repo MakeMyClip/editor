@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { readdir, readFile, rm } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { atomicWriteFile } from '../session/store.js';
 import { createRevisionedStore, type RevisionedStore } from '../storage/revisioned-store.js';
 import {
@@ -72,9 +72,16 @@ function checkedTimelineId(timeline: string): string {
   return parsed.data;
 }
 
+/** A non-main timeline's folder, checked against the workspace: `timelines/`
+ *  or the folder could be a symlink out of it, and writes (temp files) and
+ *  deletes act on the folder itself, not only on the files in it. */
+function timelineDir(timeline: string): string {
+  return resolveInWorkspace(join(TIMELINES_DIR, checkedTimelineId(timeline)));
+}
+
 function timelineFile(timeline: string, file: string): string {
   if (checkedTimelineId(timeline) === MAIN_TIMELINE) return resolve(getWorkspace(), file);
-  // Checked against the workspace: `timelines/` could be a symlink out of it.
+  timelineDir(timeline);
   return resolveInWorkspace(join(TIMELINES_DIR, timeline, file));
 }
 
@@ -533,6 +540,6 @@ export async function deleteTimeline(timeline: string): Promise<void> {
       // A corrupt document is deleted like any other.
       if (!(err instanceof CompositionCorruptError)) throw err;
     }
-    await rm(dirname(compositionPath(timeline)), { recursive: true, force: true });
+    await rm(timelineDir(timeline), { recursive: true, force: true });
   });
 }
