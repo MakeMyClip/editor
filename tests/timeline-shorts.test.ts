@@ -366,7 +366,46 @@ describe('planShort: the edit', () => {
       },
     ]);
     expect(short.captions).toBe(1);
-    expect(short.warnings).toEqual([]);
+    expect(short.warnings).toEqual([
+      'Range 1 starts mid-sentence, between "w1" and "w2" (word 2).',
+      'Range 1 ends mid-sentence, between "w4" and "w5" (word 4).',
+    ]);
+  });
+
+  it('warns only where a range cuts into a sentence', async () => {
+    // "One two. Three four five. Six" with a long pause before "Six".
+    const said = {
+      ...transcriptOf(M, [
+        [1, 1.4],
+        [1.5, 1.9],
+        [2.2, 2.6],
+        [2.7, 3.1],
+        [3.2, 3.6],
+        [4.6, 5],
+      ]),
+    };
+    said.words = said.words.map((w, i) => ({
+      ...w,
+      text: ['One', 'two.', 'Three', 'four', 'five.', 'Six'][i] ?? w.text,
+    }));
+    const warnings = async (fromIndex: number, toIndex: number): Promise<string[]> =>
+      (
+        await plan(
+          sourceOf([clipOf('c1', 0, 30, 0)]),
+          { ranges: [{ clipId: 'c1', fromIndex, toIndex }] },
+          { transcripts: [said] },
+        )
+      ).warnings;
+    expect(await warnings(2, 4)).toEqual([]); // a whole sentence
+    expect(await warnings(0, 5)).toEqual([]); // the recording's edges
+    expect(await warnings(3, 4)).toEqual([
+      'Range 1 starts mid-sentence, between "Three" and "four" (word 3).',
+    ]);
+    expect(await warnings(2, 3)).toEqual([
+      'Range 1 ends mid-sentence, between "four" and "five." (word 3).',
+    ]);
+    // "five." ends the sentence; the 1 s pause before "Six" ends one too.
+    expect(await warnings(5, 5)).toEqual([]);
   });
 
   it('captions only the asked-for words, not the word the lead reaches into', async () => {

@@ -305,7 +305,7 @@ const EDITABLE_VERB_SCHEMAS = [
       .min(1)
       .max(20)
       .describe(
-        'Word ranges, played in this order (a later moment can open the short as its hook). Pick whole sentences; 15–60 s in all is typical.',
+        'Word ranges, played in this order (a later moment can open the short as its hook). Pick whole sentences from the timeline_transcript sentence outline; 15–60 s in all is typical. A range that starts or ends mid-sentence is made anyway, with a warning.',
       ),
     source: TimelineIdSchema.optional().describe(
       'Timeline to cut from (default "main"). Its silence and retake cuts carry into the short.',
@@ -403,6 +403,9 @@ export interface VerbContext {
   defaultTrack: string;
   /** The timeline being edited (default `main`); `applyVerbs` sets it. */
   timeline?: string;
+  /** Hears what a verb did that the caller may not have meant (e.g. a short
+   *  cut mid-sentence); `applyVerbs` collects them. */
+  warn?: (message: string) => void;
 }
 
 const DEFAULT_TRACK = 'v0';
@@ -581,6 +584,7 @@ export async function lowerVerb(
         },
         ctx.transcript,
       );
+      for (const warning of plan.warnings) ctx.warn?.(warning);
       return plan.ops;
     }
     case 'transition':

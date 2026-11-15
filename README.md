@@ -161,8 +161,9 @@ The same steps from the CLI:
 ```bash
 clip timeline new
 clip timeline add-media podcast.mp4                  # prints the clip id, e.g. clip_ec2f047d
-clip timeline transcribe clip_ec2f047d               # each word with its index and time
+clip timeline transcribe clip_ec2f047d               # transcribe it (once per file)
 clip timeline silence clip_ec2f047d                  # cut the pauses on main
+clip timeline transcribe --sentences | head -80      # one line per sentence: time, word indices, text
 clip timeline short best-1 clip_ec2f047d 1400 1478 --x 0.4   # words 1400–1478 as a 9:16 short
 clip timeline --timeline best-1 frame 3 check.jpg    # look at it; move --x if the speaker is off
 clip timeline --timeline best-1 export best-1.mp4

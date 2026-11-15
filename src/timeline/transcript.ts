@@ -13,7 +13,8 @@ import {
   WhisperLanguageSchema,
 } from '../transcribe/whisper.js';
 import { getWorkspace, resolveInWorkspace } from '../workspace.js';
-import { checkExportable, type MediaInfo, withoutTextOverlays } from './compile.js';
+import { endsSentence, joinWords, PAUSE_SEC } from './captions.js';
+import { checkExportable, type MediaInfo, videoLayers, withoutTextOverlays } from './compile.js';
 import { type Composition, findClip, type MediaClip, makeClipId } from './composition.js';
 import { applyOp, type CompositionOp, type SourceRange } from './ops.js';
 import { type MediaId, MediaIdSchema } from './schema.js';
@@ -303,6 +304,170 @@ export async function transcribeClip(
     retakes: findRetakes(words),
     transcriptId: transcriptIdOf(transcript),
   };
+}
+
+/** Longest sentence an outline line holds; whisper sometimes leaves out the
+ *  punctuation, and a line has to end somewhere. */
+const MAX_SENTENCE_WORDS = 40;
+/** Default size of one outline page, in bytes of compact JSON: about 10k
+ *  tokens, which an MCP client takes in one result. */
+export const OUTLINE_PAGE_BYTES = 40_000;
+
+/** A word in timeline order, with the media clip it plays in. */
+export interface OutlineWord extends ClipWord {
+  clipId: string;
+}
+
+/** One sentence of the timeline's speech. `fromIndex..toIndex` are word indices
+ *  into its source's transcript, as `cut_words` and `make_short` take them, and
+ *  `clipId` is the clip its first word plays in. */
+export interface OutlineSentence {
+  startSec: number;
+  endSec: number;
+  clipId: string;
+  fromIndex: number;
+  toIndex: number;
+  text: string;
+}
+
+export interface TimelineOutline {
+  sentences: OutlineSentence[];
+  /** The `transcriptId` of each source the sentences come from. */
+  transcriptIds: Record<string, string>;
+  /** Where the next page starts (pass it as `fromSec`); absent on the last page. */
+  nextFromSec?: number;
+}
+
+/**
+ * Group words (one source, timeline order) into sentences: a sentence ends at
+ * sentence-ending punctuation, before a pause longer than `PAUSE_SEC`, after
+ * `MAX_SENTENCE_WORDS` words, or where the timeline goes back in the source.
+ */
+export function outlineSentences(words: OutlineWord[]): OutlineSentence[] {
+  const groups: OutlineWord[][] = [];
+  let current: OutlineWord[] = [];
+  for (const word of words) {
+    const prev = current[current.length - 1];
+    if (
+      prev &&
+      (endsSentence(prev.text) ||
+        word.startSec - prev.endSec > PAUSE_SEC ||
+        word.index < prev.index ||
+        current.length >= MAX_SENTENCE_WORDS)
+    ) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(word);
+  }
+  if (current.length > 0) groups.push(current);
+  return groups.flatMap((group) => {
+    const first = group[0];
+    const last = group[group.length - 1];
+    if (!first || !last) return [];
+    return [
+      {
+        startSec: first.startSec,
+        endSec: last.endSec,
+        clipId: first.clipId,
+        fromIndex: first.index,
+        toIndex: last.index,
+        text: joinWords(group.map((w) => w.text)),
+      },
+    ];
+  });
+}
+
+export interface OutlineOptions extends TranscribeOptions {
+  /** Only this media clip's words. */
+  clipId?: string;
+  /** Sentences starting at or after this timeline time. */
+  fromSec?: number;
+  /** Sentences starting before this timeline time. */
+  toSec?: number;
+  /** Page size in bytes of compact JSON (default `OUTLINE_PAGE_BYTES`). */
+  maxBytes?: number;
+  /** How a source's transcript is had (default: `transcribeMedia`, cached). */
+  transcribe?: (mediaId: MediaId, info: MediaInfo) => Promise<Transcript>;
+}
+
+/**
+ * The timeline's speech as sentences, in timeline order: every media clip on
+ * the picture track, each source transcribed once (or read from its stored
+ * transcript). A sentence runs on across cuts between clips of the same source
+ * (a silence cut splits a clip mid-sentence), and a word a cut splits in two is
+ * listed once. A page holds at most `maxBytes` of compact JSON; `nextFromSec`
+ * says where the next one starts.
+ */
+export async function timelineOutline(
+  comp: Composition,
+  media: Map<MediaId, MediaInfo>,
+  opts: OutlineOptions = {},
+): Promise<TimelineOutline> {
+  const transcribe = opts.transcribe ?? ((mediaId, info) => transcribeMedia(mediaId, info, opts));
+  const picture = videoLayers(comp).picture;
+  const clips = (picture?.clips ?? [])
+    .filter((c): c is MediaClip => c.kind === 'media')
+    .filter((c) => opts.clipId === undefined || c.id === opts.clipId)
+    .sort((a, b) => a.startSec - b.startSec);
+  if (opts.clipId !== undefined && clips.length === 0) {
+    // The clip isn't a media clip on the picture track: say why, as a lookup would.
+    locateMediaClip(comp, opts.clipId, media);
+  }
+
+  const transcripts = new Map<MediaId, Transcript | null>();
+  const sentences: OutlineSentence[] = [];
+  let run: OutlineWord[] = [];
+  let runMedia: MediaId | undefined;
+  for (const clip of clips) {
+    let transcript = transcripts.get(clip.mediaId);
+    if (transcript === undefined) {
+      const info = media.get(clip.mediaId);
+      if (!info) {
+        throw new TranscriptError(`No media registered for "${clip.mediaId}" (clip "${clip.id}").`);
+      }
+      transcript = info.hasAudio ? await transcribe(clip.mediaId, info) : null;
+      transcripts.set(clip.mediaId, transcript);
+    }
+    if (!transcript) continue;
+    if (clip.mediaId !== runMedia) {
+      sentences.push(...outlineSentences(run));
+      run = [];
+      runMedia = clip.mediaId;
+    }
+    for (const word of clipWords(transcript, clip)) {
+      // A word a cut runs through shows in the clips on both sides of it: one
+      // word, from its start in the first to its end in the last.
+      const last = run[run.length - 1];
+      if (last?.index === word.index) run[run.length - 1] = { ...last, endSec: word.endSec };
+      else run.push({ ...word, clipId: clip.id });
+    }
+  }
+  sentences.push(...outlineSentences(run));
+
+  const transcriptIds: Record<string, string> = {};
+  for (const [mediaId, transcript] of transcripts) {
+    if (transcript) transcriptIds[mediaId] = transcriptIdOf(transcript);
+  }
+  const fromSec = opts.fromSec ?? 0;
+  const toSec = opts.toSec ?? Number.POSITIVE_INFINITY;
+  const inRange = sentences.filter((s) => s.startSec >= fromSec && s.startSec < toSec);
+
+  const maxBytes = opts.maxBytes ?? OUTLINE_PAGE_BYTES;
+  // The page's own fields, with room for the largest nextFromSec.
+  let bytes = Buffer.byteLength(
+    JSON.stringify({ sentences: [], transcriptIds, nextFromSec: 99999.999 }),
+  );
+  const page: OutlineSentence[] = [];
+  for (const sentence of inRange) {
+    const size = Buffer.byteLength(JSON.stringify(sentence)) + 1;
+    if (bytes + size > maxBytes && page.length > 0) {
+      return { sentences: page, transcriptIds, nextFromSec: sentence.startSec };
+    }
+    page.push(sentence);
+    bytes += size;
+  }
+  return { sentences: page, transcriptIds };
 }
 
 /** An inclusive range of transcript word indices. */

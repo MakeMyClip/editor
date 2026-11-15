@@ -2,7 +2,9 @@ import {
   DEFAULT_CAPTION_TRACK,
   DEFAULT_CAPTION_WORDS,
   defaultCaptionStyle,
+  endsSentence,
   groupCaptions,
+  PAUSE_SEC,
 } from './captions.js';
 import { speedFactor, videoLayers } from './compile.js';
 import {
@@ -281,7 +283,7 @@ export async function planShort(
     })),
     durationSec: roundMs(at),
     captions,
-    warnings: [],
+    warnings: windows.flatMap((window, i) => sentenceEdgeWarnings(window, i + 1)),
   };
 }
 
@@ -319,6 +321,40 @@ function wordWindow(transcript: Transcript, range: ShortRange, clip: MediaClip):
     speechStart: first.startSec,
     speechEnd: last.endSec,
   };
+}
+
+/**
+ * Where a range starts or ends inside a sentence: right after a word that
+ * doesn't end one (with no real pause between), or right before the next word
+ * of the same sentence. Named by the words on either side; the short is still
+ * made, since a cut mid-sentence can be meant.
+ */
+function sentenceEdgeWarnings(window: WordWindow, rangeNumber: number): string[] {
+  const words = window.transcript.words;
+  const warnings: string[] = [];
+  const midSentence = (
+    a: (typeof words)[number] | undefined,
+    b: (typeof words)[number] | undefined,
+  ) =>
+    a !== undefined &&
+    b !== undefined &&
+    !endsSentence(a.text) &&
+    b.startSec - a.endSec < PAUSE_SEC;
+  const before = words[window.fromIndex - 1];
+  const first = words[window.fromIndex];
+  if (midSentence(before, first)) {
+    warnings.push(
+      `Range ${rangeNumber} starts mid-sentence, between "${before?.text}" and "${first?.text}" (word ${window.fromIndex}).`,
+    );
+  }
+  const last = words[window.toIndex];
+  const after = words[window.toIndex + 1];
+  if (midSentence(last, after)) {
+    warnings.push(
+      `Range ${rangeNumber} ends mid-sentence, between "${last?.text}" and "${after?.text}" (word ${window.toIndex}).`,
+    );
+  }
+  return warnings;
 }
 
 /**
