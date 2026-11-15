@@ -21,7 +21,8 @@ import {
   planFraming,
   planReframe,
 } from './reframe.js';
-import type { MediaId } from './schema.js';
+import { MAIN_TIMELINE, type MediaId, TimelineIdSchema } from './schema.js';
+import { checkShortTimelines, planShort } from './shorts.js';
 import { SensitivitySchema, type SilenceCut } from './silence.js';
 import {
   clipWords,
@@ -278,6 +279,71 @@ const EDITABLE_VERB_SCHEMAS = [
     ),
   }),
   z.object({
+    verb: z.literal('make_short'),
+    ranges: z
+      .array(
+        z.object({
+          clipId: z
+            .string()
+            .describe(
+              'A media clip on the source timeline whose transcript the indices come from.',
+            ),
+          fromIndex: z
+            .number()
+            .int()
+            .nonnegative()
+            .describe('First word of the range: its `index` from timeline_transcript.'),
+          toIndex: z.number().int().nonnegative().describe('Last word of the range (inclusive).'),
+          transcriptId: z
+            .string()
+            .optional()
+            .describe(
+              'The `transcriptId` the indices were read from; refused if the clip was transcribed again since.',
+            ),
+        }),
+      )
+      .min(1)
+      .max(20)
+      .describe(
+        'Word ranges, played in this order (a later moment can open the short as its hook). Pick whole sentences; 15–60 s in all is typical.',
+      ),
+    source: TimelineIdSchema.optional().describe(
+      'Timeline to cut from (default "main"). Its silence and retake cuts carry into the short.',
+    ),
+    aspect: AspectSchema.optional().describe('Output shape (default 9:16).'),
+    x: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe(
+        'Horizontal position of the picture: 0 shows the left edge of the source, 0.5 the center, 1 the right edge. Put the speaker in frame.',
+      ),
+    y: z.number().min(0).max(1).optional().describe('Vertical position: 0 top, 1 bottom.'),
+    captions: z
+      .boolean()
+      .optional()
+      .describe('Burn in captions from the transcript (default true).'),
+    maxWords: z
+      .number()
+      .int()
+      .min(1)
+      .max(12)
+      .optional()
+      .describe(
+        `Most words per caption (default ${DEFAULT_CAPTION_WORDS}); 1 shows one word at a time.`,
+      ),
+    targetLufs: TargetLufsSchema.nullable()
+      .optional()
+      .describe(
+        'Export loudness in LUFS (default -14, for Shorts, Reels and TikTok); null for off.',
+      ),
+    replace: z
+      .boolean()
+      .optional()
+      .describe('Rebuild this timeline when it already holds a short (default: refuse).'),
+  }),
+  z.object({
     verb: z.literal('transition'),
     afterClipId: z
       .string()
@@ -331,8 +397,12 @@ export interface VerbContext {
     clipId: string,
     transcriptId?: string,
   ) => Promise<{ clip: MediaClip; transcript: Transcript; media: Map<MediaId, MediaInfo> }>;
+  /** Read another timeline of the workspace (make_short's source). */
+  readTimeline: (timeline: string) => Promise<Composition>;
   /** Track a clip is placed on when the verb doesn't say. */
   defaultTrack: string;
+  /** The timeline being edited (default `main`); `applyVerbs` sets it. */
+  timeline?: string;
 }
 
 const DEFAULT_TRACK = 'v0';
@@ -493,6 +563,26 @@ export async function lowerVerb(
       return (comp.loudness?.targetLufs ?? null) === verb.targetLufs
         ? []
         : [{ op: 'setLoudness', targetLufs: verb.targetLufs }];
+    case 'make_short': {
+      const sourceId = verb.source ?? MAIN_TIMELINE;
+      checkShortTimelines(ctx.timeline ?? MAIN_TIMELINE, sourceId);
+      const plan = await planShort(
+        comp,
+        await ctx.readTimeline(sourceId),
+        {
+          ranges: verb.ranges,
+          aspect: verb.aspect,
+          x: verb.x,
+          y: verb.y,
+          captions: verb.captions,
+          maxWords: verb.maxWords,
+          targetLufs: verb.targetLufs,
+          replace: verb.replace,
+        },
+        ctx.transcript,
+      );
+      return plan.ops;
+    }
     case 'transition':
       return [
         {

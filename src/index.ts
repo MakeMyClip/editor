@@ -165,12 +165,17 @@ export {
   CompositionCorruptError,
   compositionOpsPath,
   compositionPath,
+  deleteTimeline,
+  listTimelines,
   mutateComposition,
+  NoTimelineError,
   overwriteComposition,
   readComposition,
   readDocOpLog,
   redoDocOp,
   resetComposition,
+  TimelineIdError,
+  type TimelineListing,
   undoLastDocOp,
   writeComposition,
   writeCompositionIfUnchanged,
@@ -225,6 +230,7 @@ export {
 export { type LoudnessResult, type RunPlanResult, runPlan } from './timeline/run-plan.js';
 export {
   AudioStreamSchema,
+  MAIN_TIMELINE,
   type MediaId,
   MediaIdSchema,
   type MediaRef,
@@ -232,8 +238,22 @@ export {
   makeMediaId,
   type Timecode,
   TimecodeSchema,
+  TimelineIdSchema,
   VideoStreamSchema,
 } from './timeline/schema.js';
+export {
+  checkShortTimelines,
+  DEFAULT_SHORT_LUFS,
+  planShort,
+  SHORT_LEAD_SEC,
+  SHORT_TAIL_SEC,
+  ShortError,
+  type ShortPiece,
+  type ShortPlan,
+  type ShortRange,
+  type ShortRequest,
+  type ShortTranscriptLookup,
+} from './timeline/shorts.js';
 export {
   analyzeSilence,
   DEFAULT_SENSITIVITY,

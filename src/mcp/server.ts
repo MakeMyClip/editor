@@ -15,6 +15,8 @@ import {
 import type { Composition } from '../timeline/composition.js';
 import {
   applyVerbs,
+  listTimelines,
+  NoTimelineError,
   readComposition,
   redoDocOp,
   undoLastDocOp,
@@ -28,6 +30,8 @@ import {
 import { buildMediaMap } from '../timeline/media-registry.js';
 import { reviewCuts } from '../timeline/review.js';
 import { runPlan } from '../timeline/run-plan.js';
+import { MAIN_TIMELINE, TimelineIdSchema } from '../timeline/schema.js';
+import { ShortError } from '../timeline/shorts.js';
 import { transcribeClip } from '../timeline/transcript.js';
 import { EditableVerbSchema } from '../timeline/verbs.js';
 import { doctor } from '../tools/doctor.js';
@@ -98,11 +102,29 @@ async function jpegContent(
  */
 async function describeComposition(
   comp: Composition,
-): Promise<CompositionSummary & { exportable: boolean; blockers: string[] }> {
+  timeline: string,
+): Promise<CompositionSummary & { timeline: string; exportable: boolean; blockers: string[] }> {
   const media = await buildMediaMap();
   const { exportable, blockers } = checkExportable(comp, media, getWorkspace());
-  return { ...summarizeComposition(comp), exportable, blockers };
+  return { timeline, ...summarizeComposition(comp), exportable, blockers };
 }
+
+/** Answer a missing timeline or a short that can't be made with `{ error }`:
+ *  both are the agent's to fix, like an export it can't render. */
+async function answeringTimelineErrors<T>(
+  run: () => Promise<T>,
+): Promise<T | ReturnType<typeof jsonResult>> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof NoTimelineError || err instanceof ShortError) {
+      return jsonResult({ error: err.message });
+    }
+    throw err;
+  }
+}
+
+const timelineInput = TimelineIdSchema.optional();
 
 /**
  * Build the MakeMyClip Editor MCP server — a second front door onto the SAME
@@ -119,8 +141,9 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Show the timeline',
       description:
-        'Read the current timeline document — tracks, clips, timings, and whether it can render (exportable + any blockers). Pass atSec to also get the rendered frame at that time as an image. Call this to ground yourself BEFORE editing and to VERIFY a change AFTER.',
+        'Read a timeline document — tracks, clips, timings, and whether it can render (exportable + any blockers) — plus `timelines`, the ids of every timeline in the workspace (main and each short). Pass atSec to also get the rendered frame at that time as an image. Call this to ground yourself BEFORE editing and to VERIFY a change AFTER.',
       inputSchema: {
+        timeline: timelineInput,
         atSec: z
           .number()
           .nonnegative()
@@ -130,35 +153,37 @@ export function buildMcpServer(): McpServer {
           ),
       },
     },
-    async ({ atSec }) => {
-      const comp = await readComposition();
-      const summary = jsonResult(await describeComposition(comp));
-      if (atSec === undefined) return summary;
-      const output = newOutputPath('mcp-frame', 'jpg');
-      try {
-        const plan = buildFrameAtPlan(
-          comp,
-          {
-            media: await confinedMediaMap(comp),
-            dir: getWorkspace(),
-            output,
-            tag: `mcp${randomBytes(4).toString('hex')}`,
-          },
-          atSec,
-        );
-        await runPlan(plan);
-        return { content: [...summary.content, await jpegContent(output)] };
-      } catch (err) {
-        if (!(err instanceof CompileError)) throw err;
-        const frameError = {
-          type: 'text' as const,
-          text: JSON.stringify({ frameError: err.message }),
-        };
-        return { content: [...summary.content, frameError] };
-      } finally {
-        await unlink(output).catch(() => undefined);
-      }
-    },
+    async ({ timeline = MAIN_TIMELINE, atSec }) =>
+      answeringTimelineErrors(async () => {
+        const comp = await readComposition(timeline);
+        const timelines = (await listTimelines()).map((t) => t.id);
+        const summary = jsonResult({ ...(await describeComposition(comp, timeline)), timelines });
+        if (atSec === undefined) return summary;
+        const output = newOutputPath('mcp-frame', 'jpg');
+        try {
+          const plan = buildFrameAtPlan(
+            comp,
+            {
+              media: await confinedMediaMap(comp),
+              dir: getWorkspace(),
+              output,
+              tag: `mcp${randomBytes(4).toString('hex')}`,
+            },
+            atSec,
+          );
+          await runPlan(plan);
+          return { content: [...summary.content, await jpegContent(output)] };
+        } catch (err) {
+          if (!(err instanceof CompileError)) throw err;
+          const frameError = {
+            type: 'text' as const,
+            text: JSON.stringify({ frameError: err.message }),
+          };
+          return { content: [...summary.content, frameError] };
+        } finally {
+          await unlink(output).catch(() => undefined);
+        }
+      }),
   );
 
   server.registerTool(
@@ -167,22 +192,24 @@ export function buildMcpServer(): McpServer {
       title: 'Check the cuts',
       description:
         "Review every hard cut (abutting clips with no transition). Reports cuts whose audio is loud right at the edge, which usually means a clipped word or a click, and returns a contact sheet image: one row per cut, the outgoing clip's last frame then the incoming clip's first. Run it after cutting (e.g. remove_silence) and before exporting.",
+      inputSchema: { timeline: timelineInput },
     },
-    async () => {
-      const comp = await readComposition();
-      const media = await confinedMediaMap(comp);
-      const output = newOutputPath('cut-sheet', 'jpg');
-      try {
-        const { sheet, ...review } = await reviewCuts(comp, media, output, getWorkspace());
-        const summary = jsonResult({
-          ...review,
-          sheet: sheet ? { cuts: sheet.cuts, truncated: sheet.truncated } : null,
-        });
-        return sheet ? { content: [...summary.content, await jpegContent(sheet.path)] } : summary;
-      } finally {
-        await unlink(output).catch(() => undefined);
-      }
-    },
+    async ({ timeline = MAIN_TIMELINE }) =>
+      answeringTimelineErrors(async () => {
+        const comp = await readComposition(timeline);
+        const media = await confinedMediaMap(comp);
+        const output = newOutputPath('cut-sheet', 'jpg');
+        try {
+          const { sheet, ...review } = await reviewCuts(comp, media, output, getWorkspace());
+          const summary = jsonResult({
+            ...review,
+            sheet: sheet ? { cuts: sheet.cuts, truncated: sheet.truncated } : null,
+          });
+          return sheet ? { content: [...summary.content, await jpegContent(sheet.path)] } : summary;
+        } finally {
+          await unlink(output).catch(() => undefined);
+        }
+      }),
   );
 
   server.registerTool(
@@ -190,13 +217,19 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Edit the timeline',
       description:
-        'Apply one or more editing verbs to the document as ONE undoable change. Verbs: add_media, add_text, add_color, trim, move, split, remove, remove_silence, cut_words, remove_retakes, caption_speech, reframe, set_framing, set_loudness, transition. remove_silence cuts the pauses out of a media clip (sensitivity 0–1, default 0.5) and moves later clips on its track up; it applies nothing when no pause is found. cut_words cuts words fromIndex..toIndex out of a clip, sending the transcriptId from the timeline_transcript call they came from; remove_retakes cuts the earlier take of each phrase said twice in a row. caption_speech turns stored transcripts into captions on a track above the video (short phrases, or one word at a time with maxWords 1), replacing captions already there; export burns them in. Captions do not move with later cuts, so caption after cutting, or run it again after a cut. reframe changes the output shape (aspect 9:16 for Shorts/Reels/TikTok, 1:1, 4:5, 16:9) and fills it (fit cover, the default, crops; contain shows bars); x/y (0 = left/top, 0.5 = center, 1 = right/bottom) pick the part of every current media clip that shows. set_framing sets the fit, zoom (scale 0.1–4) and position of one media clip. Check the result with timeline_show atSec. set_loudness sets the integrated loudness the mp4 export normalizes to (targetLufs -14 for YouTube/Shorts/Reels/TikTok, -16 for podcasts, null for off). Batch related verbs into a single call. Media paths must be inside the workspace. Returns the updated document summary, including whether it can now render.',
-      inputSchema: { verbs: z.array(EditableVerbSchema).min(1) },
+        'Apply one or more editing verbs to the document as ONE undoable change. Verbs: add_media, add_text, add_color, trim, move, split, remove, remove_silence, cut_words, remove_retakes, caption_speech, reframe, set_framing, set_loudness, transition. remove_silence cuts the pauses out of a media clip (sensitivity 0–1, default 0.5) and moves later clips on its track up; it applies nothing when no pause is found. cut_words cuts words fromIndex..toIndex out of a clip, sending the transcriptId from the timeline_transcript call they came from; remove_retakes cuts the earlier take of each phrase said twice in a row. caption_speech turns stored transcripts into captions on a track above the video (short phrases, or one word at a time with maxWords 1), replacing captions already there; export burns them in. Captions do not move with later cuts, so caption after cutting, or run it again after a cut. reframe changes the output shape (aspect 9:16 for Shorts/Reels/TikTok, 1:1, 4:5, 16:9) and fills it (fit cover, the default, crops; contain shows bars); x/y (0 = left/top, 0.5 = center, 1 = right/bottom) pick the part of every current media clip that shows. set_framing sets the fit, zoom (scale 0.1–4) and position of one media clip. Check the result with timeline_show atSec. set_loudness sets the integrated loudness the mp4 export normalizes to (targetLufs -14 for YouTube/Shorts/Reels/TikTok, -16 for podcasts, null for off). ' +
+        'make_short turns a long recording into a vertical short on a timeline of its own: send it with `timeline` set to a new id such as "best-1" (never main). It plays the given word ranges (indices from timeline_transcript on the source timeline, default main) with a little padding, cut from the source\'s clips so its silence and retake cuts carry in, on a 9:16 canvas filled edge to edge (x picks the part of the frame that shows), normalized to -14 LUFS, with captions. Pick whole sentences (15–60 s in all is typical), look at a frame with timeline_show (same timeline, atSec), then adjust with reframe x. Undo on that timeline removes it; replace rebuilds it. Every other verb also takes `timeline`, so a short can be edited like main. ' +
+        'Batch related verbs into a single call. Media paths must be inside the workspace. Returns the updated document summary, including whether it can now render.',
+      inputSchema: { timeline: timelineInput, verbs: z.array(EditableVerbSchema).min(1) },
     },
-    async ({ verbs }) => {
-      const { doc, ops } = await applyVerbs(verbs, makeVerbContext());
-      return jsonResult({ applied: ops.length, document: await describeComposition(doc) });
-    },
+    async ({ timeline = MAIN_TIMELINE, verbs }) =>
+      answeringTimelineErrors(async () => {
+        const { doc, ops } = await applyVerbs(verbs, makeVerbContext(), timeline);
+        return jsonResult({
+          applied: ops.length,
+          document: await describeComposition(doc, timeline),
+        });
+      }),
   );
 
   server.registerTool(
@@ -206,34 +239,46 @@ export function buildMcpServer(): McpServer {
       description:
         "Transcribe a media clip's speech with the local whisper.cpp and return its words with timeline times. Optional feature: if whisper.cpp or a model isn't set up, the error says how. The first call per source file takes a while; later calls reuse the stored transcript. A word's `index` is stable for its source file.",
       inputSchema: {
+        timeline: timelineInput,
         clipId: z.string().describe('Media clip to transcribe.'),
         language: WhisperLanguageSchema.optional(),
       },
     },
-    async ({ clipId, language }) => {
-      const comp = await readComposition();
-      return jsonResult(
-        await transcribeClip(comp, clipId, await confinedMediaMap(comp), { language }),
-      );
-    },
+    async ({ timeline = MAIN_TIMELINE, clipId, language }) =>
+      answeringTimelineErrors(async () => {
+        const comp = await readComposition(timeline);
+        return jsonResult(
+          await transcribeClip(comp, clipId, await confinedMediaMap(comp), { language }),
+        );
+      }),
   );
 
   server.registerTool(
     'timeline_undo',
-    { title: 'Undo', description: 'Undo the most recent timeline edit.' },
-    async () => {
-      const { undone, label } = await undoLastDocOp();
-      return jsonResult(undone ? { undone, label } : { undone, message: 'Nothing to undo.' });
+    {
+      title: 'Undo',
+      description: 'Undo the most recent edit of a timeline (default main).',
+      inputSchema: { timeline: timelineInput },
     },
+    async ({ timeline = MAIN_TIMELINE }) =>
+      answeringTimelineErrors(async () => {
+        const { undone, label } = await undoLastDocOp(timeline);
+        return jsonResult(undone ? { undone, label } : { undone, message: 'Nothing to undo.' });
+      }),
   );
 
   server.registerTool(
     'timeline_redo',
-    { title: 'Redo', description: 'Redo the most recently undone timeline edit.' },
-    async () => {
-      const { redone, label } = await redoDocOp();
-      return jsonResult(redone ? { redone, label } : { redone, message: 'Nothing to redo.' });
+    {
+      title: 'Redo',
+      description: 'Redo the most recently undone edit of a timeline (default main).',
+      inputSchema: { timeline: timelineInput },
     },
+    async ({ timeline = MAIN_TIMELINE }) =>
+      answeringTimelineErrors(async () => {
+        const { redone, label } = await redoDocOp(timeline);
+        return jsonResult(redone ? { redone, label } : { redone, message: 'Nothing to redo.' });
+      }),
   );
 
   server.registerTool(
@@ -241,10 +286,11 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Export the timeline',
       description:
-        'Export the current timeline document to a file in the workspace and return its path. format mp4 (default) renders the video, normalized to the loudness set with set_loudness (the result reports the measured loudness). ' +
+        'Export a timeline (default main; pass `timeline` for a short) to a file in the workspace and return its path. format mp4 (default) renders the video, normalized to the loudness set with set_loudness (the result reports the measured loudness). ' +
         'fcpxml writes an FCPXML project for Final Cut Pro and DaVinci Resolve; xmeml writes Final Cut Pro 7 XML for Premiere Pro (Resolve reads it too), with text as .srt caption files beside it. ' +
         'Both reference the source media by absolute path, refuse what the editor file cannot hold with the fix to make, and return notes on what is carried only in part.',
       inputSchema: {
+        timeline: timelineInput,
         format: z
           .enum(['mp4', 'fcpxml', 'xmeml'])
           .optional()
@@ -255,9 +301,9 @@ export function buildMcpServer(): McpServer {
           .describe('Output file inside the workspace (relative paths resolve against it).'),
       },
     },
-    async ({ format = 'mp4', output }) => {
-      const comp = await readComposition();
+    async ({ timeline = MAIN_TIMELINE, format = 'mp4', output }) => {
       try {
+        const comp = await readComposition(timeline);
         if (format !== 'mp4') {
           const target = output
             ? resolveInWorkspace(output)
@@ -290,7 +336,8 @@ export function buildMcpServer(): McpServer {
         if (
           err instanceof CompileError ||
           err instanceof InterchangeError ||
-          err instanceof WorkspaceBoundaryError
+          err instanceof WorkspaceBoundaryError ||
+          err instanceof NoTimelineError
         ) {
           return jsonResult({ error: err.message });
         }

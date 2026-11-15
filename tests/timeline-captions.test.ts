@@ -322,6 +322,9 @@ describe('caption_speech verb', () => {
       const { clip, transcript } = await lookup(new Map([[M, RECORDING]]))(clipId);
       return { clip, transcript, media: new Map() };
     },
+    readTimeline: async () => {
+      throw new Error('not used');
+    },
     defaultTrack: 'v0',
   });
 

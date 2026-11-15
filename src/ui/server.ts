@@ -42,6 +42,7 @@ import { CompositionOpError } from '../timeline/ops.js';
 import { ReframeError } from '../timeline/reframe.js';
 import { runPlan } from '../timeline/run-plan.js';
 import type { MediaId } from '../timeline/schema.js';
+import { ShortError } from '../timeline/shorts.js';
 import { SilenceAnalysisError } from '../timeline/silence.js';
 import { TranscriptError, transcribeClip } from '../timeline/transcript.js';
 import { CompositionVerbSchema } from '../timeline/verbs.js';
@@ -60,11 +61,12 @@ import {
 import { clipConfinedMedia, confinedMediaRefs, makeVerbContext } from './timeline-tools.js';
 
 /** Errors about the clip or its setup, not the server: silence removal or
- *  transcription can't work on this clip, whisper.cpp isn't set up, or a
- *  reframe asks for a size or position that can't be. */
+ *  transcription can't work on this clip, whisper.cpp isn't set up, a reframe
+ *  asks for a size or position that can't be, or a short can't be made. */
 function isClipConditionError(err: unknown): boolean {
   return (
     err instanceof ReframeError ||
+    err instanceof ShortError ||
     err instanceof SilenceAnalysisError ||
     err instanceof TranscriptError ||
     err instanceof TranscriptionUnavailableError

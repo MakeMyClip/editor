@@ -1,10 +1,20 @@
 import { randomBytes } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { readdir, readFile, rm } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { atomicWriteFile } from '../session/store.js';
-import { createRevisionedStore } from '../storage/revisioned-store.js';
-import { ensureWorkspace, getWorkspace } from '../workspace.js';
-import { type Composition, CompositionSchema, emptyComposition } from './composition.js';
+import { createRevisionedStore, type RevisionedStore } from '../storage/revisioned-store.js';
+import {
+  ensureWorkspace,
+  getWorkspace,
+  resolveInWorkspace,
+  WorkspaceBoundaryError,
+} from '../workspace.js';
+import {
+  type Composition,
+  CompositionSchema,
+  compositionDuration,
+  emptyComposition,
+} from './composition.js';
 import {
   type DocOpLog,
   type DocOpLogEntry,
@@ -17,17 +27,67 @@ import {
   undo as undoLog,
 } from './doc-op-log.js';
 import { applyOps, applyOpsTracked, type CompositionOp } from './ops.js';
+import { MAIN_TIMELINE, TimelineIdSchema } from './schema.js';
 import { type CompositionVerb, lowerVerbs, type VerbContext } from './verbs.js';
 
+/*
+ * A workspace holds several named timelines. `main` stays at the workspace root
+ * (`composition.json` + `composition-ops.json`), so existing workspaces and older
+ * `clip` versions keep working; every other timeline keeps the same two files in
+ * `timelines/<id>/`. Each timeline has its own rev, write lock and undo history.
+ */
 const COMPOSITION_FILE = 'composition.json';
 const COMPOSITION_OPS_FILE = 'composition-ops.json';
+const TIMELINES_DIR = 'timelines';
 
-export function compositionPath(): string {
-  return resolve(getWorkspace(), COMPOSITION_FILE);
+/** Thrown for a malformed timeline id, or for an operation `main` can't take. */
+export class TimelineIdError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TimelineIdError';
+  }
 }
 
-export function compositionOpsPath(): string {
-  return resolve(getWorkspace(), COMPOSITION_OPS_FILE);
+/** Thrown when a timeline other than `main` doesn't exist. Only `make_short` and
+ *  `clip timeline new --timeline` create one, so a typo can't edit an empty document. */
+export class NoTimelineError extends Error {
+  readonly timeline: string;
+  constructor(timeline: string) {
+    super(
+      `No timeline "${timeline}" in the workspace. List them with \`clip timeline list\` ` +
+        `(timeline_show reports them too). make_short creates a short's timeline.`,
+    );
+    this.name = 'NoTimelineError';
+    this.timeline = timeline;
+  }
+}
+
+function checkedTimelineId(timeline: string): string {
+  const parsed = TimelineIdSchema.safeParse(timeline);
+  if (!parsed.success) {
+    throw new TimelineIdError(
+      `Invalid timeline id "${timeline}". ${parsed.error.issues[0]?.message ?? ''}`.trim(),
+    );
+  }
+  return parsed.data;
+}
+
+function timelineFile(timeline: string, file: string): string {
+  if (checkedTimelineId(timeline) === MAIN_TIMELINE) return resolve(getWorkspace(), file);
+  // Checked against the workspace: `timelines/` could be a symlink out of it.
+  return resolveInWorkspace(join(TIMELINES_DIR, timeline, file));
+}
+
+export function compositionPath(timeline: string = MAIN_TIMELINE): string {
+  return timelineFile(timeline, COMPOSITION_FILE);
+}
+
+export function compositionOpsPath(timeline: string = MAIN_TIMELINE): string {
+  return timelineFile(timeline, COMPOSITION_OPS_FILE);
+}
+
+function isMissingFile(err: unknown): boolean {
+  return err instanceof Error && 'code' in err && (err.code === 'ENOENT' || err.code === 'ENOTDIR');
 }
 
 /** Thrown when composition.json exists but cannot be parsed/validated — surfaced,
@@ -65,31 +125,52 @@ export class CompositionConflictError extends Error {
   }
 }
 
-export async function readComposition(): Promise<Composition> {
+/** The stored document, or null when the timeline has none yet. */
+async function readStoredComposition(timeline: string): Promise<Composition | null> {
   await ensureWorkspace();
+  const path = compositionPath(timeline);
   let raw: string;
   try {
-    raw = await readFile(compositionPath(), 'utf-8');
+    raw = await readFile(path, 'utf-8');
   } catch (err: unknown) {
-    if (err instanceof Error && 'code' in err && err.code === 'ENOENT') return emptyComposition();
+    if (isMissingFile(err)) return null;
     throw err;
   }
   try {
     return CompositionSchema.parse(JSON.parse(raw));
   } catch (err) {
-    throw new CompositionCorruptError(compositionPath(), { cause: err });
+    throw new CompositionCorruptError(path, { cause: err });
   }
 }
 
-export async function writeComposition(comp: Composition): Promise<void> {
-  await atomicWriteFile(compositionPath(), `${JSON.stringify(comp, null, 2)}\n`);
+/** The document an edit starts from. A missing `main` is an empty document (a
+ *  fresh workspace); any other missing timeline is an error unless the edit
+ *  `create`s it. */
+async function readForEdit(timeline: string, create: boolean): Promise<Composition> {
+  const comp = await readStoredComposition(timeline);
+  if (comp) return comp;
+  if (create || timeline === MAIN_TIMELINE) return emptyComposition();
+  throw new NoTimelineError(timeline);
 }
 
-/** On-disk rev, treating a corrupt file as rev 0 — a deliberate overwrite is
- *  about to discard it anyway. Non-corruption read errors still propagate. */
-async function readCompositionRevTolerant(): Promise<number> {
+/** Read a timeline's document (default `main`). Throws `NoTimelineError` for a
+ *  timeline other than `main` that doesn't exist. */
+export async function readComposition(timeline: string = MAIN_TIMELINE): Promise<Composition> {
+  return readForEdit(timeline, false);
+}
+
+export async function writeComposition(
+  comp: Composition,
+  timeline: string = MAIN_TIMELINE,
+): Promise<void> {
+  await atomicWriteFile(compositionPath(timeline), `${JSON.stringify(comp, null, 2)}\n`);
+}
+
+/** On-disk rev, treating a corrupt or missing file as rev 0 — a deliberate
+ *  overwrite is about to replace it anyway. Other read errors still propagate. */
+async function readCompositionRevTolerant(timeline: string): Promise<number> {
   try {
-    return (await readComposition()).rev;
+    return (await readStoredComposition(timeline))?.rev ?? 0;
   } catch (err) {
     if (err instanceof CompositionCorruptError) return 0;
     throw err;
@@ -97,16 +178,26 @@ async function readCompositionRevTolerant(): Promise<number> {
 }
 
 // Serialization + compare-and-swap, shared with the session store (see
-// `storage/revisioned-store.ts`) so co-editing the doc (the agent + `clip ui`)
-// can't silently lose updates.
-const docStore = createRevisionedStore<Composition>({
-  read: readComposition,
-  write: writeComposition,
-  getRev: (comp) => comp.rev,
-  withRev: (comp, rev) => ({ ...comp, rev }),
-  readRevTolerant: readCompositionRevTolerant,
-  onConflict: (expectedRev, actualRev) => new CompositionConflictError(expectedRev, actualRev),
-});
+// `storage/revisioned-store.ts`) so co-editing a timeline (the agent + `clip ui`)
+// can't silently lose updates. One store per timeline, so each has its own lock.
+const stores = new Map<string, RevisionedStore<Composition>>();
+
+function storeFor(timeline: string): RevisionedStore<Composition> {
+  const id = checkedTimelineId(timeline);
+  let store = stores.get(id);
+  if (!store) {
+    store = createRevisionedStore<Composition>({
+      read: () => readComposition(id),
+      write: (comp) => writeComposition(comp, id),
+      getRev: (comp) => comp.rev,
+      withRev: (comp, rev) => ({ ...comp, rev }),
+      readRevTolerant: () => readCompositionRevTolerant(id),
+      onConflict: (expectedRev, actualRev) => new CompositionConflictError(expectedRev, actualRev),
+    });
+    stores.set(id, store);
+  }
+  return store;
+}
 
 // ─── op-log (undo/redo) ──────────────────────────────────────────────────────
 //
@@ -130,13 +221,13 @@ function labelForOps(ops: CompositionOp[]): string {
 /** Read the raw op-log file. Missing OR corrupt → an empty log: undo history is a
  *  convenience, never worth failing a read for. The caller reconciles it against
  *  the authoritative document rev. */
-async function readDocOpLogFile(): Promise<DocOpLog> {
+async function readDocOpLogFile(timeline: string): Promise<DocOpLog> {
   await ensureWorkspace();
   let raw: string;
   try {
-    raw = await readFile(compositionOpsPath(), 'utf-8');
+    raw = await readFile(compositionOpsPath(timeline), 'utf-8');
   } catch (err: unknown) {
-    if (err instanceof Error && 'code' in err && err.code === 'ENOENT') return emptyDocOpLog(0);
+    if (isMissingFile(err)) return emptyDocOpLog(0);
     throw err;
   }
   try {
@@ -146,8 +237,8 @@ async function readDocOpLogFile(): Promise<DocOpLog> {
   }
 }
 
-async function writeDocOpLog(log: DocOpLog): Promise<void> {
-  await atomicWriteFile(compositionOpsPath(), serializeDocOpLog(log));
+async function writeDocOpLog(log: DocOpLog, timeline: string): Promise<void> {
+  await atomicWriteFile(compositionOpsPath(timeline), serializeDocOpLog(log));
 }
 
 /** The op-log reconciled against the current document rev — the trustworthy view
@@ -155,10 +246,10 @@ async function writeDocOpLog(log: DocOpLog): Promise<void> {
  *  inside the store's exclusive section so an interleaved IN-PROCESS commit can't
  *  make a consistent log momentarily read as empty (cross-process reads stay
  *  best-effort, as everywhere in this store). */
-export async function readDocOpLog(): Promise<DocOpLog> {
-  return docStore.runExclusive(async () => {
-    const docRev = (await readComposition()).rev;
-    return reconcile(await readDocOpLogFile(), docRev);
+export async function readDocOpLog(timeline: string = MAIN_TIMELINE): Promise<DocOpLog> {
+  return storeFor(timeline).runExclusive(async () => {
+    const docRev = (await readComposition(timeline)).rev;
+    return reconcile(await readDocOpLogFile(timeline), docRev);
   });
 }
 
@@ -176,19 +267,21 @@ export async function readDocOpLog(): Promise<DocOpLog> {
  * shipping surface).
  */
 async function commitDocAndLog<T>(
+  timeline: string,
+  create: boolean,
   derive: (
     doc: Composition,
     log: DocOpLog,
   ) => { doc: Composition; log: DocOpLog; result: T } | null,
 ): Promise<{ doc: Composition; result: T } | null> {
-  return docStore.runExclusive(async () => {
+  return storeFor(timeline).runExclusive(async () => {
     for (let attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
-      const current = await readComposition();
-      const log = reconcile(await readDocOpLogFile(), current.rev);
+      const current = await readForEdit(timeline, create);
+      const log = reconcile(await readDocOpLogFile(timeline), current.rev);
       const derived = derive(current, log);
       if (derived === null) return null;
 
-      const observed = (await readComposition()).rev;
+      const observed = (await readForEdit(timeline, create)).rev;
       if (observed !== current.rev) {
         if (attempt === MAX_COMMIT_ATTEMPTS) {
           throw new CompositionConflictError(current.rev, observed);
@@ -199,8 +292,8 @@ async function commitDocAndLog<T>(
       const nextRev = current.rev + 1;
       const committedDoc = { ...derived.doc, rev: nextRev };
       const committedLog = { ...derived.log, rev: nextRev };
-      await writeDocOpLog(committedLog);
-      await writeComposition(committedDoc);
+      await writeDocOpLog(committedLog, timeline);
+      await writeComposition(committedDoc, timeline);
       return { doc: committedDoc, result: derived.result };
     }
     throw new CompositionConflictError(-1, -1);
@@ -211,14 +304,18 @@ async function commitDocAndLog<T>(
  * Read → apply ops → write, returning the new composition, and record the batch
  * (with its computed inverse) to the op-log so the edit is undoable. Serialized +
  * rev compare-and-swap via the shared revisioned store, so the agent and the UI
- * can co-edit without lost updates. An empty batch is a true no-op.
+ * can co-edit without lost updates. An empty batch is a true no-op. `timeline`
+ * defaults to `main`; `create` lets the edit start a timeline that doesn't exist
+ * yet (from an empty document) instead of throwing `NoTimelineError`.
  */
 export async function mutateComposition(
   ops: CompositionOp[],
-  opts?: { expectedBaseRev?: number },
+  opts?: { expectedBaseRev?: number; timeline?: string; create?: boolean },
 ): Promise<Composition> {
-  if (ops.length === 0) return readComposition();
-  const committed = await commitDocAndLog((current, log) => {
+  const timeline = opts?.timeline ?? MAIN_TIMELINE;
+  const create = opts?.create ?? false;
+  if (ops.length === 0) return readForEdit(timeline, create);
+  const committed = await commitDocAndLog(timeline, create, (current, log) => {
     // Optimistic-concurrency guard for callers whose ops were lowered against a
     // specific revision (e.g. `applyVerbs`, where a default append point is baked
     // from a snapshot read): if the doc moved under us, reject so the caller can
@@ -235,7 +332,7 @@ export async function mutateComposition(
     };
     return { doc, log: recordOps(log, entry), result: null };
   });
-  return committed ? committed.doc : readComposition();
+  return committed ? committed.doc : readForEdit(timeline, create);
 }
 
 /**
@@ -243,12 +340,16 @@ export async function mutateComposition(
  * op-aware mutation path the agent and `clip ui` share. Lowering (which ingests
  * files and mints ids) runs outside the write lock; `mutateComposition` then
  * validates, applies, and records the ops (so the edit lands in the undo stack).
- * Returns the new document and the ops that were applied.
+ * Returns the new document and the ops that were applied. Edits `timeline`
+ * (default `main`), which must exist unless the batch starts with `make_short`.
  */
 export async function applyVerbs(
   verbs: CompositionVerb[],
   ctx: VerbContext,
+  timeline: string = MAIN_TIMELINE,
 ): Promise<{ doc: Composition; ops: CompositionOp[] }> {
+  const create = verbs[0]?.verb === 'make_short';
+  const editCtx: VerbContext = { ...ctx, timeline };
   // The default append point (`trackEnd`) is baked from the snapshot we lower
   // against, so if another in-process writer commits between the read and the
   // apply, re-lower against the fresh doc rather than land overlapping clips. A
@@ -257,10 +358,14 @@ export async function applyVerbs(
   // a burst of N concurrent edits each re-lower and land instead of the (N-cap)
   // tail silently losing to a `CompositionConflictError`.
   for (let attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
-    const current = await readComposition();
-    const ops = await lowerVerbs(current, verbs, ctx);
+    const current = await readForEdit(timeline, create);
+    const ops = await lowerVerbs(current, verbs, editCtx);
     try {
-      const doc = await mutateComposition(ops, { expectedBaseRev: current.rev });
+      const doc = await mutateComposition(ops, {
+        expectedBaseRev: current.rev,
+        timeline,
+        create,
+      });
       return { doc, ops };
     } catch (err) {
       if (err instanceof CompositionConflictError && attempt < MAX_COMMIT_ATTEMPTS) continue;
@@ -273,33 +378,33 @@ export async function applyVerbs(
 
 /** Undo the most recent recorded edit (apply its inverse), moving the op-log
  *  cursor back. `undone: false` when there is nothing to undo. */
-export async function undoLastDocOp(): Promise<{
+export async function undoLastDocOp(timeline: string = MAIN_TIMELINE): Promise<{
   undone: boolean;
   doc: Composition;
   label: string | null;
 }> {
-  const committed = await commitDocAndLog((current, log) => {
+  const committed = await commitDocAndLog(timeline, false, (current, log) => {
     const step = undoLog(log);
     if (!step) return null;
     return { doc: applyOps(current, step.entry.inverse), log: step.log, result: step.entry.label };
   });
-  if (!committed) return { undone: false, doc: await readComposition(), label: null };
+  if (!committed) return { undone: false, doc: await readComposition(timeline), label: null };
   return { undone: true, doc: committed.doc, label: committed.result };
 }
 
 /** Redo the most recently undone edit (re-apply its forward ops), moving the
  *  cursor forward. `redone: false` when there is nothing to redo. */
-export async function redoDocOp(): Promise<{
+export async function redoDocOp(timeline: string = MAIN_TIMELINE): Promise<{
   redone: boolean;
   doc: Composition;
   label: string | null;
 }> {
-  const committed = await commitDocAndLog((current, log) => {
+  const committed = await commitDocAndLog(timeline, false, (current, log) => {
     const step = redoLog(log);
     if (!step) return null;
     return { doc: applyOps(current, step.entry.forward), log: step.log, result: step.entry.label };
   });
-  if (!committed) return { redone: false, doc: await readComposition(), label: null };
+  if (!committed) return { redone: false, doc: await readComposition(timeline), label: null };
   return { redone: true, doc: committed.doc, label: committed.result };
 }
 
@@ -318,9 +423,10 @@ export async function redoDocOp(): Promise<{
 export async function writeCompositionIfUnchanged(
   comp: Composition,
   expectedRev: number,
+  timeline: string = MAIN_TIMELINE,
 ): Promise<Composition> {
-  const committed = await docStore.writeIfUnchanged(comp, expectedRev);
-  await writeDocOpLog(emptyDocOpLog(committed.rev));
+  const committed = await storeFor(timeline).writeIfUnchanged(comp, expectedRev);
+  await writeDocOpLog(emptyDocOpLog(committed.rev), timeline);
   return committed;
 }
 
@@ -332,12 +438,12 @@ export async function writeCompositionIfUnchanged(
  * replay an inverse against the wrong document. Log-first ordering (the seeded
  * log is empty anyway, so a crash resolves to the same empty history).
  */
-async function overwriteDocAndResetLog(comp: Composition): Promise<Composition> {
-  return docStore.runExclusive(async () => {
-    const baseRev = await readCompositionRevTolerant();
+async function overwriteDocAndResetLog(comp: Composition, timeline: string): Promise<Composition> {
+  return storeFor(timeline).runExclusive(async () => {
+    const baseRev = await readCompositionRevTolerant(timeline);
     const committed: Composition = { ...comp, rev: baseRev + 1 };
-    await writeDocOpLog(emptyDocOpLog(committed.rev));
-    await writeComposition(committed);
+    await writeDocOpLog(emptyDocOpLog(committed.rev), timeline);
+    await writeComposition(committed, timeline);
     return committed;
   });
 }
@@ -348,12 +454,85 @@ async function overwriteDocAndResetLog(comp: Composition): Promise<Composition> 
  * recovered). Resets undo history — a recovered document has none — and advances
  * `rev` so a stale log can never collide with the new revision.
  */
-export function overwriteComposition(comp: Composition = emptyComposition()): Promise<Composition> {
-  return overwriteDocAndResetLog(comp);
+export function overwriteComposition(
+  comp: Composition = emptyComposition(),
+  timeline: string = MAIN_TIMELINE,
+): Promise<Composition> {
+  return overwriteDocAndResetLog(comp, timeline);
 }
 
 /** Start a fresh timeline (`clip timeline new`): replace the document, clear undo
- *  history, and advance `rev` past the previous one (never reuse a rev). */
-export function resetComposition(comp: Composition = emptyComposition()): Promise<Composition> {
-  return overwriteDocAndResetLog(comp);
+ *  history, and advance `rev` past the previous one (never reuse a rev). Creates
+ *  `timeline` when it doesn't exist yet. */
+export function resetComposition(
+  comp: Composition = emptyComposition(),
+  timeline: string = MAIN_TIMELINE,
+): Promise<Composition> {
+  return overwriteDocAndResetLog(comp, timeline);
+}
+
+// ─── the workspace's timelines ───────────────────────────────────────────────
+
+/** A timeline in the workspace, or one whose document can't be read. */
+export type TimelineListing =
+  | { id: string; width: number; height: number; durationSec: number; rev: number }
+  | { id: string; error: string };
+
+/** `main` first, then every `timelines/<id>/` holding a document, by id. A
+ *  document that can't be read is listed with its error instead of failing the
+ *  list; a `timelines/` folder that leads out of the workspace is refused. */
+export async function listTimelines(): Promise<TimelineListing[]> {
+  await ensureWorkspace();
+  const listed: TimelineListing[] = [];
+  for (const id of [MAIN_TIMELINE, ...(await timelineFolders())]) {
+    try {
+      const comp = await readStoredComposition(id);
+      if (!comp && id !== MAIN_TIMELINE) continue;
+      const doc = comp ?? emptyComposition();
+      listed.push({
+        id,
+        width: doc.width,
+        height: doc.height,
+        durationSec: compositionDuration(doc),
+        rev: doc.rev,
+      });
+    } catch (err) {
+      if (!(err instanceof CompositionCorruptError || err instanceof WorkspaceBoundaryError)) {
+        throw err;
+      }
+      listed.push({ id, error: err.message });
+    }
+  }
+  return listed;
+}
+
+async function timelineFolders(): Promise<string[]> {
+  let names: string[];
+  try {
+    names = await readdir(resolveInWorkspace(TIMELINES_DIR));
+  } catch (err) {
+    if (isMissingFile(err)) return [];
+    throw err;
+  }
+  return names
+    .filter((name) => name !== MAIN_TIMELINE && TimelineIdSchema.safeParse(name).success)
+    .sort();
+}
+
+/** Remove a timeline and its undo history. `main` can't be deleted. */
+export async function deleteTimeline(timeline: string): Promise<void> {
+  if (checkedTimelineId(timeline) === MAIN_TIMELINE) {
+    throw new TimelineIdError(
+      "The main timeline can't be deleted. Start it over with `clip timeline new`.",
+    );
+  }
+  await storeFor(timeline).runExclusive(async () => {
+    try {
+      if (!(await readStoredComposition(timeline))) throw new NoTimelineError(timeline);
+    } catch (err) {
+      // A corrupt document is deleted like any other.
+      if (!(err instanceof CompositionCorruptError)) throw err;
+    }
+    await rm(dirname(compositionPath(timeline)), { recursive: true, force: true });
+  });
 }

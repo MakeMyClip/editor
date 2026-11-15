@@ -7,6 +7,7 @@ import {
   type Fit,
   findClip,
 } from '../timeline/composition.js';
+import { readComposition } from '../timeline/document-store.js';
 import { buildMediaMap, buildMediaRefs } from '../timeline/media-registry.js';
 import { ownFraming } from '../timeline/reframe.js';
 import type { MediaId, MediaRef } from '../timeline/schema.js';
@@ -33,6 +34,7 @@ export function makeVerbContext(): VerbContext {
       });
       return { mediaId: result.mediaId, durationSec: result.ref.durationSec };
     },
+    readTimeline: (timeline) => readComposition(timeline),
     analyzeSilence: async (comp, clipId, sensitivity) =>
       analyzeSilence(comp, clipId, { media: await clipConfinedMedia(comp, clipId), sensitivity }),
     transcript: async (comp, clipId, transcriptId) => {

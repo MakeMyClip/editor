@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildMcpServer } from '../src/mcp/server.js';
+import { appendOp } from '../src/session/store.js';
+import { mutateComposition, readComposition } from '../src/timeline/document-store.js';
+import { mediaClip, videoTrack } from '../src/timeline/ops.js';
+import { makeMediaId } from '../src/timeline/schema.js';
+import type { Transcript } from '../src/timeline/transcript.js';
 
 const pkg = createRequire(import.meta.url)('../package.json') as { version: string };
 
@@ -215,6 +220,132 @@ describe('MCP server', () => {
         await client.callTool({ name: 'timeline_export', arguments: { format: 'xmeml' } }),
       );
       expect(String(empty.error)).toMatch(/Nothing to export/);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('MCP shorts (named timelines)', () => {
+  /** Main holds a 30 s registered recording with a stored transcript: nothing renders. */
+  async function recordingOnMain(): Promise<void> {
+    const source = join(workspace, 'talk.mp4');
+    await writeFile(source, 'video bytes');
+    const mediaId = makeMediaId(source);
+    await appendOp({
+      tool: 'ingest',
+      args: { path: source },
+      result: {
+        mediaId,
+        ref: { path: source, durationSec: 30, audio: { codec: 'aac' }, video: { codec: 'h264' } },
+      },
+    });
+    const file = await stat(source);
+    const transcript: Transcript = {
+      version: 1,
+      mediaId,
+      language: 'en',
+      source: 'whisper-cpp',
+      model: 'ggml-tiny.en.bin',
+      modelKey: 'fixture',
+      requestedLanguage: 'auto',
+      sourceSize: file.size,
+      sourceMtimeMs: file.mtimeMs,
+      words: Array.from({ length: 20 }, (_, i) => ({
+        text: `word${i}`,
+        startSec: i + 1,
+        endSec: i + 1.5,
+      })),
+    };
+    await mkdir(join(workspace, 'transcripts'), { recursive: true });
+    await writeFile(join(workspace, 'transcripts', `${mediaId}.json`), JSON.stringify(transcript));
+    await mutateComposition([
+      { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'c1', mediaId, sourceOutSec: 30, startSec: 0 }),
+      },
+    ]);
+  }
+
+  it('makes a short on its own timeline with timeline_edit, leaving main alone', async () => {
+    await recordingOnMain();
+    const mainBefore = await readComposition();
+    const { client, close } = await connect();
+    try {
+      const edit = payload(
+        await client.callTool({
+          name: 'timeline_edit',
+          arguments: {
+            timeline: 'clip-1',
+            verbs: [
+              {
+                verb: 'make_short',
+                ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 6 }],
+                x: 0.4,
+              },
+            ],
+          },
+        }),
+      );
+      const doc = edit.document as Record<string, unknown>;
+      expect(doc.timeline).toBe('clip-1');
+      expect(doc.canvas).toMatchObject({ width: 1080, height: 1920, fit: 'cover' });
+      expect(doc.loudness).toEqual({ targetLufs: -14 });
+      expect(doc.exportable).toBe(true);
+      expect((doc.tracks as { id: string }[]).map((t) => t.id)).toEqual(['v0', 'captions']);
+      expect(await readComposition()).toEqual(mainBefore);
+
+      const show = payload(await client.callTool({ name: 'timeline_show', arguments: {} }));
+      expect(show.timeline).toBe('main');
+      expect(show.timelines).toEqual(['main', 'clip-1']);
+
+      const undo = payload(
+        await client.callTool({ name: 'timeline_undo', arguments: { timeline: 'clip-1' } }),
+      );
+      expect(undo.undone).toBe(true);
+      const emptied = payload(
+        await client.callTool({ name: 'timeline_show', arguments: { timeline: 'clip-1' } }),
+      );
+      expect(emptied.tracks).toEqual([]);
+      expect((await readComposition()).rev).toBe(mainBefore.rev);
+    } finally {
+      await close();
+    }
+  });
+
+  it('answers a missing timeline or a short on main with an error', async () => {
+    await recordingOnMain();
+    const { client, close } = await connect();
+    try {
+      for (const name of ['timeline_show', 'timeline_check', 'timeline_undo', 'timeline_export']) {
+        const result = payload(await client.callTool({ name, arguments: { timeline: 'nope' } }));
+        expect(result.error).toMatch(/No timeline "nope"/);
+      }
+      const typo = payload(
+        await client.callTool({
+          name: 'timeline_edit',
+          arguments: { timeline: 'nope', verbs: [{ verb: 'remove', clipId: 'c1' }] },
+        }),
+      );
+      expect(typo.error).toMatch(/No timeline "nope"/);
+
+      const onMain = payload(
+        await client.callTool({
+          name: 'timeline_edit',
+          arguments: {
+            verbs: [{ verb: 'make_short', ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 6 }] }],
+          },
+        }),
+      );
+      expect(onMain.error).toMatch(/not main/);
+
+      const badId = await client.callTool({
+        name: 'timeline_show',
+        arguments: { timeline: '../main' },
+      });
+      expect(badId.isError).toBe(true);
     } finally {
       await close();
     }
