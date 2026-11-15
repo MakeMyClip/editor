@@ -400,6 +400,59 @@ function segPath(dir: string, index: number, clipId: string, tag?: string): stri
 }
 
 /**
+ * A clip's segment filters after its input: the video chain (framing onto the
+ * canvas, a text clip's own text, effects, then the text over it) and the audio
+ * effects. Shared by export and the frame preview, so a preview can't drift
+ * from what export draws.
+ */
+function clipChains(
+  comp: Composition,
+  clip: Clip,
+  index: number,
+  ctx: CompileContext,
+  overlays: TextClip[],
+  fadeSuppress: FadeSuppression = { in: false, out: false },
+): { chain: string; audio: string[]; textFiles: StepSideFile[] } {
+  const outDur = outputDuration(clip);
+  const { width, height, fps, background } = comp;
+  const { video: fx, audio } = effectFilters(clip, outDur, fadeSuppress);
+  const textFiles: StepSideFile[] = [];
+
+  if (clip.kind === 'text') {
+    const textfile = resolve(ctx.dir, `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}.txt`);
+    textFiles.push({ path: textfile, content: clip.text });
+    fx.unshift(drawtextFilter(textfile, clip, fontFor(ctx, clip, false)));
+  }
+
+  // Overlay times are timeline seconds; the segment runs in output time, which
+  // a speed effect scales.
+  const ratio = clipDuration(clip) > 0 ? outDur / clipDuration(clip) : 1;
+  const end = clipEndSec(clip);
+  for (const overlay of overlays) {
+    const from = Math.max(overlay.startSec, clip.startSec);
+    const to = Math.min(clipEndSec(overlay), end);
+    if (to - from <= ABUT_EPSILON) continue;
+    const textfile = resolve(
+      ctx.dir,
+      `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}-${overlay.id}.txt`,
+    );
+    textFiles.push({ path: textfile, content: overlay.text });
+    const window = `gte(t,${seconds((from - clip.startSec) * ratio)})*lt(t,${seconds((to - clip.startSec) * ratio)})`;
+    fx.push(drawtextFilter(textfile, overlay, fontFor(ctx, overlay, true), window));
+  }
+
+  // Geometry first: frame onto the canvas, square pixels, lock fps. (No-op-ish
+  // for generated sources that are already canvas-sized, but keeps the chain uniform.)
+  const geometry = [
+    ...framingFilters(clipFraming(comp, clip), width, height, background),
+    'setsar=1',
+    `fps=${fps}`,
+    'format=yuv420p',
+  ];
+  return { chain: [...geometry, ...fx].join(','), audio, textFiles };
+}
+
+/**
  * Normalize one clip to a self-contained segment: canvas-sized video at the
  * composition fps, effects baked in, and a guaranteed stereo AAC audio track
  * (the source's, or generated silence) so the fold can always join segments.
@@ -419,8 +472,14 @@ function buildSegmentStep(
   const outDur = outputDuration(clip);
   const { width, height, fps, background } = comp;
   const out = segPath(ctx.dir, index, clip.id, ctx.tag);
-  const { video: fx, audio: afx } = effectFilters(clip, outDur, fadeSuppress);
-  const textFiles: StepSideFile[] = [];
+  const { chain: videoChain, audio: afx, textFiles } = clipChains(
+    comp,
+    clip,
+    index,
+    ctx,
+    overlays,
+    fadeSuppress,
+  );
 
   const inputArgs: string[] = [];
   let videoSource: string; // filtergraph input label feeding the video chain, e.g. [0:v]
@@ -475,38 +534,8 @@ function buildSegmentStep(
     );
     videoSource = '[0:v]';
     audioSource = '1:a';
-    const textfile = resolve(ctx.dir, `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}.txt`);
-    textFiles.push({ path: textfile, content: clip.text });
-    fx.unshift(drawtextFilter(textfile, clip, fontFor(ctx, clip, false)));
   }
 
-  // Overlay times are timeline seconds; the segment runs in output time, which
-  // a speed effect scales.
-  const ratio = clipDuration(clip) > 0 ? outDur / clipDuration(clip) : 1;
-  const end = clipEndSec(clip);
-  for (const overlay of overlays) {
-    const from = Math.max(overlay.startSec, clip.startSec);
-    const to = Math.min(clipEndSec(overlay), end);
-    if (to - from <= ABUT_EPSILON) continue;
-    const textfile = resolve(
-      ctx.dir,
-      `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}-${overlay.id}.txt`,
-    );
-    textFiles.push({ path: textfile, content: overlay.text });
-    const window = `gte(t,${seconds((from - clip.startSec) * ratio)})*lt(t,${seconds((to - clip.startSec) * ratio)})`;
-    fx.push(drawtextFilter(textfile, overlay, fontFor(ctx, overlay, true), window));
-  }
-
-  // Geometry first: frame onto the canvas, square pixels, lock fps. (No-op-ish
-  // for generated sources that are already canvas-sized, but keeps the chain uniform.)
-  const geometry = [
-    ...framingFilters(clipFraming(comp, clip), width, height, background),
-    'setsar=1',
-    `fps=${fps}`,
-    'format=yuv420p',
-  ];
-
-  const videoChain = [...geometry, ...fx].join(',');
   // Always normalize audio to a uniform stereo/48k layout BEFORE any effects, so
   // the fold's concat/acrossfade can't silently downmix when a source clip is
   // mono (and so every segment exposes a real [a] output). aformat is a harmless
@@ -692,18 +721,18 @@ function assertAbutting(clips: Clip[]): void {
 
 /**
  * Render ONE frame at timeline time `atSec` — the agent's "eyes" on the doc.
- * Goes through the REAL segment path (`buildSegmentStep`) so the preview can't
- * diverge from what export would produce, then extracts a still from that
- * normalized segment. Two steps: encode the active clip's segment, then grab the
- * frame at the mapped offset. Runs the SAME abutting check as export, so it fails
- * (rather than guessing a clip) on an unexportable doc; throws `CompileError` past
- * the end, in a gap, or on an overlap, and inherits the v1 single-video-track /
- * no-compositing guards.
+ * Uses the segment's own video chain (`clipChains`) so the preview can't diverge
+ * from what export would produce. A media clip is one step: seek the source to
+ * the frame and run the chain on a window starting there, with the timestamps
+ * offset so fades and text windows read the time they would in the segment, so
+ * the cost doesn't grow with the clip's length. A text or color card (generated,
+ * and short) is two: encode its segment, then grab the frame from it. Runs the
+ * SAME abutting check as export, so it fails (rather than guessing a clip) on an
+ * unexportable doc; throws `CompileError` past the end, in a gap, or on an
+ * overlap, and inherits the v1 single-video-track / no-compositing guards.
  *
- * Known v1 limits (flag, don't fix here): a frame inside a transition window
- * shows the underlying clip, not the xfade blend; `-ss` is keyframe-accurate
- * (off by up to a GOP) — fine for a thumbnail; and a long clip re-encodes a whole
- * segment to grab one frame.
+ * Known v1 limit (flag, don't fix here): a frame inside a transition window
+ * shows the underlying clip, not the xfade blend.
  */
 export function buildFrameAtPlan(
   comp: Composition,
@@ -728,9 +757,6 @@ export function buildFrameAtPlan(
   }
   assertCompilable(clip);
 
-  // Encode the clip's segment exactly as export would, then extract the frame.
-  const segStep = buildSegmentStep(comp, clip, index, ctx, overlays);
-
   // Map doc-local time to the post-speed SEGMENT timebase. The ratio is 1 unless
   // the clip carries a speed effect, which shortens the segment relative to the
   // document extent — so a frame still lands on the source content the document
@@ -741,9 +767,40 @@ export function buildFrameAtPlan(
   const segTime = clipDur > 0 ? (localDoc * outDur) / clipDur : 0;
   const lastFrame = Math.max(0, outDur - 1 / comp.fps);
   const clamped = Math.max(0, Math.min(segTime, lastFrame));
+  const label = `frame:${clip.id}@${atSec}`;
 
+  if (clip.kind === 'media') {
+    const info = ctx.media.get(clip.mediaId);
+    if (!info) {
+      throw new CompileError(`No media registered for "${clip.mediaId}" (clip "${clip.id}").`);
+    }
+    // Seconds into the clip's source. The chain's speed `setpts` divides the
+    // offset back into segment time, which is what its fades and text read.
+    const local = Math.round(clamped * speedFactor(clip.effects) * 1000) / 1000;
+    const { chain, textFiles } = clipChains(comp, clip, index, ctx, overlays);
+    const frameStep: FfmpegStep = {
+      label,
+      args: [
+        '-y',
+        '-ss',
+        seconds(clip.sourceInSec + local),
+        '-i',
+        info.path,
+        '-filter_complex',
+        `[0:v]setpts=PTS-STARTPTS+${local}/TB,${chain}[v]`,
+        ...['-map', '[v]', '-an', '-frames:v', '1', '-q:v', '2'],
+        ctx.output,
+      ],
+      output: ctx.output,
+      textFiles,
+    };
+    return { steps: [frameStep], output: ctx.output, durationSec: 0 };
+  }
+
+  // Encode the card's segment exactly as export would, then extract the frame.
+  const segStep = buildSegmentStep(comp, clip, index, ctx, overlays);
   const frameStep: FfmpegStep = {
-    label: `frame:${clip.id}@${atSec}`,
+    label,
     args: buildPreviewFrameArgs({ input: segStep.output, output: ctx.output, atSec: clamped }),
     output: ctx.output,
     textFiles: [],

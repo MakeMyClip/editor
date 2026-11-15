@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildFrameAtPlan, CompileError, type MediaInfo } from '../src/timeline/compile.js';
+import {
+  buildFrameAtPlan,
+  CompileError,
+  compileTimeline,
+  type MediaInfo,
+} from '../src/timeline/compile.js';
 import { clipsAtTime, emptyComposition } from '../src/timeline/composition.js';
 import { applyOps, mediaClip, textClip, videoTrack } from '../src/timeline/ops.js';
 import type { MediaId } from '../src/timeline/schema.js';
@@ -65,18 +70,48 @@ describe('buildFrameAtPlan', () => {
     ]);
   }
 
-  it('encodes the clip segment then extracts the frame at the doc-local offset', () => {
-    const plan = buildFrameAtPlan(oneClip(), CTX('/ws/frame.jpg'), 3);
-    expect(plan.steps).toHaveLength(2);
-    const [seg, frame] = plan.steps;
-    expect(seg?.label).toBe('segment:c1');
-    expect(frame?.label).toContain('frame:c1');
-    expect(frame?.output).toBe('/ws/frame.jpg');
-    // -ss <offset> -i <segment> … <output>
-    expect(frame?.args.slice(0, 2)).toEqual(['-y', '-ss']);
-    expect(Number(frame?.args[2])).toBeCloseTo(3);
-    expect(frame?.args[4]).toBe(seg?.output); // reads the encoded segment
-    expect(frame?.args.at(-1)).toBe('/ws/frame.jpg');
+  /** The `-filter_complex` graph of a step. */
+  const graphOf = (args: string[] | undefined): string =>
+    args?.[(args?.indexOf('-filter_complex') ?? -2) + 1] ?? '';
+
+  it('renders a media frame in one step from the source, through the segment chain', () => {
+    const doc = applyOps(oneClip(), [
+      { op: 'addEffect', clipId: 'c1', effect: { type: 'fadeIn', durationSec: 1 } },
+    ]);
+    const plan = buildFrameAtPlan(doc, CTX('/ws/frame.jpg'), 3);
+    expect(plan.steps).toHaveLength(1);
+    const [frame] = plan.steps;
+    expect(frame?.label).toBe('frame:c1@3');
+    expect(frame?.args.slice(0, 5)).toEqual(['-y', '-ss', '3', '-i', '/in.mp4']);
+    expect(frame?.args.slice(-8)).toEqual([
+      '-map',
+      '[v]',
+      '-an',
+      '-frames:v',
+      '1',
+      '-q:v',
+      '2',
+      '/ws/frame.jpg',
+    ]);
+    // The same video chain export runs, on timestamps offset to the frame's time.
+    const exported = graphOf(compileTimeline(doc, CTX('/ws/out.mp4')).steps[0]?.args);
+    const segmentChain = exported.slice('[0:v]'.length, exported.indexOf('[v]'));
+    expect(graphOf(frame?.args)).toBe(`[0:v]setpts=PTS-STARTPTS+3/TB,${segmentChain}[v]`);
+  });
+
+  it('seeks into the source from the clip in-point and stops at its last frame', () => {
+    const doc = applyOps(emptyComposition(), [
+      { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'c1', mediaId: M, sourceInSec: 100, sourceOutSec: 108, startSec: 0 }),
+      },
+    ]);
+    const near = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 7.999).steps[0];
+    // 30 fps: the last frame starts at 8 - 1/30 s.
+    expect(near?.args.slice(1, 3)).toEqual(['-ss', '107.967']);
+    expect(graphOf(near?.args)).toMatch(/^\[0:v\]setpts=PTS-STARTPTS\+7\.967\/TB,/);
   });
 
   it('frames the picture the way export does (fit, zoom, position)', () => {
@@ -90,9 +125,17 @@ describe('buildFrameAtPlan', () => {
     expect(graph).toContain("crop=w='min(iw,1080)':h='min(ih,1920)':x='(iw-ow)*0'");
   });
 
-  it('a tagged context gives the segment a collision-free path; untagged stays stable', () => {
+  it('a tagged context gives a card segment a collision-free path; untagged stays stable', () => {
+    const card = applyOps(emptyComposition(), [
+      { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: textClip({ id: 'c1', text: 'hi', durationSec: 8, startSec: 0 }),
+      },
+    ]);
     const segOut = (tag?: string) =>
-      buildFrameAtPlan(oneClip(), { ...CTX('/ws/frame.jpg'), tag }, 3).steps[0]?.output;
+      buildFrameAtPlan(card, { ...CTX('/ws/frame.jpg'), tag }, 3).steps[0]?.output;
     // Untagged keeps the deterministic name export also uses.
     expect(segOut()).toBe('/ws/tl-seg-0-c1.mp4');
     // A tag is mixed in, so a preview can't overwrite/unlink an export's segment…
@@ -106,12 +149,13 @@ describe('buildFrameAtPlan', () => {
       {
         op: 'addClip',
         trackId: 'v0',
-        clip: mediaClip({ id: 'c2', mediaId: M, sourceOutSec: 4, startSec: 8 }),
+        clip: mediaClip({ id: 'c2', mediaId: M, sourceInSec: 1, sourceOutSec: 5, startSec: 8 }),
       },
     ]);
     const plan = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 10); // 2s into c2 ([8,12))
-    expect(plan.steps[0]?.label).toBe('segment:c2');
-    expect(Number(plan.steps[1]?.args[2])).toBeCloseTo(2);
+    expect(plan.steps[0]?.label).toBe('frame:c2@10');
+    expect(plan.steps[0]?.args.slice(1, 3)).toEqual(['-ss', '3']);
+    expect(graphOf(plan.steps[0]?.args)).toMatch(/^\[0:v\]setpts=PTS-STARTPTS\+2\/TB,/);
   });
 
   it('maps doc-local time to the post-speed segment timebase for a speed clip', () => {
@@ -130,8 +174,13 @@ describe('buildFrameAtPlan', () => {
         }),
       },
     ]);
-    const plan = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 4);
-    expect(Number(plan.steps[1]?.args[2])).toBeCloseTo(2);
+    // The frame shows source second 4; the chain's setpts=PTS/2 turns the +4 s
+    // offset into segment time 2, which the fades and text windows read.
+    const frame = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 4).steps[0];
+    expect(frame?.args.slice(1, 3)).toEqual(['-ss', '4']);
+    const graph = graphOf(frame?.args);
+    expect(graph).toMatch(/^\[0:v\]setpts=PTS-STARTPTS\+4\/TB,/);
+    expect(graph).toContain('setpts=PTS/2');
   });
 
   it('works on a text clip (no media required)', () => {
