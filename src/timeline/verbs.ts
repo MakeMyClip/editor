@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DEFAULT_CAPTION_TRACK, DEFAULT_CAPTION_WORDS, planCaptions } from './captions.js';
+import { ColorSchema } from './color.js';
 import type { MediaInfo } from './compile.js';
 import {
   AnchorSchema,
@@ -109,7 +110,9 @@ const EDITABLE_VERB_SCHEMAS = [
         'Optional clip id — supply one to reference this clip in a later verb of the SAME batch.',
       ),
     durationSec: z.number().positive(),
-    color: z.string().optional().describe('Card color (default black).'),
+    color: ColorSchema.optional().describe(
+      'Card color: a name like black or white, or hex like #ffcc00 (default black).',
+    ),
     track: z.string().optional(),
     startSec: z.number().nonnegative().optional(),
   }),
