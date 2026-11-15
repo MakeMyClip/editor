@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { MissingFontError } from '../src/ffmpeg/font.js';
-import { type CompileContext, CompileError, compileTimeline } from '../src/timeline/compile.js';
-import { emptyComposition } from '../src/timeline/composition.js';
+import {
+  buildFrameAtPlan,
+  type CompileContext,
+  CompileError,
+  clipFraming,
+  compileTimeline,
+} from '../src/timeline/compile.js';
+import { type Composition, emptyComposition } from '../src/timeline/composition.js';
 import { applyOps, colorClip, mediaClip, textClip, videoTrack } from '../src/timeline/ops.js';
 import type { MediaId } from '../src/timeline/schema.js';
 import { parseFilter } from './ffmpeg-parse.js';
@@ -305,16 +311,47 @@ describe('compileTimeline — v1 guards (explicit, not silent-wrong)', () => {
     expect(() => compileTimeline(comp, ctx())).toThrow(/single video track/i);
   });
 
-  it('rejects a non-identity transform', () => {
+  it('rejects a rotated or partly transparent clip', () => {
+    for (const transform of [{ rotationDeg: 90 }, { opacity: 0.5 }]) {
+      const comp = oneTrack(
+        {
+          op: 'addClip',
+          trackId: 'v0',
+          clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 0 }),
+        },
+        { op: 'setTransform', clipId: 'a', transform },
+      );
+      expect(() => compileTimeline(comp, ctx())).toThrow(/rotation and opacity/i);
+    }
+  });
+
+  it('rejects a position outside 0..1', () => {
     const comp = oneTrack(
       {
         op: 'addClip',
         trackId: 'v0',
         clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 0 }),
       },
-      { op: 'setTransform', clipId: 'a', transform: { scale: 2 } },
+      { op: 'setTransform', clipId: 'a', transform: { x: 1.2 } },
     );
-    expect(() => compileTimeline(comp, ctx())).toThrow(/transform/i);
+    expect(() => compileTimeline(comp, ctx())).toThrow(/between 0 and 1/);
+  });
+
+  it('rejects a zoom or position on a text or color clip', () => {
+    const color = oneTrack(
+      { op: 'addClip', trackId: 'v0', clip: colorClip({ id: 'k', durationSec: 2, startSec: 0 }) },
+      { op: 'setTransform', clipId: 'k', transform: { scale: 2 } },
+    );
+    expect(() => compileTimeline(color, ctx())).toThrow(/Color clip "k".*media clips only/);
+    const text = oneTrack(
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: textClip({ id: 't', text: 'Hi', durationSec: 2, startSec: 0 }),
+      },
+      { op: 'setTransform', clipId: 't', transform: { y: 0.9 } },
+    );
+    expect(() => compileTimeline(text, ctx({ fontFor: () => undefined }))).toThrow(/anchor/);
   });
 
   it('rejects chromaKey in single-track export', () => {
@@ -575,5 +612,224 @@ describe('compileTimeline — text over the picture (captions)', () => {
     const comp = oneTrack({ op: 'addClip', trackId: 'v0', clip: caption('t', 'Title', 0, 2) });
     const plan = compileTimeline(comp, ctx({ fontFor: () => undefined }));
     expect(drawtexts(plan.steps[0]?.args)[0]?.enable).toBeUndefined();
+  });
+});
+
+describe('compileTimeline — framing (fit, zoom, position)', () => {
+  function framed(canvas: Partial<Composition>, transform?: Record<string, unknown>) {
+    const comp = applyOps(emptyComposition(canvas), [
+      { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 0 }),
+      },
+      ...(transform ? [{ op: 'setTransform' as const, clipId: 'a', transform }] : []),
+    ]);
+    const args = compileTimeline(comp, ctx()).steps[0]?.args ?? [];
+    return { comp, fc: args[args.indexOf('-filter_complex') + 1] ?? '' };
+  }
+
+  it('keeps the plain fit-and-center chain for default framing', () => {
+    const { fc } = framed({ width: 1080, height: 1920 });
+    expect(fc).toBe(
+      '[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,' +
+        'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,format=yuv420p[v];' +
+        '[0:a]aformat=sample_rates=48000:channel_layouts=stereo[a]',
+    );
+  });
+
+  it('covers a 9:16 canvas: scale up, crop at the alignment, pad as a no-op', () => {
+    const { fc } = framed({ width: 1080, height: 1920, fit: 'cover' }, { x: 0.4 });
+    expect(fc).toContain(
+      '[0:v]scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2,' +
+        "crop=w='min(iw,1080)':h='min(ih,1920)':x='(iw-ow)*0.4':y='(ih-oh)*0.5'," +
+        "pad=1080:1920:x='(ow-iw)*0.4':y='(oh-ih)*0.5':color=black,setsar=1,fps=30,format=yuv420p[v]",
+    );
+  });
+
+  it('lets a clip override the canvas fit', () => {
+    const { fc } = framed({ width: 1080, height: 1920, fit: 'cover' }, { fit: 'contain' });
+    expect(fc).toContain('scale=1080:1920:force_original_aspect_ratio=decrease,pad=');
+    const { fc: covered } = framed({ width: 1080, height: 1920 }, { fit: 'cover' });
+    expect(covered).toContain('force_original_aspect_ratio=increase');
+  });
+
+  it('zooms by scaling the target size, rounded to even pixels', () => {
+    const { fc } = framed({ width: 1080, height: 1350 }, { scale: 1.15 });
+    expect(fc).toContain(
+      'scale=1242:1552:force_original_aspect_ratio=decrease:force_divisible_by=2',
+    );
+    const { fc: tiny } = framed({}, { scale: 0.0001 });
+    expect(tiny).toContain('scale=2:2:');
+  });
+
+  it('quotes the crop and pad expressions so their commas survive the graph parser', () => {
+    const { fc } = framed({ fit: 'cover', width: 1080, height: 1080 }, { x: 0, y: 1 });
+    const crop = parseFilter(fc.slice(fc.indexOf('crop=')));
+    expect(crop.options).toMatchObject({
+      w: 'min(iw,1080)',
+      h: 'min(ih,1080)',
+      x: '(iw-ow)*0',
+      y: '(ih-oh)*1',
+    });
+    // The graph parser stops at the comma AFTER the quoted crop, not inside it.
+    expect(crop.rest.startsWith(',pad=1080:1080:')).toBe(true);
+    expect(fc).toContain("pad=1080:1080:x='(ow-iw)*0':y='(oh-ih)*1':color=black");
+  });
+
+  it('keeps captions and title cards at canvas size on a cover canvas', () => {
+    const comp = applyOps(emptyComposition({ width: 1080, height: 1920, fit: 'cover' }), [
+      { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+      { op: 'addTrack', track: videoTrack({ id: 'captions' }) },
+      { op: 'addClip', trackId: 'v0', clip: colorClip({ id: 'k', durationSec: 1, startSec: 0 }) },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 1 }),
+      },
+      {
+        op: 'addClip',
+        trackId: 'captions',
+        clip: textClip({ id: 'cap', text: 'Hello', durationSec: 1, startSec: 1.5 }),
+      },
+    ]);
+    const plan = compileTimeline(comp, ctx({ fontFor: () => '/fonts/x.ttf' }));
+    const graph = (i: number) => {
+      const args = plan.steps[i]?.args ?? [];
+      return args[args.indexOf('-filter_complex') + 1] ?? '';
+    };
+    expect(graph(0)).toContain('force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2');
+    expect(graph(1)).toContain('force_original_aspect_ratio=increase');
+    expect(graph(1)).toContain('drawtext=');
+    expect(clipFraming(comp, comp.tracks[0]?.clips[0] as never).fit).toBe('contain');
+  });
+});
+
+describe('compileTimeline — loudness', () => {
+  const clip = {
+    op: 'addClip' as const,
+    trackId: 'v0',
+    clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 0 }),
+  };
+
+  it('carries the target on the export plan, single clip or folded', () => {
+    expect(compileTimeline(oneTrack(clip), ctx()).loudness).toBeUndefined();
+    const loud = oneTrack(clip, { op: 'setLoudness', targetLufs: -16 });
+    expect(compileTimeline(loud, ctx()).loudness).toEqual({ targetLufs: -16 });
+    const two = oneTrack(
+      clip,
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'b', mediaId: M2, sourceOutSec: 1, startSec: 2 }),
+      },
+      { op: 'setLoudness', targetLufs: -14 },
+    );
+    const plan = compileTimeline(two, ctx());
+    expect(plan.loudness).toEqual({ targetLufs: -14 });
+    // The steps themselves don't change: the pass runs after them.
+    expect(plan.steps.at(-1)?.output).toBe('/ws/out.mp4');
+  });
+
+  it('never sets it on a frame plan', () => {
+    const loud = oneTrack(clip, { op: 'setLoudness', targetLufs: -14 });
+    expect(buildFrameAtPlan(loud, ctx({ output: '/ws/f.jpg' }), 1).loudness).toBeUndefined();
+  });
+});
+
+describe('compileTimeline — join fades at hard cuts', () => {
+  const graph = (plan: ReturnType<typeof compileTimeline>, label: string): string => {
+    const args = plan.steps.find((s) => s.label === label)?.args ?? [];
+    return args[args.indexOf('-filter_complex') + 1] ?? '';
+  };
+  const audio = (fc: string): string => fc.slice(fc.indexOf('[0:a]'));
+  const media = (id: string, startSec: number, sourceOutSec = 2) => ({
+    op: 'addClip' as const,
+    trackId: 'v0',
+    clip: mediaClip({ id, mediaId: M1, sourceOutSec, startSec }),
+  });
+
+  it('fades the audio 8 ms into and out of each hard cut, not at the outer edges', () => {
+    const plan = compileTimeline(oneTrack(media('a', 0), media('b', 2), media('c', 4)), ctx());
+    expect(audio(graph(plan, 'segment:a'))).toBe(
+      '[0:a]aformat=sample_rates=48000:channel_layouts=stereo,afade=t=out:st=1.992:d=0.008[a]',
+    );
+    expect(audio(graph(plan, 'segment:b'))).toBe(
+      '[0:a]aformat=sample_rates=48000:channel_layouts=stereo,afade=t=in:st=0:d=0.008,afade=t=out:st=1.992:d=0.008[a]',
+    );
+    expect(audio(graph(plan, 'segment:c'))).toBe(
+      '[0:a]aformat=sample_rates=48000:channel_layouts=stereo,afade=t=in:st=0:d=0.008[a]',
+    );
+  });
+
+  it('ends the fade at or before a cut that falls between milliseconds', () => {
+    // 32 frames at 30 fps = 1.0667s: a start rounded up (1.059) would end the
+    // fade after the cut; rounded down it ends at 1.066.
+    const plan = compileTimeline(oneTrack(media('a', 0, 32 / 30), media('b', 32 / 30)), ctx());
+    expect(audio(graph(plan, 'segment:a'))).toContain('afade=t=out:st=1.058:d=0.008');
+  });
+
+  it('leaves cuts with a transition to the crossfade', () => {
+    const plan = compileTimeline(
+      oneTrack(media('a', 0), media('b', 2), {
+        op: 'addTransition',
+        trackId: 'v0',
+        transition: { afterClipId: 'a', kind: 'fade', durationSec: 0.5 },
+      }),
+      ctx(),
+    );
+    expect(graph(plan, 'segment:a')).not.toContain('afade');
+    expect(graph(plan, 'segment:b')).not.toContain('afade');
+  });
+
+  it("keeps a clip's own fade instead of adding one on that edge", () => {
+    const plan = compileTimeline(
+      oneTrack(media('a', 0), media('b', 2), {
+        op: 'addEffect',
+        clipId: 'a',
+        effect: { type: 'fadeOut', durationSec: 0.5 },
+      }),
+      ctx(),
+    );
+    const a = audio(graph(plan, 'segment:a'));
+    expect(a).toContain('afade=t=out:st=1.5:d=0.5');
+    expect(a).not.toContain('d=0.008');
+    expect(audio(graph(plan, 'segment:b'))).toContain('afade=t=in:st=0:d=0.008');
+  });
+
+  it('times the fade in output time when the clip is sped up', () => {
+    const plan = compileTimeline(
+      oneTrack(media('a', 0), media('b', 2), {
+        op: 'addEffect',
+        clipId: 'a',
+        effect: { type: 'speed', factor: 2 },
+      }),
+      ctx(),
+    );
+    expect(audio(graph(plan, 'segment:a'))).toMatch(
+      /atempo=2\.0,afade=t=out:st=0\.992:d=0\.008\[a\]$/,
+    );
+  });
+
+  it('skips generated silence: color cards and media without sound', () => {
+    const silent = ctx({ media: new Map([[M1, { path: '/ws/a.mp4', hasAudio: false }]]) });
+    const plan = compileTimeline(oneTrack(media('a', 0), media('b', 2)), silent);
+    expect(graph(plan, 'segment:a')).not.toContain('afade');
+    const card = compileTimeline(
+      oneTrack(
+        { op: 'addClip', trackId: 'v0', clip: colorClip({ id: 'k', durationSec: 1, startSec: 0 }) },
+        media('b', 1),
+      ),
+      ctx(),
+    );
+    expect(graph(card, 'segment:k')).not.toContain('afade');
+    expect(audio(graph(card, 'segment:b'))).toContain('afade=t=in:st=0:d=0.008');
+  });
+
+  it('never fades a frame preview', () => {
+    const doc = oneTrack(media('a', 0), media('b', 2));
+    const seg = buildFrameAtPlan(doc, ctx({ output: '/ws/f.jpg' }), 2.5).steps[0];
+    expect(seg?.args.join(' ')).not.toContain('afade');
   });
 });

@@ -190,7 +190,7 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Edit the timeline',
       description:
-        'Apply one or more editing verbs to the document as ONE undoable change. Verbs: add_media, add_text, add_color, trim, move, split, remove, remove_silence, cut_words, remove_retakes, caption_speech, transition. remove_silence cuts the pauses out of a media clip (sensitivity 0–1, default 0.5) and moves later clips on its track up; it applies nothing when no pause is found. cut_words cuts words fromIndex..toIndex out of a clip, sending the transcriptId from the timeline_transcript call they came from; remove_retakes cuts the earlier take of each phrase said twice in a row. caption_speech turns stored transcripts into captions on a track above the video (short phrases, or one word at a time with maxWords 1), replacing captions already there; export burns them in. Captions do not move with later cuts, so caption after cutting, or run it again after a cut. Batch related verbs into a single call. Media paths must be inside the workspace. Returns the updated document summary, including whether it can now render.',
+        'Apply one or more editing verbs to the document as ONE undoable change. Verbs: add_media, add_text, add_color, trim, move, split, remove, remove_silence, cut_words, remove_retakes, caption_speech, reframe, set_framing, set_loudness, transition. remove_silence cuts the pauses out of a media clip (sensitivity 0–1, default 0.5) and moves later clips on its track up; it applies nothing when no pause is found. cut_words cuts words fromIndex..toIndex out of a clip, sending the transcriptId from the timeline_transcript call they came from; remove_retakes cuts the earlier take of each phrase said twice in a row. caption_speech turns stored transcripts into captions on a track above the video (short phrases, or one word at a time with maxWords 1), replacing captions already there; export burns them in. Captions do not move with later cuts, so caption after cutting, or run it again after a cut. reframe changes the output shape (aspect 9:16 for Shorts/Reels/TikTok, 1:1, 4:5, 16:9) and fills it (fit cover, the default, crops; contain shows bars); x/y (0 = left/top, 0.5 = center, 1 = right/bottom) pick the part of every current media clip that shows. set_framing sets the fit, zoom (scale 0.1–4) and position of one media clip. Check the result with timeline_show atSec. set_loudness sets the integrated loudness the mp4 export normalizes to (targetLufs -14 for YouTube/Shorts/Reels/TikTok, -16 for podcasts, null for off). Batch related verbs into a single call. Media paths must be inside the workspace. Returns the updated document summary, including whether it can now render.',
       inputSchema: { verbs: z.array(EditableVerbSchema).min(1) },
     },
     async ({ verbs }) => {
@@ -241,7 +241,7 @@ export function buildMcpServer(): McpServer {
     {
       title: 'Export the timeline',
       description:
-        'Export the current timeline document to a file in the workspace and return its path. format mp4 (default) renders the video. ' +
+        'Export the current timeline document to a file in the workspace and return its path. format mp4 (default) renders the video, normalized to the loudness set with set_loudness (the result reports the measured loudness). ' +
         'fcpxml writes an FCPXML project for Final Cut Pro and DaVinci Resolve; xmeml writes Final Cut Pro 7 XML for Premiere Pro (Resolve reads it too), with text as .srt caption files beside it. ' +
         'Both reference the source media by absolute path, refuse what the editor file cannot hold with the fix to make, and return notes on what is carried only in part.',
       inputSchema: {
@@ -281,7 +281,11 @@ export function buildMcpServer(): McpServer {
           : newOutputPath('timeline-export', 'mp4');
         const plan = compileTimeline(comp, { media, dir: getWorkspace(), output: target });
         const result = await runPlan(plan);
-        return jsonResult({ exported: result.output, durationSec: plan.durationSec });
+        return jsonResult({
+          exported: result.output,
+          durationSec: plan.durationSec,
+          ...(result.loudness ? { loudness: result.loudness } : {}),
+        });
       } catch (err) {
         if (
           err instanceof CompileError ||

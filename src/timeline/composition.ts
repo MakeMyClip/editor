@@ -14,8 +14,10 @@ import { MediaIdSchema } from './schema.js';
  *    contribute audio only.
  *  - A clip sits on a track at `startSec` (timeline time). Its on-screen duration
  *    is derived for media (sourceOut − sourceIn) or explicit for text/color.
- *  - Visual clips carry an optional `transform` (scale/position/rotation/opacity)
- *    and an ordered, non-destructive `effects` stack.
+ *  - Media fill the canvas by the composition's `fit` (contain = whole picture,
+ *    bars where it doesn't fill; cover = fill the canvas, crop the overflow).
+ *  - Visual clips carry an optional `transform` (fit override, zoom, position,
+ *    rotation, opacity) and an ordered, non-destructive `effects` stack.
  *  - Transitions live on a track, keyed to the clip they follow.
  *
  * Time is in seconds (floats) everywhere — the document is machine-edited, so
@@ -58,11 +60,24 @@ export const TransitionKindSchema = z.enum([
 export type TransitionKind = z.infer<typeof TransitionKindSchema>;
 
 /**
- * Geometric placement of a visual clip on the canvas. `x`/`y` are the clip
- * CENTER in normalized [0,1] canvas coordinates; `scale` multiplies the clip's
- * fitted size; `rotationDeg` rotates clockwise; `opacity` is [0,1].
+ * How a picture fills the canvas: `contain` shows all of it (bars where the
+ * aspect differs), `cover` fills the canvas and crops the overflow.
+ */
+export const FitSchema = z.enum(['contain', 'cover']);
+export type Fit = z.infer<typeof FitSchema>;
+
+/**
+ * Placement of a visual clip on the canvas. `fit` overrides the composition's
+ * fit for this clip (absent = use the canvas's). `scale` multiplies the fitted
+ * (contain) or covering (cover) size. `x`/`y` ALIGN the picture with the canvas,
+ * as CSS `object-position` does: 0 puts the left/top edges together, 0.5
+ * centers, 1 puts the right/bottom edges together — for a picture larger than
+ * the canvas that picks the part that shows, for a smaller one where it sits.
+ * The same values hold when the canvas changes shape. `rotationDeg` rotates
+ * clockwise; `opacity` is [0,1].
  */
 export const TransformSchema = z.object({
+  fit: FitSchema.optional(),
   scale: z.number().positive().default(1),
   x: z.number().default(0.5),
   y: z.number().default(0.5),
@@ -174,6 +189,12 @@ export const TrackSchema = z.object({
 });
 export type Track = z.infer<typeof TrackSchema>;
 
+/** Integrated loudness targets export can normalize to, in LUFS: -14 matches
+ *  YouTube, Shorts, Reels and TikTok, -16 podcasts. */
+export const LOUDNESS_MIN_LUFS = -30;
+export const LOUDNESS_MAX_LUFS = -9;
+export const TargetLufsSchema = z.number().min(LOUDNESS_MIN_LUFS).max(LOUDNESS_MAX_LUFS);
+
 export const CompositionSchema = z.object({
   version: z.literal(COMPOSITION_VERSION),
   /**
@@ -188,6 +209,10 @@ export const CompositionSchema = z.object({
   height: z.number().int().positive().default(1080),
   fps: z.number().positive().default(30),
   background: z.string().default('black'),
+  /** How media clips fill the canvas unless a clip's transform says otherwise. */
+  fit: FitSchema.default('contain'),
+  /** Normalize the exported mp4 to this integrated loudness, or null to leave levels as they are. */
+  loudness: z.object({ targetLufs: TargetLufsSchema }).nullable().default(null),
   tracks: z.array(TrackSchema).default([]),
 });
 export type Composition = z.infer<typeof CompositionSchema>;
@@ -204,7 +229,7 @@ export function makeTrackId(): string {
 
 /** A fresh empty composition at the given (or default 1080p30) canvas. */
 export function emptyComposition(
-  canvas: Partial<Pick<Composition, 'width' | 'height' | 'fps' | 'background'>> = {},
+  canvas: Partial<Pick<Composition, 'width' | 'height' | 'fps' | 'background' | 'fit'>> = {},
 ): Composition {
   return CompositionSchema.parse({ version: COMPOSITION_VERSION, tracks: [], ...canvas });
 }

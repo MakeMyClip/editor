@@ -8,6 +8,13 @@ export { type AdjustArgs, buildAdjustArgs } from './ffmpeg/args/adjust.js';
 export { buildChromaKeyArgs, type ChromaKeyArgs } from './ffmpeg/args/chroma-key.js';
 export { buildConcatArgs, type ConcatArgs } from './ffmpeg/args/concat.js';
 export {
+  buildLoudnormApplyArgs,
+  buildLoudnormMeasureArgs,
+  type LoudnormMeasurement,
+  parseLoudnormJson,
+  TRUE_PEAK_DB,
+} from './ffmpeg/args/loudnorm.js';
+export {
   buildOverlayArgs,
   type OverlayArgs,
   type OverlayPosition,
@@ -101,9 +108,12 @@ export {
   buildFrameAtPlan,
   type CompileContext,
   CompileError,
+  clipFraming,
   compileTimeline,
   type FfmpegPlan,
   type FfmpegStep,
+  type Framing,
+  isDefaultFraming,
   type MediaInfo,
   type StepSideFile,
 } from './timeline/compile.js';
@@ -125,11 +135,16 @@ export {
   EffectSchema,
   type EffectType,
   emptyComposition,
+  type Fit,
+  FitSchema,
   findClip,
+  LOUDNESS_MAX_LUFS,
+  LOUDNESS_MIN_LUFS,
   type MediaClip,
   MediaClipSchema,
   makeClipId,
   makeTrackId,
+  TargetLufsSchema,
   type TextClip,
   TextClipSchema,
   type TextStyle,
@@ -180,6 +195,22 @@ export {
   videoTrack,
 } from './timeline/ops.js';
 export {
+  type Aspect,
+  AspectSchema,
+  canvasFor,
+  type FramingFit,
+  FramingFitSchema,
+  type FramingRequest,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  ownFraming,
+  planFraming,
+  planReframe,
+  ReframeError,
+  type ReframePlan,
+  type ReframeRequest,
+} from './timeline/reframe.js';
+export {
   type CutCheck,
   type CutPoint,
   type CutReport,
@@ -191,7 +222,7 @@ export {
   renderCutSheet,
   reviewCuts,
 } from './timeline/review.js';
-export { type RunPlanResult, runPlan } from './timeline/run-plan.js';
+export { type LoudnessResult, type RunPlanResult, runPlan } from './timeline/run-plan.js';
 export {
   AudioStreamSchema,
   type MediaId,

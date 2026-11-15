@@ -145,6 +145,36 @@ describe('MCP server', () => {
     }
   });
 
+  it('reframes the canvas to 9:16 and reports the new shape', async () => {
+    const { client, close } = await connect();
+    try {
+      const edit = payload(
+        await client.callTool({
+          name: 'timeline_edit',
+          arguments: {
+            verbs: [
+              { verb: 'add_color', durationSec: 2 },
+              { verb: 'reframe', aspect: '9:16' },
+            ],
+          },
+        }),
+      );
+      const doc = edit.document as { canvas: unknown; exportable: boolean };
+      expect(doc.canvas).toEqual({ width: 1080, height: 1920, fps: 30, fit: 'cover' });
+      expect(doc.exportable).toBe(true);
+
+      const loud = payload(
+        await client.callTool({
+          name: 'timeline_edit',
+          arguments: { verbs: [{ verb: 'set_loudness', targetLufs: -14 }] },
+        }),
+      );
+      expect((loud.document as { loudness: unknown }).loudness).toEqual({ targetLufs: -14 });
+    } finally {
+      await close();
+    }
+  });
+
   it('rejects an invalid verb (Zod validates at the boundary)', async () => {
     const { client, close } = await connect();
     try {

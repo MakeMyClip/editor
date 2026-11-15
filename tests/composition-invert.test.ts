@@ -61,6 +61,17 @@ describe('invertOp — per-op round-trip (apply then inverse = identity)', () =>
     expectRoundtrip(richDoc(), { op: 'setCanvas', width: 1080, fps: 24 });
   });
 
+  it('setLoudness on and off', () => {
+    expectRoundtrip(richDoc(), { op: 'setLoudness', targetLufs: -14 });
+    const on = applyOp(richDoc(), { op: 'setLoudness', targetLufs: -16 });
+    expectRoundtrip(on, { op: 'setLoudness', targetLufs: null });
+    expectRoundtrip(on, { op: 'setLoudness', targetLufs: -14 });
+  });
+
+  it('setCanvas fit', () => {
+    expectRoundtrip(richDoc(), { op: 'setCanvas', width: 1080, height: 1920, fit: 'cover' });
+  });
+
   it('addTrack (append) → removeTrack', () => {
     expectRoundtrip(richDoc(), { op: 'addTrack', track: videoTrack({ id: 'vNew' }) });
   });
@@ -191,6 +202,25 @@ describe('invertOp — per-op round-trip (apply then inverse = identity)', () =>
       clipId: 'c1',
       transform: { x: 0.75, opacity: 0.5 },
     });
+  });
+
+  it('setTransform adding a fit to a clip WITHOUT one (undo drops the fit)', () => {
+    const pre = applyOp(richDoc(), { op: 'setTransform', clipId: 'c1', transform: { x: 0.2 } });
+    expectRoundtrip(pre, { op: 'setTransform', clipId: 'c1', transform: { fit: 'cover' } });
+  });
+
+  it('setTransform with an explicit undefined keeps the stored value', () => {
+    const pre = applyOp(richDoc(), {
+      op: 'setTransform',
+      clipId: 'c1',
+      transform: { fit: 'cover' },
+    });
+    const after = applyOp(pre, {
+      op: 'setTransform',
+      clipId: 'c1',
+      transform: { fit: undefined, x: 0 },
+    });
+    expect(after.tracks[0]?.clips[0]?.transform).toMatchObject({ fit: 'cover', x: 0 });
   });
 
   it('clearTransform on a clip with a transform (inverse restores it)', () => {

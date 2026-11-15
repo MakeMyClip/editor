@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { clipDuration, clipEndSec, clipLabel } from '../lib/composition.js';
 import type { Verb } from '../lib/verbs.js';
-import type { Clip } from '../types.js';
+import type { Clip, Fit } from '../types.js';
+import { FramingSection } from './FramingSection.js';
 import { TranscriptSection } from './TranscriptSection.js';
 
 const TRANSITION_KINDS = [
@@ -33,15 +34,18 @@ function num(value: string): number | undefined {
 
 /**
  * Edit a selected clip by emitting verbs through the shared verb layer (the same
- * path the agent + CLI use). Numeric trim/move, split at the playhead, add a
- * transition into the next clip, remove. `set_transform` is intentionally absent
- * — the compiler rejects a non-identity transform, so the UI must not author one.
+ * path the agent + CLI use). Numeric trim/move, framing (fit, zoom, position),
+ * split at the playhead, add a transition into the next clip, remove.
+ * `set_transform` is intentionally absent — it can rotate a clip or make it
+ * partly transparent, which export refuses.
  * Remounted per clip (keyed by id) so the inputs reset to the selected clip.
  */
 export function ClipInspector({
   clip,
   playheadSec,
   hasNext,
+  canvasFit,
+  trackMediaIds,
   busy,
   error,
   onApply,
@@ -51,6 +55,10 @@ export function ClipInspector({
   clip: Clip;
   playheadSec: number;
   hasNext: boolean;
+  /** The timeline's fit, which a clip without its own follows. */
+  canvasFit: Fit;
+  /** Media clips on this clip's track, for framing them all at once. */
+  trackMediaIds: string[];
   busy: boolean;
   error: string | null;
   /** Resolves to the number of ops applied, or null if the edit failed. */
@@ -169,6 +177,17 @@ export function ClipInspector({
             Remove silence
           </button>
         </div>
+      ) : null}
+
+      {clip.kind === 'media' ? (
+        <FramingSection
+          key={`${canvasFit}:${JSON.stringify(clip.transform ?? {})}`}
+          clip={clip}
+          canvasFit={canvasFit}
+          trackMediaIds={trackMediaIds}
+          busy={busy}
+          onApply={onApply}
+        />
       ) : null}
 
       {clip.kind === 'media' ? (

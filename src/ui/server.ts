@@ -39,6 +39,7 @@ import {
 } from '../timeline/interchange.js';
 import { buildMediaMap } from '../timeline/media-registry.js';
 import { CompositionOpError } from '../timeline/ops.js';
+import { ReframeError } from '../timeline/reframe.js';
 import { runPlan } from '../timeline/run-plan.js';
 import type { MediaId } from '../timeline/schema.js';
 import { SilenceAnalysisError } from '../timeline/silence.js';
@@ -59,9 +60,11 @@ import {
 import { clipConfinedMedia, confinedMediaRefs, makeVerbContext } from './timeline-tools.js';
 
 /** Errors about the clip or its setup, not the server: silence removal or
- *  transcription can't work on this clip, or whisper.cpp isn't set up. */
+ *  transcription can't work on this clip, whisper.cpp isn't set up, or a
+ *  reframe asks for a size or position that can't be. */
 function isClipConditionError(err: unknown): boolean {
   return (
+    err instanceof ReframeError ||
     err instanceof SilenceAnalysisError ||
     err instanceof TranscriptError ||
     err instanceof TranscriptionUnavailableError
@@ -417,12 +420,18 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       const target = output ? resolveInWorkspace(output) : newOutputPath('timeline-export', 'mp4');
       const plan = compileTimeline(comp, { media, dir: getWorkspace(), output: target });
       const result = await runPlan(plan);
+      const loudness = result.loudness ? { loudness: result.loudness } : {};
       const entry = await appendOp({
         tool: 'timeline_export',
         args: { rev: comp.rev },
-        result: { path: result.output, durationSec: plan.durationSec },
+        result: { path: result.output, durationSec: plan.durationSec, ...loudness },
       });
-      return c.json({ id: entry.id, output: result.output, durationSec: plan.durationSec });
+      return c.json({
+        id: entry.id,
+        output: result.output,
+        durationSec: plan.durationSec,
+        ...loudness,
+      });
     } catch (err) {
       if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
       if (err instanceof CompileError) return c.json({ error: err.message }, 422);

@@ -9,6 +9,8 @@ import {
   clipDuration,
   clipEndSec,
   type Effect,
+  type EffectType,
+  type Fit,
   type TextClip,
   type Track,
 } from './composition.js';
@@ -30,10 +32,11 @@ import type { MediaId } from './schema.js';
  * v1 scope is a single video-track sequence of abutting clips, plus text-only
  * tracks above it (captions, titles over the picture), which each segment burns
  * in for the stretch of timeline it covers. Constructs that need true
- * compositing — a second track of media/color clips, audio tracks, a
- * non-identity per-clip transform, chromaKey (which needs a background layer),
- * or gaps/overlaps on the picture track — throw a clear `CompileError` rather
- * than emitting a wrong graph.
+ * compositing — a second track of media/color clips, audio tracks, a rotated
+ * or partly transparent clip, chromaKey (which needs a background layer), or
+ * gaps/overlaps on the picture track — throw a clear `CompileError` rather than
+ * emitting a wrong graph. Media clips are framed onto the canvas by fit, zoom and
+ * position (see `clipFraming`).
  *
  * Text outside Latin is drawn with a font file that has its glyphs (see
  * `ffmpeg/font.ts`); that lookup reads font files, once per process, unless the
@@ -44,6 +47,10 @@ import type { MediaId } from './schema.js';
  * `FadeSuppression` plumbing), so the xfade's blend isn't stacked over a fade
  * over the same window. Fades on outer boundaries (open from black, close to
  * black) and on plain cuts are untouched.
+ *
+ * A hard cut between two clips also gets a few milliseconds of audio fade on
+ * each side (see `Joins`), so the waveform meets the cut at zero instead of
+ * jumping, which is what makes a cut click.
  */
 
 export interface MediaInfo {
@@ -95,6 +102,9 @@ export interface FfmpegPlan {
   output: string;
   /** Wall-clock duration of the composed result, in seconds. */
   durationSec: number;
+  /** Normalize the finished output to this loudness (`runPlan` measures it
+   *  first, so it can't be a fixed step). Export only; never set for a frame. */
+  loudness?: { targetLufs: number };
 }
 
 export class CompileError extends Error {
@@ -117,10 +127,34 @@ const VIDEO_ENCODE = [
 const AUDIO_ENCODE = ['-c:a', 'aac', '-ar', '48000'] as const;
 const SAMPLE_RATE = 48000;
 
-function isIdentityTransform(clip: Clip): boolean {
+/** How a clip's picture sits on the canvas, with every default filled in. */
+export interface Framing {
+  fit: Fit;
+  scale: number;
+  /** Alignment in [0,1]: 0 = left/top edges together, 1 = right/bottom. */
+  x: number;
+  y: number;
+}
+
+/**
+ * The framing export applies to a clip: its transform's values over the
+ * defaults. The canvas `fit` applies to media clips only — text and color clips
+ * are generated at canvas size, so captions and title cards don't change when
+ * the canvas is set to cover.
+ */
+export function clipFraming(comp: Composition, clip: Clip): Framing {
   const t = clip.transform;
-  if (!t) return true;
-  return t.scale === 1 && t.x === 0.5 && t.y === 0.5 && t.rotationDeg === 0 && t.opacity === 1;
+  return {
+    fit: clip.kind === 'media' ? (t?.fit ?? comp.fit) : 'contain',
+    scale: t?.scale ?? 1,
+    x: t?.x ?? 0.5,
+    y: t?.y ?? 0.5,
+  };
+}
+
+/** Whole picture, centered, unzoomed: the plain fit-and-pad export has always used. */
+export function isDefaultFraming(f: Framing): boolean {
+  return f.fit === 'contain' && f.scale === 1 && f.x === 0.5 && f.y === 0.5;
 }
 
 /** Net speed multiplier from the effect stack (1 when none). */
@@ -212,9 +246,21 @@ function selectLayers(comp: Composition): { track: Track; overlays: TextClip[] }
 }
 
 function assertCompilable(clip: Clip): void {
-  if (!isIdentityTransform(clip)) {
+  const t = clip.transform;
+  if (t && (t.rotationDeg !== 0 || t.opacity !== 1)) {
     throw new CompileError(
-      `Clip "${clip.id}" has a non-identity transform — per-clip transform is not supported in export yet.`,
+      `Clip "${clip.id}" is rotated or partly transparent — rotation and opacity are not supported in export yet (fit, zoom and position are).`,
+    );
+  }
+  if (t && (t.x < 0 || t.x > 1 || t.y < 0 || t.y > 1)) {
+    throw new CompileError(
+      `Clip "${clip.id}" has position x=${t.x}, y=${t.y}; both must be between 0 and 1 (0 = left/top, 0.5 = center, 1 = right/bottom).`,
+    );
+  }
+  if (clip.kind !== 'media' && t && (t.scale !== 1 || t.x !== 0.5 || t.y !== 0.5)) {
+    throw new CompileError(
+      `${clip.kind === 'text' ? 'Text' : 'Color'} clip "${clip.id}" has a zoom or position — export frames media clips only. ` +
+        'Place text with its anchor.',
     );
   }
   if (clip.effects.some((e) => e.type === 'chromaKey')) {
@@ -238,6 +284,32 @@ interface FilterChains {
 
 /** Whether a clip's leading/trailing per-clip fade should be dropped because a
  *  transition already owns the blend over that boundary (else they double-darken). */
+/** Audio fade on each side of a hard cut, seconds: long enough to bring the
+ *  waveform to zero at the join, too short to hear as a dip. */
+const JOIN_FADE_SEC = 0.008;
+
+/** Which edges of a clip meet another clip at a hard cut (no transition). */
+interface Joins {
+  head: boolean;
+  tail: boolean;
+}
+
+/** The join fades for a clip's edges, in output time. An edge with a fade of
+ *  the clip's own already reaches silence there, so it gets none. */
+function joinFades(clip: Clip, outDur: number, joins: Joins): string[] {
+  const d = Math.min(JOIN_FADE_SEC, outDur / 2);
+  const has = (type: EffectType): boolean => clip.effects.some((e) => e.type === type);
+  const fades: string[] = [];
+  if (joins.head && !has('fadeIn')) fades.push(`afade=t=in:st=0:d=${seconds(d)}`);
+  if (joins.tail && !has('fadeOut')) {
+    // Start rounded DOWN to the millisecond, so the fade reaches silence at or
+    // before the end of the segment (afade holds silence after it), never past it.
+    const st = Math.floor((outDur - d) * 1000 + 1e-6) / 1000;
+    fades.push(`afade=t=out:st=${st}:d=${seconds(d)}`);
+  }
+  return fades;
+}
+
 interface FadeSuppression {
   in: boolean;
   out: boolean;
@@ -341,6 +413,7 @@ function buildSegmentStep(
   ctx: CompileContext,
   overlays: TextClip[],
   fadeSuppress: FadeSuppression = { in: false, out: false },
+  joins: Joins = { head: false, tail: false },
 ): FfmpegStep {
   assertCompilable(clip);
   const outDur = outputDuration(clip);
@@ -424,11 +497,10 @@ function buildSegmentStep(
     fx.push(drawtextFilter(textfile, overlay, fontFor(ctx, overlay, true), window));
   }
 
-  // Geometry first: fit to canvas, pad, square pixels, lock fps. (No-op-ish for
-  // generated sources that are already canvas-sized, but keeps the chain uniform.)
+  // Geometry first: frame onto the canvas, square pixels, lock fps. (No-op-ish
+  // for generated sources that are already canvas-sized, but keeps the chain uniform.)
   const geometry = [
-    `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
-    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=${quoteColor(background)}`,
+    ...framingFilters(clipFraming(comp, clip), width, height, background),
     'setsar=1',
     `fps=${fps}`,
     'format=yuv420p',
@@ -440,7 +512,13 @@ function buildSegmentStep(
   // mono (and so every segment exposes a real [a] output). aformat is a harmless
   // no-op for the already-stereo silence sources. This makes the "guaranteed
   // stereo AAC audio" invariant real, not aspirational.
-  const audioChain = ['aformat=sample_rates=48000:channel_layouts=stereo', ...afx].join(',');
+  // Join fades only where there is sound to click: generated silence needs none.
+  const hasSound = clip.kind === 'media' && ctx.media.get(clip.mediaId)?.hasAudio === true;
+  const audioChain = [
+    'aformat=sample_rates=48000:channel_layouts=stereo',
+    ...afx,
+    ...(hasSound ? joinFades(clip, outDur, joins) : []),
+  ].join(',');
 
   const filterParts = [`${videoSource}${videoChain}[v]`, `[${audioSource}]${audioChain}[a]`];
   const audioMap = '[a]';
@@ -462,6 +540,41 @@ function buildSegmentStep(
   ];
 
   return { label: `segment:${clip.id}`, args, output: out, textFiles };
+}
+
+/**
+ * Scale, crop and pad a picture onto a `width`x`height` canvas. The default
+ * framing keeps the plain fit-and-center chain. Otherwise: scale to fit
+ * (contain) or cover the canvas times the zoom, crop whatever overflows at the
+ * alignment, then pad whatever falls short at the same alignment — so one chain
+ * handles crop and bars on either axis.
+ */
+function framingFilters(
+  framing: Framing,
+  width: number,
+  height: number,
+  background: string,
+): string[] {
+  const pad = `color=${quoteColor(background)}`;
+  if (isDefaultFraming(framing)) {
+    return [
+      `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
+      `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:${pad}`,
+    ];
+  }
+  const { x, y } = framing;
+  const mode = framing.fit === 'cover' ? 'increase' : 'decrease';
+  return [
+    `scale=${even(width * framing.scale)}:${even(height * framing.scale)}:force_original_aspect_ratio=${mode}:force_divisible_by=2`,
+    `crop=w=${quoteFilterArg(`min(iw,${width})`)}:h=${quoteFilterArg(`min(ih,${height})`)}` +
+      `:x=${quoteFilterArg(`(iw-ow)*${x}`)}:y=${quoteFilterArg(`(ih-oh)*${y}`)}`,
+    `pad=${width}:${height}:x=${quoteFilterArg(`(ow-iw)*${x}`)}:y=${quoteFilterArg(`(oh-ih)*${y}`)}:${pad}`,
+  ];
+}
+
+/** Nearest even size of at least 2: x264 needs even sides, and scale=0 means "keep". */
+function even(size: number): number {
+  return Math.max(2, Math.round(size / 2) * 2);
 }
 
 const CENTER_POS = { x: '(w-text_w)/2', y: '(h-text_h)/2' };
@@ -681,7 +794,11 @@ export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegP
       in: prevClip ? transitionAfter.has(prevClip.id) : false,
       out: i < clips.length - 1 && transitionAfter.has(clip.id),
     };
-    const step = buildSegmentStep(comp, clip, i, ctx, overlays, fadeSuppress);
+    const joins: Joins = {
+      head: prevClip !== undefined && !transitionAfter.has(prevClip.id),
+      tail: i < clips.length - 1 && !transitionAfter.has(clip.id),
+    };
+    const step = buildSegmentStep(comp, clip, i, ctx, overlays, fadeSuppress, joins);
     steps.push(step);
     return { clip, output: step.output, durationSec: outputDuration(clip) };
   });
@@ -692,7 +809,12 @@ export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegP
     if (!only) throw new CompileError('Nothing to export.');
     only.args[only.args.length - 1] = ctx.output;
     only.output = ctx.output;
-    return { steps, output: ctx.output, durationSec: segments[0]?.durationSec ?? 0 };
+    return {
+      steps,
+      output: ctx.output,
+      durationSec: segments[0]?.durationSec ?? 0,
+      ...loudnessOf(comp),
+    };
   }
 
   // 2. Fold left-to-right: xfade where a transition follows the clip, else cut.
@@ -750,5 +872,9 @@ export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegP
     accPath = out;
   }
 
-  return { steps, output: ctx.output, durationSec: accDur };
+  return { steps, output: ctx.output, durationSec: accDur, ...loudnessOf(comp) };
+}
+
+function loudnessOf(comp: Composition): Pick<FfmpegPlan, 'loudness'> {
+  return comp.loudness ? { loudness: { targetLufs: comp.loudness.targetLufs } } : {};
 }
