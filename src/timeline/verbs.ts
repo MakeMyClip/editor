@@ -8,6 +8,7 @@ import {
   FitSchema,
   type MediaClip,
   makeClipId,
+  TargetLufsSchema,
   type TextStyle,
   TransitionKindSchema,
 } from './composition.js';
@@ -271,6 +272,12 @@ const EDITABLE_VERB_SCHEMAS = [
       .describe('Start from the canvas default (its fit, centered, unzoomed) before the rest.'),
   }),
   z.object({
+    verb: z.literal('set_loudness'),
+    targetLufs: TargetLufsSchema.nullable().describe(
+      'Normalize the exported mp4 to this integrated loudness in LUFS: -14 for YouTube, Shorts, Reels and TikTok, -16 for podcasts. null turns it off. Applies to mp4 export only.',
+    ),
+  }),
+  z.object({
     verb: z.literal('transition'),
     afterClipId: z
       .string()
@@ -482,6 +489,10 @@ export async function lowerVerb(
       return planReframe(comp, verb).ops;
     case 'set_framing':
       return planFraming(comp, verb);
+    case 'set_loudness':
+      return (comp.loudness?.targetLufs ?? null) === verb.targetLufs
+        ? []
+        : [{ op: 'setLoudness', targetLufs: verb.targetLufs }];
     case 'transition':
       return [
         {

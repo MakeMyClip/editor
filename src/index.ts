@@ -8,6 +8,13 @@ export { type AdjustArgs, buildAdjustArgs } from './ffmpeg/args/adjust.js';
 export { buildChromaKeyArgs, type ChromaKeyArgs } from './ffmpeg/args/chroma-key.js';
 export { buildConcatArgs, type ConcatArgs } from './ffmpeg/args/concat.js';
 export {
+  buildLoudnormApplyArgs,
+  buildLoudnormMeasureArgs,
+  type LoudnormMeasurement,
+  parseLoudnormJson,
+  TRUE_PEAK_DB,
+} from './ffmpeg/args/loudnorm.js';
+export {
   buildOverlayArgs,
   type OverlayArgs,
   type OverlayPosition,
@@ -131,10 +138,13 @@ export {
   type Fit,
   FitSchema,
   findClip,
+  LOUDNESS_MAX_LUFS,
+  LOUDNESS_MIN_LUFS,
   type MediaClip,
   MediaClipSchema,
   makeClipId,
   makeTrackId,
+  TargetLufsSchema,
   type TextClip,
   TextClipSchema,
   type TextStyle,
@@ -212,7 +222,7 @@ export {
   renderCutSheet,
   reviewCuts,
 } from './timeline/review.js';
-export { type RunPlanResult, runPlan } from './timeline/run-plan.js';
+export { type LoudnessResult, type RunPlanResult, runPlan } from './timeline/run-plan.js';
 export {
   AudioStreamSchema,
   type MediaId,

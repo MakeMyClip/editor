@@ -97,6 +97,9 @@ export interface FfmpegPlan {
   output: string;
   /** Wall-clock duration of the composed result, in seconds. */
   durationSec: number;
+  /** Normalize the finished output to this loudness (`runPlan` measures it
+   *  first, so it can't be a fixed step). Export only; never set for a frame. */
+  loudness?: { targetLufs: number };
 }
 
 export class CompileError extends Error {
@@ -764,7 +767,12 @@ export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegP
     if (!only) throw new CompileError('Nothing to export.');
     only.args[only.args.length - 1] = ctx.output;
     only.output = ctx.output;
-    return { steps, output: ctx.output, durationSec: segments[0]?.durationSec ?? 0 };
+    return {
+      steps,
+      output: ctx.output,
+      durationSec: segments[0]?.durationSec ?? 0,
+      ...loudnessOf(comp),
+    };
   }
 
   // 2. Fold left-to-right: xfade where a transition follows the clip, else cut.
@@ -822,5 +830,9 @@ export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegP
     accPath = out;
   }
 
-  return { steps, output: ctx.output, durationSec: accDur };
+  return { steps, output: ctx.output, durationSec: accDur, ...loudnessOf(comp) };
+}
+
+function loudnessOf(comp: Composition): Pick<FfmpegPlan, 'loudness'> {
+  return comp.loudness ? { loudness: { targetLufs: comp.loudness.targetLufs } } : {};
 }

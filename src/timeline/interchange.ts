@@ -71,6 +71,11 @@ export function buildInterchange(
       ? { ...writeFcpxml(layout, name), captions: [] }
       : writeXmeml(layout, name);
   const notes = [...written.notes, ...letterboxNote(layout)];
+  if (comp.loudness) {
+    notes.push(
+      `Loudness normalization (${comp.loudness.targetLufs} LUFS) applies to the mp4 export only; the project keeps the clips' own levels. Normalize in the editor.`,
+    );
+  }
   const dir = dirname(options.output);
   // Track ids are free text: keep only filename-safe characters, and never
   // reuse a name — the main file's included (case-blind, as macOS is).

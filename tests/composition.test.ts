@@ -21,6 +21,7 @@ describe('CompositionSchema', () => {
       fps: 30,
       background: 'black',
       fit: 'contain',
+      loudness: null,
     });
     expect(comp.tracks).toEqual([]);
   });

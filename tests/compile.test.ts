@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MissingFontError } from '../src/ffmpeg/font.js';
 import {
+  buildFrameAtPlan,
   type CompileContext,
   CompileError,
   clipFraming,
@@ -702,5 +703,37 @@ describe('compileTimeline — framing (fit, zoom, position)', () => {
     expect(graph(1)).toContain('force_original_aspect_ratio=increase');
     expect(graph(1)).toContain('drawtext=');
     expect(clipFraming(comp, comp.tracks[0]?.clips[0] as never).fit).toBe('contain');
+  });
+});
+
+describe('compileTimeline — loudness', () => {
+  const clip = {
+    op: 'addClip' as const,
+    trackId: 'v0',
+    clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 0 }),
+  };
+
+  it('carries the target on the export plan, single clip or folded', () => {
+    expect(compileTimeline(oneTrack(clip), ctx()).loudness).toBeUndefined();
+    const loud = oneTrack(clip, { op: 'setLoudness', targetLufs: -16 });
+    expect(compileTimeline(loud, ctx()).loudness).toEqual({ targetLufs: -16 });
+    const two = oneTrack(
+      clip,
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'b', mediaId: M2, sourceOutSec: 1, startSec: 2 }),
+      },
+      { op: 'setLoudness', targetLufs: -14 },
+    );
+    const plan = compileTimeline(two, ctx());
+    expect(plan.loudness).toEqual({ targetLufs: -14 });
+    // The steps themselves don't change: the pass runs after them.
+    expect(plan.steps.at(-1)?.output).toBe('/ws/out.mp4');
+  });
+
+  it('never sets it on a frame plan', () => {
+    const loud = oneTrack(clip, { op: 'setLoudness', targetLufs: -14 });
+    expect(buildFrameAtPlan(loud, ctx({ output: '/ws/f.jpg' }), 1).loudness).toBeUndefined();
   });
 });

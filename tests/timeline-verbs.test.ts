@@ -295,6 +295,30 @@ describe('reframe and set_framing', () => {
   });
 });
 
+describe('set_loudness', () => {
+  it('lowers to setLoudness, and to nothing when already set', async () => {
+    const off = emptyComposition();
+    expect(await lowerVerb(off, { verb: 'set_loudness', targetLufs: -14 }, ctx())).toEqual([
+      { op: 'setLoudness', targetLufs: -14 },
+    ]);
+    expect(await lowerVerb(off, { verb: 'set_loudness', targetLufs: null }, ctx())).toEqual([]);
+    const on = applyOps(off, [{ op: 'setLoudness', targetLufs: -14 }]);
+    expect(await lowerVerb(on, { verb: 'set_loudness', targetLufs: -14 }, ctx())).toEqual([]);
+    expect(await lowerVerb(on, { verb: 'set_loudness', targetLufs: null }, ctx())).toEqual([
+      { op: 'setLoudness', targetLufs: null },
+    ]);
+  });
+
+  it('takes -30..-9 LUFS or null', () => {
+    expect(EditableVerbSchema.parse({ verb: 'set_loudness', targetLufs: null })).toEqual({
+      verb: 'set_loudness',
+      targetLufs: null,
+    });
+    expect(() => EditableVerbSchema.parse({ verb: 'set_loudness', targetLufs: -5 })).toThrow();
+    expect(() => EditableVerbSchema.parse({ verb: 'set_loudness' })).toThrow();
+  });
+});
+
 describe('lowerVerbs (state threads between verbs)', () => {
   it('the default append point shifts as earlier verbs add clips', async () => {
     const ops = await lowerVerbs(

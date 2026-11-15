@@ -58,6 +58,7 @@ const SAMPLES: Record<CompositionOpKind, CompositionOp> = {
     transition: { afterClipId: 'c1', kind: 'fade', durationSec: 1 },
   },
   removeTransition: { op: 'removeTransition', trackId: 'v0', afterClipId: 'c1' },
+  setLoudness: { op: 'setLoudness', targetLufs: -14 },
 };
 
 describe('CompositionOpSchema', () => {

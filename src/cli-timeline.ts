@@ -17,7 +17,10 @@ import {
   type Fit,
   FitSchema,
   findClip,
+  LOUDNESS_MAX_LUFS,
+  LOUDNESS_MIN_LUFS,
   makeClipId,
+  TargetLufsSchema,
   type TextStyle,
 } from './timeline/composition.js';
 import {
@@ -77,6 +80,7 @@ const TIMELINE_HELP = `clip timeline — build and export a non-destructive comp
   clip timeline captions [<clipId>] [--words N] [--track T] [--font N --color C --anchor A --background C|none] [--dry-run]
   clip timeline reframe <9:16|1:1|4:5|16:9|WxH> [--fit cover|contain] [--x 0..1] [--y 0..1] [--dry-run]
   clip timeline framing <clipId> [--fit cover|contain|inherit] [--scale 0.1..4] [--x 0..1] [--y 0..1] [--reset]
+  clip timeline loudness <-14|-16|LUFS|off>
   clip timeline show
   clip timeline at <atSec>
   clip timeline frame <atSec> [<output>]
@@ -405,6 +409,32 @@ export async function runTimeline(args: string[]): Promise<void> {
       return;
     }
 
+    case 'loudness': {
+      const [value] = positional;
+      const usage = 'Usage: clip timeline loudness <LUFS, e.g. -14 or -16 | off>';
+      if (!value) throw new Error(usage);
+      let targetLufs: number | null = null;
+      if (value !== 'off') {
+        const parsed = TargetLufsSchema.safeParse(Number(value));
+        if (!parsed.success) {
+          throw new Error(
+            `Loudness must be off or a LUFS value from ${LOUDNESS_MIN_LUFS} to ${LOUDNESS_MAX_LUFS}, got "${value}". ${usage}`,
+          );
+        }
+        targetLufs = parsed.data;
+      }
+      const comp = await readComposition();
+      if ((comp.loudness?.targetLufs ?? null) === targetLufs) {
+        out({ loudness: comp.loudness, applied: false });
+        return;
+      }
+      const doc = await mutateComposition([{ op: 'setLoudness', targetLufs }], {
+        expectedBaseRev: comp.rev,
+      });
+      out({ loudness: doc.loudness, applied: true, rev: doc.rev });
+      return;
+    }
+
     case 'check': {
       const comp = await readComposition();
       const media = await buildMediaMap();
@@ -512,6 +542,7 @@ export async function runTimeline(args: string[]): Promise<void> {
         rev: comp.rev,
         durationSec: compositionDuration(comp),
         canvas: { width: comp.width, height: comp.height, fps: comp.fps, fit: comp.fit },
+        loudness: comp.loudness,
         exportable,
         blockers,
         tracks: comp.tracks.map((t) => ({
@@ -645,6 +676,7 @@ export async function runTimeline(args: string[]): Promise<void> {
         steps: result.steps,
         durationSec: plan.durationSec,
         durationMs: result.durationMs,
+        ...(result.loudness ? { loudness: result.loudness } : {}),
       });
       return;
     }
