@@ -9,11 +9,11 @@ The open-source AI video editor for Claude Code and any MCP client: remove silen
 
 <p align="center">
   <a href="https://skills.sh/makemyclip/editor"><img src="https://skills.sh/b/makemyclip/editor" alt="skills.sh"></a>
+  <a href="https://www.npmjs.com/package/@makemyclip/editor"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.npmjs.org%2Fdownloads%2Fpoint%2Flast-week%2F%40makemyclip%2Feditor&query=%24.downloads&label=weekly%20downloads" alt="npm weekly downloads"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="./package.json"><img src="https://img.shields.io/badge/node-%E2%89%A524-brightgreen" alt="Node 24+"></a>
   <a href="https://www.npmjs.com/package/@makemyclip/editor"><img src="https://img.shields.io/npm/v/@makemyclip/editor.svg" alt="npm"></a>
   <img src="https://img.shields.io/badge/tests-859%20passing-brightgreen" alt="Tests: 859 passing">
-  <img src="https://img.shields.io/badge/telemetry-none-brightgreen" alt="Telemetry: none">
 </p>
 
 <p align="center">
