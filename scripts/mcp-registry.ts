@@ -6,9 +6,11 @@
  *            package.json (which semantic-release has just written), and
  *            add the Claude Desktop extension as an `mcpb` package: its
  *            release URL and the SHA-256 of release/makemyclip-editor.mcpb.
- *   publish  `mcp-publisher login github-oidc`, then `mcp-publisher publish`.
- *            Retried, since the registry reads the new npm version, which
- *            can take a minute to appear. Needs `mcp-publisher` on PATH and
+ *   publish  Wait until npm serves the version in server.json (the registry
+ *            refuses a version npm doesn't have yet, and npm can take several
+ *            minutes after `npm publish` to serve it), then
+ *            `mcp-publisher login github-oidc` and `mcp-publisher publish`,
+ *            retried for registry hiccups. Needs `mcp-publisher` on PATH and
  *            a GitHub Actions OIDC token (`id-token: write`).
  *
  * server.json is changed in the release job's checkout only; nothing is
@@ -18,6 +20,7 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import { execa } from 'execa';
 
 const root = resolve(import.meta.dirname, '..');
@@ -64,7 +67,82 @@ async function prepare(versionArg?: string): Promise<void> {
   process.stdout.write(`server.json: ${version}, makemyclip-editor.mcpb sha256 ${sha256}\n`);
 }
 
+export interface WaitForNpmOptions {
+  registryBaseUrl: string;
+  identifier: string;
+  version: string;
+  /** Give up after this long, request time included; npm has taken over 4
+   *  minutes to serve a new version. */
+  timeoutMs?: number;
+  intervalMs?: number;
+  /** One request; `timeoutMs` bounds it. Rejects on a network error. */
+  fetch?: (url: string, timeoutMs: number) => Promise<{ status: number }>;
+  sleep?: (ms: number) => Promise<unknown>;
+  now?: () => number;
+  log?: (line: string) => void;
+}
+
+/** Longest a single request may take, so one hung connection can't eat the wait. */
+const REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Poll npm for one version's metadata until it answers 200. The registry's own
+ * check reads the same metadata, so publishing before this passes only fails.
+ * A network error counts as "not yet" and is retried until the deadline.
+ */
+export async function waitForNpmVersion(options: WaitForNpmOptions): Promise<void> {
+  const {
+    registryBaseUrl,
+    identifier,
+    version,
+    timeoutMs = 20 * 60_000,
+    intervalMs = 20_000,
+    fetch: get = (url, ms) =>
+      fetch(url, { headers: { 'cache-control': 'no-cache' }, signal: AbortSignal.timeout(ms) }),
+    sleep: wait = sleep,
+    now = Date.now,
+    log = (line) => process.stderr.write(`${line}\n`),
+  } = options;
+  // Scoped names keep their @ but escape the slash: @scope%2fname.
+  const url = `${registryBaseUrl.replace(/\/$/, '')}/${identifier.replace('/', '%2f')}/${version}`;
+  const start = now();
+  const deadline = start + timeoutMs;
+  for (;;) {
+    let answer: string;
+    try {
+      const { status } = await get(
+        url,
+        Math.max(1, Math.min(REQUEST_TIMEOUT_MS, deadline - now())),
+      );
+      if (status === 200) return;
+      answer = `answers ${status}`;
+    } catch (err) {
+      answer = `failed (${err instanceof Error ? err.message : String(err)})`;
+    }
+    const left = deadline - now();
+    if (left <= 0) {
+      throw new Error(
+        `npm still ${answer} for ${identifier}@${version} after ${Math.round((now() - start) / 1000)} s (${url}); list it by hand once npm serves it (RELEASING.md).`,
+      );
+    }
+    const pause = Math.min(intervalMs, left);
+    log(
+      `npm ${answer} for ${identifier}@${version}; checking again in ${Math.round(pause / 1000)} s`,
+    );
+    await wait(pause);
+  }
+}
+
 async function publish(): Promise<void> {
+  const server = JSON.parse(await readFile(serverJsonPath, 'utf8')) as ServerJson;
+  for (const p of server.packages) {
+    if (p.registryType !== 'npm') continue;
+    await waitForNpmVersion({
+      registryBaseUrl: String(p.registryBaseUrl ?? 'https://registry.npmjs.org'),
+      identifier: p.identifier,
+      version: p.version ?? server.version,
+    });
+  }
   await execa('mcp-publisher', ['login', 'github-oidc'], { cwd: root, stdio: 'inherit' });
   const attempts = 6;
   for (let attempt = 1; ; attempt++) {
@@ -79,14 +157,17 @@ async function publish(): Promise<void> {
   }
 }
 
-const [command, version] = process.argv.slice(2);
-const run =
-  command === 'prepare' ? () => prepare(version) : command === 'publish' ? publish : undefined;
-if (!run) {
-  process.stderr.write('Usage: tsx scripts/mcp-registry.ts prepare [version] | publish\n');
-  process.exit(1);
+// Run as a command only, so tests can import waitForNpmVersion.
+if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+  const [command, version] = process.argv.slice(2);
+  const run =
+    command === 'prepare' ? () => prepare(version) : command === 'publish' ? publish : undefined;
+  if (!run) {
+    process.stderr.write('Usage: tsx scripts/mcp-registry.ts prepare [version] | publish\n');
+    process.exit(1);
+  }
+  run().catch((err: unknown) => {
+    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  });
 }
-run().catch((err: unknown) => {
-  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
-  process.exit(1);
-});
