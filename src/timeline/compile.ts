@@ -3,6 +3,7 @@ import { buildPreviewFrameArgs } from '../ffmpeg/args/preview.js';
 import { buildTransitionArgs } from '../ffmpeg/args/transition.js';
 import { quoteFilterArg } from '../ffmpeg/escape.js';
 import { fontFileFor, MissingFontError } from '../ffmpeg/font.js';
+import { invalidColorMessage, isColor } from './color.js';
 import {
   type Clip,
   type Composition,
@@ -449,7 +450,7 @@ function buildSegmentStep(
       '-f',
       'lavfi',
       '-i',
-      `color=c=${quoteColor(clip.color)}:s=${width}x${height}:r=${fps}`,
+      `color=c=${quoteColor(clip.color, `Color clip "${clip.id}" color`)}:s=${width}x${height}:r=${fps}`,
     );
     inputArgs.push(
       '-f',
@@ -465,7 +466,7 @@ function buildSegmentStep(
       '-f',
       'lavfi',
       '-i',
-      `color=c=${quoteColor(background)}:s=${width}x${height}:r=${fps}`,
+      `color=c=${quoteColor(background, CANVAS_BACKGROUND)}:s=${width}x${height}:r=${fps}`,
     );
     inputArgs.push(
       '-f',
@@ -555,7 +556,7 @@ function framingFilters(
   height: number,
   background: string,
 ): string[] {
-  const pad = `color=${quoteColor(background)}`;
+  const pad = `color=${quoteColor(background, CANVAS_BACKGROUND)}`;
   if (isDefaultFraming(framing)) {
     return [
       `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
@@ -635,8 +636,13 @@ const ANCHOR_EXPR: Record<string, { x: string; y: string }> = {
   'bottom-right': { x: `w-text_w-${EDGE}`, y: `h-text_h-${EDGE}` },
 };
 
-/** color filter `c=` rejects '#rrggbb'; normalize to 0x form, pass names through. */
-function quoteColor(color: string): string {
+const CANVAS_BACKGROUND = 'Canvas background';
+
+/** color filter `c=` rejects '#rrggbb'; normalize to 0x form, pass names through.
+ *  The value lands unquoted in the graph, so anything but a color is refused: a
+ *  stored document is only as safe as whatever wrote it. */
+function quoteColor(color: string, what: string): string {
+  if (!isColor(color)) throw new CompileError(`${what} ${invalidColorMessage(color)}`);
   return color.startsWith('#') ? `0x${color.slice(1)}` : color;
 }
 
