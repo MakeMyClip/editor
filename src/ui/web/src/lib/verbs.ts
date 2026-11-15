@@ -1,4 +1,4 @@
-import type { Composition } from '../types.js';
+import type { Composition, Fit } from '../types.js';
 
 /** A timeline editing verb (mirrors CompositionVerb in src/timeline/verbs.ts).
  *  Loosely typed at the field level — the server validates with Zod, which is the
@@ -18,6 +18,24 @@ export type Verb =
       anchor?: string;
       color?: string;
       background?: string | null;
+    }
+  | {
+      verb: 'reframe';
+      aspect?: string;
+      width?: number;
+      height?: number;
+      fit?: Fit;
+      x?: number;
+      y?: number;
+    }
+  | {
+      verb: 'set_framing';
+      clipId: string;
+      fit?: Fit | 'inherit';
+      scale?: number;
+      x?: number;
+      y?: number;
+      reset?: boolean;
     }
   | {
       verb: 'transition';

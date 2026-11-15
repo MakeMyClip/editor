@@ -4,6 +4,7 @@ import type { Verb } from '../lib/verbs.js';
 import type { Clip, Composition, MediaClip } from '../types.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { ExportButton } from './ExportButton.js';
+import { OutputPanel } from './OutputPanel.js';
 
 const PX_PER_SEC = 90;
 const GUTTER = 128; // left lane-label column width (px)
@@ -40,7 +41,7 @@ export function DocTimeline({
   exporting: boolean;
   onUndo: () => void;
   onRedo: () => void;
-  /** Apply editing verbs (captions); resolves to the ops applied, or null on error. */
+  /** Apply editing verbs (captions, output shape); resolves to the ops applied, or null on error. */
   onApply: (verbs: Verb[]) => Promise<number | null>;
   verbError: string | null;
 }) {
@@ -90,6 +91,12 @@ export function DocTimeline({
           rev {composition.rev}
         </span>
         <span className="doc-tl-playtime">▶ {playhead.toFixed(2)}s</span>
+        <OutputPanel
+          composition={composition}
+          busy={exporting}
+          error={verbError}
+          onApply={onApply}
+        />
         <CaptionsPanel busy={exporting} error={verbError} onApply={onApply} />
         <button
           type="button"

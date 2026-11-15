@@ -226,6 +226,10 @@ export function App() {
                 clip={selected.clip}
                 playheadSec={playheadSec}
                 hasNext={nextClipOnTrack(selected.track, selected.clip) !== null}
+                canvasFit={composition.fit}
+                trackMediaIds={selected.track.clips
+                  .filter((c) => c.kind === 'media')
+                  .map((c) => c.id)}
                 busy={verbBusy}
                 error={verbError}
                 onApply={handleApplyVerbs}

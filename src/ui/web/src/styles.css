@@ -1646,3 +1646,30 @@ select.form-input {
   border-color: var(--accent);
   color: var(--text);
 }
+
+/* Clip inspector: framing sliders and a row of actions. */
+.ci-slider {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.ci-slider input {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.ci-slider-value {
+  width: 3.2rem;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text-2);
+}
+
+.ci-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}

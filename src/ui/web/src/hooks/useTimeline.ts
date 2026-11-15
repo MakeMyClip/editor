@@ -8,6 +8,7 @@ const EMPTY: Composition = {
   height: 1080,
   fps: 30,
   background: 'black',
+  fit: 'contain',
   tracks: [],
 };
 
