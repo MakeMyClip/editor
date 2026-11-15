@@ -187,6 +187,55 @@ describe('planShort: cut from the source timeline', () => {
     expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 3.9, sourceOutSec: 5.6 }]);
   });
 
+  it('refuses words cut out exactly, where only padding touches them', async () => {
+    // Word 2 (3.0–3.5) was cut out exactly: c1 ends at its start, c2 starts at its end.
+    const exact = sourceOf([clipOf('c1', 0, 3, 0), clipOf('c2', 3.5, 30, 3)]);
+    await expect(
+      plan(exact, { ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 2 }] }),
+    ).rejects.toThrow(/cut out of the source timeline/);
+  });
+
+  it('keeps the lead padding across a split at the first word', async () => {
+    const split = sourceOf([clipOf('c1', 0, 3, 0), clipOf('c2', 3, 30, 3)]);
+    const short = await plan(split, { ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 2 }] });
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 2.9, sourceOutSec: 3.75 }]);
+  });
+
+  it('plays two ranges of neighboring words straight through, without replaying padding', async () => {
+    const close = transcriptOf(M, [
+      [1, 1.5],
+      [1.7, 2.2],
+      [2.9, 3.4],
+    ]);
+    const whole = sourceOf([clipOf('c1', 0, 30, 0)]);
+    const short = await plan(
+      whole,
+      {
+        ranges: [
+          { clipId: 'c1', fromIndex: 0, toIndex: 0 },
+          { clipId: 'c1', fromIndex: 1, toIndex: 1 },
+        ],
+      },
+      { transcripts: [close] },
+    );
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 0.9, sourceOutSec: 2.45 }]);
+
+    const repeated = await plan(
+      whole,
+      {
+        ranges: [
+          { clipId: 'c1', fromIndex: 1, toIndex: 1 },
+          { clipId: 'c1', fromIndex: 0, toIndex: 1 },
+        ],
+      },
+      { transcripts: [close] },
+    );
+    expect(repeated.pieces).toEqual([
+      { mediaId: M, sourceInSec: 1.6, sourceOutSec: 2.45 },
+      { mediaId: M, sourceInSec: 0.9, sourceOutSec: 2.45 },
+    ]);
+  });
+
   it('plays the ranges in the order given', async () => {
     const whole = sourceOf([clipOf('c1', 0, 30, 0)]);
     const short = await plan(whole, {

@@ -104,6 +104,7 @@ export function checkShortTimelines(target: string, source: string = MAIN_TIMELI
 }
 
 interface WordWindow {
+  mediaId: MediaId;
   /** Padded edges, source seconds. */
   start: number;
   end: number;
@@ -114,6 +115,9 @@ interface WordWindow {
 
 interface Piece extends ShortPiece {
   effects: Effect[];
+  /** The source clip's speed, refused only if the piece is played. */
+  speed: number;
+  sourceClipId: string;
 }
 
 /**
@@ -142,17 +146,28 @@ export async function planShort(
     );
   }
 
-  const pieces: Piece[] = [];
+  const windows: WordWindow[] = [];
   for (const range of request.ranges) {
     const { clip, transcript } = await lookup(source, range.clipId, range.transcriptId);
-    const window = wordWindow(transcript, range, clip.id);
-    const found = piecesUnder(picture.clips, clip.mediaId, window);
+    windows.push(wordWindow(transcript, range, clip));
+  }
+  const pieces: Piece[] = [];
+  windows.forEach((window, i) => {
+    const range = request.ranges[i];
+    const found = piecesUnder(picture.clips, withoutReplay(window, windows[i - 1]));
     if (found.length === 0) {
       throw new ShortError(
-        `Words ${range.fromIndex}..${range.toIndex} were cut out of the source timeline, so there is nothing to play. Pick words that are still on it.`,
+        `Words ${range?.fromIndex}..${range?.toIndex} were cut out of the source timeline, so there is nothing to play. Pick words that are still on it.`,
       );
     }
     pieces.push(...found);
+  });
+  const sped = pieces.find((p) => p.speed !== 1);
+  if (sped) {
+    throw new ShortError(
+      `Clip "${sped.sourceClipId}" on the source timeline plays at ${sped.speed}x, and a short can't include a speed change yet. ` +
+        'Remove its speed effect or pick words outside it.',
+    );
   }
   const joined = joinContinuous(pieces);
 
@@ -238,12 +253,12 @@ export async function planShort(
  * so the padding never takes in part of a word outside the range, and at the
  * start of the file.
  */
-function wordWindow(transcript: Transcript, range: ShortRange, clipId: string): WordWindow {
+function wordWindow(transcript: Transcript, range: ShortRange, clip: MediaClip): WordWindow {
   const first = transcript.words[range.fromIndex];
   const last = transcript.words[range.toIndex];
   if (!first || !last || range.toIndex < range.fromIndex) {
     throw new ShortError(
-      `Words ${range.fromIndex}..${range.toIndex} aren't in the transcript of clip "${clipId}" ` +
+      `Words ${range.fromIndex}..${range.toIndex} aren't in the transcript of clip "${clip.id}" ` +
         `(it has ${transcript.words.length} words, numbered from 0).`,
     );
   }
@@ -258,6 +273,7 @@ function wordWindow(transcript: Transcript, range: ShortRange, clipId: string): 
     Math.min(last.endSec + SHORT_TAIL_SEC, after?.startSec ?? Number.POSITIVE_INFINITY),
   );
   return {
+    mediaId: clip.mediaId,
     start: roundMs(start),
     end: roundMs(end),
     speechStart: first.startSec,
@@ -266,39 +282,62 @@ function wordWindow(transcript: Transcript, range: ShortRange, clipId: string): 
 }
 
 /**
- * The parts of a window that the source timeline's picture clips of one file
- * play, in timeline order. A moment the timeline plays twice is taken once, and
- * a part holding only padding (no word of the range) is left out, since it would
- * only add a jump cut.
+ * A window that picks up later in the same file than the one before it starts
+ * where that one's padding ended, so two ranges of neighboring words play
+ * straight through instead of replaying the padding they share. A range that
+ * repeats or goes back to earlier words is left as asked.
  */
-function piecesUnder(clips: readonly Clip[], mediaId: MediaId, window: WordWindow): Piece[] {
+function withoutReplay(window: WordWindow, before: WordWindow | undefined): WordWindow {
+  if (
+    !before ||
+    before.mediaId !== window.mediaId ||
+    window.speechStart < before.speechEnd ||
+    window.start >= before.end
+  ) {
+    return window;
+  }
+  return { ...window, start: Math.min(before.end, window.speechStart) };
+}
+
+/**
+ * The parts of a window that the source timeline's picture clips of its file
+ * play, in timeline order. A moment the timeline plays twice is taken once.
+ * Parts a split left continuous are joined first; then a part holding none of
+ * the range's words (only padding) is left out, since it would only add a jump
+ * cut, as is a sliver too short to see.
+ */
+function piecesUnder(clips: readonly Clip[], window: WordWindow): Piece[] {
   const taken: [number, number][] = [];
-  const pieces: Piece[] = [];
+  const parts: Piece[] = [];
   for (const clip of [...clips].sort((a, b) => a.startSec - b.startSec)) {
-    if (clip.kind !== 'media' || clip.mediaId !== mediaId) continue;
+    if (clip.kind !== 'media' || clip.mediaId !== window.mediaId) continue;
     const lo = Math.max(window.start, clip.sourceInSec);
     const hi = Math.min(window.end, clip.sourceOutSec);
     if (hi <= lo) continue;
     for (const [a, b] of subtract([lo, hi], taken)) {
-      if (b - a < MIN_PIECE_SEC || b < window.speechStart || a > window.speechEnd) continue;
-      const speed = speedFactor(clip.effects);
-      if (speed !== 1) {
-        throw new ShortError(
-          `Clip "${clip.id}" on the source timeline plays at ${speed}x, and a short can't include a speed change yet. ` +
-            'Remove its speed effect or pick words outside it.',
-        );
-      }
-      pieces.push({
-        mediaId,
+      parts.push({
+        mediaId: window.mediaId,
         sourceInSec: a,
         sourceOutSec: b,
         // Fades belonged to the source clip's edges, not the short's.
         effects: clip.effects.filter((e) => e.type === 'adjust' || e.type === 'volume'),
+        speed: speedFactor(clip.effects),
+        sourceClipId: clip.id,
       });
       taken.push([a, b]);
     }
   }
-  return pieces;
+  return joinContinuous(parts).filter(
+    (p) => p.sourceOutSec - p.sourceInSec >= MIN_PIECE_SEC && holdsSpeech(p, window),
+  );
+}
+
+/** Whether a piece plays any of the range's words, not just touches their edge. */
+function holdsSpeech(piece: Piece, window: WordWindow): boolean {
+  if (window.speechEnd > window.speechStart) {
+    return piece.sourceOutSec > window.speechStart && piece.sourceInSec < window.speechEnd;
+  }
+  return piece.sourceInSec <= window.speechStart && piece.sourceOutSec >= window.speechEnd;
 }
 
 /** `[lo, hi]` minus the `taken` intervals, in order. */
@@ -326,6 +365,7 @@ function joinContinuous(pieces: Piece[]): Piece[] {
       prev &&
       prev.mediaId === piece.mediaId &&
       Math.abs(prev.sourceOutSec - piece.sourceInSec) < SAME_SEC &&
+      prev.speed === piece.speed &&
       JSON.stringify(prev.effects) === JSON.stringify(piece.effects)
     ) {
       joined[joined.length - 1] = { ...prev, sourceOutSec: piece.sourceOutSec };
