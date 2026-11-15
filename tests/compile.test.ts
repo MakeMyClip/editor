@@ -737,3 +737,99 @@ describe('compileTimeline — loudness', () => {
     expect(buildFrameAtPlan(loud, ctx({ output: '/ws/f.jpg' }), 1).loudness).toBeUndefined();
   });
 });
+
+describe('compileTimeline — join fades at hard cuts', () => {
+  const graph = (plan: ReturnType<typeof compileTimeline>, label: string): string => {
+    const args = plan.steps.find((s) => s.label === label)?.args ?? [];
+    return args[args.indexOf('-filter_complex') + 1] ?? '';
+  };
+  const audio = (fc: string): string => fc.slice(fc.indexOf('[0:a]'));
+  const media = (id: string, startSec: number, sourceOutSec = 2) => ({
+    op: 'addClip' as const,
+    trackId: 'v0',
+    clip: mediaClip({ id, mediaId: M1, sourceOutSec, startSec }),
+  });
+
+  it('fades the audio 8 ms into and out of each hard cut, not at the outer edges', () => {
+    const plan = compileTimeline(oneTrack(media('a', 0), media('b', 2), media('c', 4)), ctx());
+    expect(audio(graph(plan, 'segment:a'))).toBe(
+      '[0:a]aformat=sample_rates=48000:channel_layouts=stereo,afade=t=out:st=1.992:d=0.008[a]',
+    );
+    expect(audio(graph(plan, 'segment:b'))).toBe(
+      '[0:a]aformat=sample_rates=48000:channel_layouts=stereo,afade=t=in:st=0:d=0.008,afade=t=out:st=1.992:d=0.008[a]',
+    );
+    expect(audio(graph(plan, 'segment:c'))).toBe(
+      '[0:a]aformat=sample_rates=48000:channel_layouts=stereo,afade=t=in:st=0:d=0.008[a]',
+    );
+  });
+
+  it('ends the fade at or before a cut that falls between milliseconds', () => {
+    // 32 frames at 30 fps = 1.0667s: a start rounded up (1.059) would end the
+    // fade after the cut; rounded down it ends at 1.066.
+    const plan = compileTimeline(oneTrack(media('a', 0, 32 / 30), media('b', 32 / 30)), ctx());
+    expect(audio(graph(plan, 'segment:a'))).toContain('afade=t=out:st=1.058:d=0.008');
+  });
+
+  it('leaves cuts with a transition to the crossfade', () => {
+    const plan = compileTimeline(
+      oneTrack(media('a', 0), media('b', 2), {
+        op: 'addTransition',
+        trackId: 'v0',
+        transition: { afterClipId: 'a', kind: 'fade', durationSec: 0.5 },
+      }),
+      ctx(),
+    );
+    expect(graph(plan, 'segment:a')).not.toContain('afade');
+    expect(graph(plan, 'segment:b')).not.toContain('afade');
+  });
+
+  it("keeps a clip's own fade instead of adding one on that edge", () => {
+    const plan = compileTimeline(
+      oneTrack(media('a', 0), media('b', 2), {
+        op: 'addEffect',
+        clipId: 'a',
+        effect: { type: 'fadeOut', durationSec: 0.5 },
+      }),
+      ctx(),
+    );
+    const a = audio(graph(plan, 'segment:a'));
+    expect(a).toContain('afade=t=out:st=1.5:d=0.5');
+    expect(a).not.toContain('d=0.008');
+    expect(audio(graph(plan, 'segment:b'))).toContain('afade=t=in:st=0:d=0.008');
+  });
+
+  it('times the fade in output time when the clip is sped up', () => {
+    const plan = compileTimeline(
+      oneTrack(media('a', 0), media('b', 2), {
+        op: 'addEffect',
+        clipId: 'a',
+        effect: { type: 'speed', factor: 2 },
+      }),
+      ctx(),
+    );
+    expect(audio(graph(plan, 'segment:a'))).toMatch(
+      /atempo=2\.0,afade=t=out:st=0\.992:d=0\.008\[a\]$/,
+    );
+  });
+
+  it('skips generated silence: color cards and media without sound', () => {
+    const silent = ctx({ media: new Map([[M1, { path: '/ws/a.mp4', hasAudio: false }]]) });
+    const plan = compileTimeline(oneTrack(media('a', 0), media('b', 2)), silent);
+    expect(graph(plan, 'segment:a')).not.toContain('afade');
+    const card = compileTimeline(
+      oneTrack(
+        { op: 'addClip', trackId: 'v0', clip: colorClip({ id: 'k', durationSec: 1, startSec: 0 }) },
+        media('b', 1),
+      ),
+      ctx(),
+    );
+    expect(graph(card, 'segment:k')).not.toContain('afade');
+    expect(audio(graph(card, 'segment:b'))).toContain('afade=t=in:st=0:d=0.008');
+  });
+
+  it('never fades a frame preview', () => {
+    const doc = oneTrack(media('a', 0), media('b', 2));
+    const seg = buildFrameAtPlan(doc, ctx({ output: '/ws/f.jpg' }), 2.5).steps[0];
+    expect(seg?.args.join(' ')).not.toContain('afade');
+  });
+});

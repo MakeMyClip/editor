@@ -9,6 +9,7 @@ import {
   clipDuration,
   clipEndSec,
   type Effect,
+  type EffectType,
   type Fit,
   type TextClip,
   type Track,
@@ -46,6 +47,10 @@ import type { MediaId } from './schema.js';
  * `FadeSuppression` plumbing), so the xfade's blend isn't stacked over a fade
  * over the same window. Fades on outer boundaries (open from black, close to
  * black) and on plain cuts are untouched.
+ *
+ * A hard cut between two clips also gets a few milliseconds of audio fade on
+ * each side (see `Joins`), so the waveform meets the cut at zero instead of
+ * jumping, which is what makes a cut click.
  */
 
 export interface MediaInfo {
@@ -279,6 +284,32 @@ interface FilterChains {
 
 /** Whether a clip's leading/trailing per-clip fade should be dropped because a
  *  transition already owns the blend over that boundary (else they double-darken). */
+/** Audio fade on each side of a hard cut, seconds: long enough to bring the
+ *  waveform to zero at the join, too short to hear as a dip. */
+const JOIN_FADE_SEC = 0.008;
+
+/** Which edges of a clip meet another clip at a hard cut (no transition). */
+interface Joins {
+  head: boolean;
+  tail: boolean;
+}
+
+/** The join fades for a clip's edges, in output time. An edge with a fade of
+ *  the clip's own already reaches silence there, so it gets none. */
+function joinFades(clip: Clip, outDur: number, joins: Joins): string[] {
+  const d = Math.min(JOIN_FADE_SEC, outDur / 2);
+  const has = (type: EffectType): boolean => clip.effects.some((e) => e.type === type);
+  const fades: string[] = [];
+  if (joins.head && !has('fadeIn')) fades.push(`afade=t=in:st=0:d=${seconds(d)}`);
+  if (joins.tail && !has('fadeOut')) {
+    // Start rounded DOWN to the millisecond, so the fade reaches silence at or
+    // before the end of the segment (afade holds silence after it), never past it.
+    const st = Math.floor((outDur - d) * 1000 + 1e-6) / 1000;
+    fades.push(`afade=t=out:st=${st}:d=${seconds(d)}`);
+  }
+  return fades;
+}
+
 interface FadeSuppression {
   in: boolean;
   out: boolean;
@@ -382,6 +413,7 @@ function buildSegmentStep(
   ctx: CompileContext,
   overlays: TextClip[],
   fadeSuppress: FadeSuppression = { in: false, out: false },
+  joins: Joins = { head: false, tail: false },
 ): FfmpegStep {
   assertCompilable(clip);
   const outDur = outputDuration(clip);
@@ -480,7 +512,13 @@ function buildSegmentStep(
   // mono (and so every segment exposes a real [a] output). aformat is a harmless
   // no-op for the already-stereo silence sources. This makes the "guaranteed
   // stereo AAC audio" invariant real, not aspirational.
-  const audioChain = ['aformat=sample_rates=48000:channel_layouts=stereo', ...afx].join(',');
+  // Join fades only where there is sound to click: generated silence needs none.
+  const hasSound = clip.kind === 'media' && ctx.media.get(clip.mediaId)?.hasAudio === true;
+  const audioChain = [
+    'aformat=sample_rates=48000:channel_layouts=stereo',
+    ...afx,
+    ...(hasSound ? joinFades(clip, outDur, joins) : []),
+  ].join(',');
 
   const filterParts = [`${videoSource}${videoChain}[v]`, `[${audioSource}]${audioChain}[a]`];
   const audioMap = '[a]';
@@ -756,7 +794,11 @@ export function compileTimeline(comp: Composition, ctx: CompileContext): FfmpegP
       in: prevClip ? transitionAfter.has(prevClip.id) : false,
       out: i < clips.length - 1 && transitionAfter.has(clip.id),
     };
-    const step = buildSegmentStep(comp, clip, i, ctx, overlays, fadeSuppress);
+    const joins: Joins = {
+      head: prevClip !== undefined && !transitionAfter.has(prevClip.id),
+      tail: i < clips.length - 1 && !transitionAfter.has(clip.id),
+    };
+    const step = buildSegmentStep(comp, clip, i, ctx, overlays, fadeSuppress, joins);
     steps.push(step);
     return { clip, output: step.output, durationSec: outputDuration(clip) };
   });
