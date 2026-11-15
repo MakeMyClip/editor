@@ -79,6 +79,17 @@ describe('buildFrameAtPlan', () => {
     expect(frame?.args.at(-1)).toBe('/ws/frame.jpg');
   });
 
+  it('frames the picture the way export does (fit, zoom, position)', () => {
+    const doc = applyOps(oneClip(), [
+      { op: 'setCanvas', width: 1080, height: 1920, fit: 'cover' },
+      { op: 'setTransform', clipId: 'c1', transform: { x: 0 } },
+    ]);
+    const seg = buildFrameAtPlan(doc, CTX('/ws/frame.jpg'), 3).steps[0];
+    const graph = seg?.args[(seg?.args.indexOf('-filter_complex') ?? -2) + 1] ?? '';
+    expect(graph).toContain('force_original_aspect_ratio=increase');
+    expect(graph).toContain("crop=w='min(iw,1080)':h='min(ih,1920)':x='(iw-ow)*0'");
+  });
+
   it('a tagged context gives the segment a collision-free path; untagged stays stable', () => {
     const segOut = (tag?: string) =>
       buildFrameAtPlan(oneClip(), { ...CTX('/ws/frame.jpg'), tag }, 3).steps[0]?.output;

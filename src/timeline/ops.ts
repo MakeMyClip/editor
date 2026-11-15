@@ -10,6 +10,8 @@ import {
   clipEndSec,
   type Effect,
   EffectSchema,
+  type Fit,
+  FitSchema,
   type MediaClip,
   MediaClipSchema,
   makeClipId,
@@ -43,7 +45,14 @@ export type SourceRange = z.infer<typeof SourceRangeSchema>;
  * and tests assert the resulting document deterministically.
  */
 export type CompositionOp =
-  | { op: 'setCanvas'; width?: number; height?: number; fps?: number; background?: string }
+  | {
+      op: 'setCanvas';
+      width?: number;
+      height?: number;
+      fps?: number;
+      background?: string;
+      fit?: Fit;
+    }
   | { op: 'addTrack'; track: Track; index?: number }
   | { op: 'removeTrack'; trackId: string }
   | { op: 'addClip'; trackId: string; clip: Clip }
@@ -69,6 +78,7 @@ export type CompositionOpKind = CompositionOp['op'];
  * into a full transform and silently change what the op overwrites on redo.
  */
 const PartialTransformSchema = z.object({
+  fit: FitSchema.optional(),
   scale: z.number().positive().optional(),
   x: z.number().optional(),
   y: z.number().optional(),
@@ -89,6 +99,7 @@ export const CompositionOpSchema = z.discriminatedUnion('op', [
     height: z.number().int().positive().optional(),
     fps: z.number().positive().optional(),
     background: z.string().optional(),
+    fit: FitSchema.optional(),
   }),
   z.object({
     op: z.literal('addTrack'),
@@ -191,6 +202,7 @@ export function applyOp(comp: Composition, op: CompositionOp): Composition {
       if (op.height !== undefined) draft.height = op.height;
       if (op.fps !== undefined) draft.fps = op.fps;
       if (op.background !== undefined) draft.background = op.background;
+      if (op.fit !== undefined) draft.fit = op.fit;
       break;
     }
     case 'addTrack': {
@@ -303,7 +315,12 @@ export function applyOp(comp: Composition, op: CompositionOp): Composition {
     case 'setTransform': {
       const { clip } = locateClip(draft, op.clipId);
       const base = clip.transform ?? TransformSchema.parse({});
-      clip.transform = { ...base, ...op.transform };
+      // Skip keys present but undefined: a spread would let `fit: undefined`
+      // wipe a stored override that the op never meant to touch.
+      const set = Object.fromEntries(
+        Object.entries(op.transform).filter(([, value]) => value !== undefined),
+      );
+      clip.transform = { ...base, ...set };
       break;
     }
     case 'clearTransform': {
@@ -387,6 +404,7 @@ export function invertOp(comp: Composition, op: CompositionOp): CompositionOp[] 
           ...(op.height !== undefined ? { height: comp.height } : {}),
           ...(op.fps !== undefined ? { fps: comp.fps } : {}),
           ...(op.background !== undefined ? { background: comp.background } : {}),
+          ...(op.fit !== undefined ? { fit: comp.fit } : {}),
         },
       ];
     case 'addTrack':
@@ -516,7 +534,10 @@ export function invertOp(comp: Composition, op: CompositionOp): CompositionOp[] 
     case 'setTransform': {
       const { clip } = locateClip(comp, op.clipId);
       if (clip.transform === undefined) return [{ op: 'clearTransform', clipId: op.clipId }];
+      // Clear first: setTransform merges, so restoring alone would keep an
+      // optional key (`fit`) the op added and the prior transform didn't have.
       return [
+        { op: 'clearTransform', clipId: op.clipId },
         { op: 'setTransform', clipId: op.clipId, transform: structuredClone(clip.transform) },
       ];
     }

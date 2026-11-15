@@ -5,12 +5,21 @@ import {
   AnchorSchema,
   type Composition,
   clipEndSec,
+  FitSchema,
   type MediaClip,
   makeClipId,
   type TextStyle,
   TransitionKindSchema,
 } from './composition.js';
 import { applyOps, type CompositionOp, colorClip, mediaClip, textClip, videoTrack } from './ops.js';
+import {
+  AspectSchema,
+  FramingFitSchema,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  planFraming,
+  planReframe,
+} from './reframe.js';
 import type { MediaId } from './schema.js';
 import { SensitivitySchema, type SilenceCut } from './silence.js';
 import {
@@ -198,6 +207,70 @@ const EDITABLE_VERB_SCHEMAS = [
     anchor: AnchorSchema.optional().describe('Where captions sit (default bottom-center).'),
   }),
   z.object({
+    verb: z.literal('reframe'),
+    aspect: AspectSchema.optional().describe(
+      'Output shape: 9:16 (vertical: Shorts, Reels, TikTok), 1:1, 4:5 (feed) or 16:9. Keeps the canvas short side, so 1920x1080 becomes 1080x1920.',
+    ),
+    width: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe('Exact canvas width in pixels (even), with height, instead of aspect.'),
+    height: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe('Exact canvas height in pixels (even), with width, instead of aspect.'),
+    fit: FitSchema.optional().describe(
+      'cover (default): fill the frame and crop what overflows. contain: show the whole picture with bars.',
+    ),
+    x: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe(
+        'Horizontal position for every media clip now on the timeline: 0 shows the left edge of the source, 0.5 the center, 1 the right edge. Clips added later start centered; frame them with set_framing.',
+      ),
+    y: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Vertical position for every media clip now on the timeline: 0 top, 1 bottom.'),
+  }),
+  z.object({
+    verb: z.literal('set_framing'),
+    clipId: z.string().describe('Media clip to frame.'),
+    fit: FramingFitSchema.optional().describe(
+      "This clip's fit: cover fills the frame, contain shows all of it, inherit follows the canvas again.",
+    ),
+    scale: z
+      .number()
+      .min(MIN_ZOOM)
+      .max(MAX_ZOOM)
+      .optional()
+      .describe('Zoom: 1 = fitted size, 1.3 = a punch-in, below 1 = smaller with bars.'),
+    x: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Horizontal position: 0 shows the left edge of the source, 0.5 center, 1 right.'),
+    y: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Vertical position: 0 top, 0.5 center, 1 bottom.'),
+    reset: z
+      .boolean()
+      .optional()
+      .describe('Start from the canvas default (its fit, centered, unzoomed) before the rest.'),
+  }),
+  z.object({
     verb: z.literal('transition'),
     afterClipId: z
       .string()
@@ -209,10 +282,10 @@ const EDITABLE_VERB_SCHEMAS = [
 ] as const;
 
 /**
- * `set_transform` is split out from the editable set: the compiler rejects a
- * non-identity transform (see `assertCompilable` in compile.ts), so surfaces that
- * expose only renderable edits — the `clip ui` inspector and the MCP server — omit
- * it. The CLI and the op layer still accept it.
+ * `set_transform` is split out from the editable set: it can rotate a clip or
+ * make it partly transparent, which export refuses (see `assertCompilable` in
+ * compile.ts), so the MCP server omits it and offers `set_framing` for fit, zoom
+ * and position. The op layer still accepts it.
  */
 const TRANSFORM_VERB_SCHEMA = z.object({
   verb: z.literal('set_transform'),
@@ -224,8 +297,8 @@ const TRANSFORM_VERB_SCHEMA = z.object({
   opacity: z.number().min(0).max(1).optional(),
 });
 
-/** Renderable editing verbs only — no `set_transform`. What the `clip ui` and the
- *  MCP `timeline_edit` accept, so neither can author a doc the compiler refuses. */
+/** Renderable editing verbs only — no `set_transform`. What the MCP
+ *  `timeline_edit` accepts, so it can't author a doc the compiler refuses. */
 export const EditableVerbSchema = z.discriminatedUnion('verb', EDITABLE_VERB_SCHEMAS);
 
 /** The full verb vocabulary, including `set_transform` (accepted by the CLI/op layer). */
@@ -405,6 +478,10 @@ export async function lowerVerb(
       );
       return plan.ops;
     }
+    case 'reframe':
+      return planReframe(comp, verb).ops;
+    case 'set_framing':
+      return planFraming(comp, verb);
     case 'transition':
       return [
         {

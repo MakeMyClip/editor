@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { MissingFontError } from '../src/ffmpeg/font.js';
-import { type CompileContext, CompileError, compileTimeline } from '../src/timeline/compile.js';
-import { emptyComposition } from '../src/timeline/composition.js';
+import {
+  type CompileContext,
+  CompileError,
+  clipFraming,
+  compileTimeline,
+} from '../src/timeline/compile.js';
+import { type Composition, emptyComposition } from '../src/timeline/composition.js';
 import { applyOps, colorClip, mediaClip, textClip, videoTrack } from '../src/timeline/ops.js';
 import type { MediaId } from '../src/timeline/schema.js';
 import { parseFilter } from './ffmpeg-parse.js';
@@ -305,16 +310,47 @@ describe('compileTimeline — v1 guards (explicit, not silent-wrong)', () => {
     expect(() => compileTimeline(comp, ctx())).toThrow(/single video track/i);
   });
 
-  it('rejects a non-identity transform', () => {
+  it('rejects a rotated or partly transparent clip', () => {
+    for (const transform of [{ rotationDeg: 90 }, { opacity: 0.5 }]) {
+      const comp = oneTrack(
+        {
+          op: 'addClip',
+          trackId: 'v0',
+          clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 0 }),
+        },
+        { op: 'setTransform', clipId: 'a', transform },
+      );
+      expect(() => compileTimeline(comp, ctx())).toThrow(/rotation and opacity/i);
+    }
+  });
+
+  it('rejects a position outside 0..1', () => {
     const comp = oneTrack(
       {
         op: 'addClip',
         trackId: 'v0',
         clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 0 }),
       },
-      { op: 'setTransform', clipId: 'a', transform: { scale: 2 } },
+      { op: 'setTransform', clipId: 'a', transform: { x: 1.2 } },
     );
-    expect(() => compileTimeline(comp, ctx())).toThrow(/transform/i);
+    expect(() => compileTimeline(comp, ctx())).toThrow(/between 0 and 1/);
+  });
+
+  it('rejects a zoom or position on a text or color clip', () => {
+    const color = oneTrack(
+      { op: 'addClip', trackId: 'v0', clip: colorClip({ id: 'k', durationSec: 2, startSec: 0 }) },
+      { op: 'setTransform', clipId: 'k', transform: { scale: 2 } },
+    );
+    expect(() => compileTimeline(color, ctx())).toThrow(/Color clip "k".*media clips only/);
+    const text = oneTrack(
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: textClip({ id: 't', text: 'Hi', durationSec: 2, startSec: 0 }),
+      },
+      { op: 'setTransform', clipId: 't', transform: { y: 0.9 } },
+    );
+    expect(() => compileTimeline(text, ctx({ fontFor: () => undefined }))).toThrow(/anchor/);
   });
 
   it('rejects chromaKey in single-track export', () => {
@@ -575,5 +611,96 @@ describe('compileTimeline — text over the picture (captions)', () => {
     const comp = oneTrack({ op: 'addClip', trackId: 'v0', clip: caption('t', 'Title', 0, 2) });
     const plan = compileTimeline(comp, ctx({ fontFor: () => undefined }));
     expect(drawtexts(plan.steps[0]?.args)[0]?.enable).toBeUndefined();
+  });
+});
+
+describe('compileTimeline — framing (fit, zoom, position)', () => {
+  function framed(canvas: Partial<Composition>, transform?: Record<string, unknown>) {
+    const comp = applyOps(emptyComposition(canvas), [
+      { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 0 }),
+      },
+      ...(transform ? [{ op: 'setTransform' as const, clipId: 'a', transform }] : []),
+    ]);
+    const args = compileTimeline(comp, ctx()).steps[0]?.args ?? [];
+    return { comp, fc: args[args.indexOf('-filter_complex') + 1] ?? '' };
+  }
+
+  it('keeps the plain fit-and-center chain for default framing', () => {
+    const { fc } = framed({ width: 1080, height: 1920 });
+    expect(fc).toBe(
+      '[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,' +
+        'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,format=yuv420p[v];' +
+        '[0:a]aformat=sample_rates=48000:channel_layouts=stereo[a]',
+    );
+  });
+
+  it('covers a 9:16 canvas: scale up, crop at the alignment, pad as a no-op', () => {
+    const { fc } = framed({ width: 1080, height: 1920, fit: 'cover' }, { x: 0.4 });
+    expect(fc).toContain(
+      '[0:v]scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2,' +
+        "crop=w='min(iw,1080)':h='min(ih,1920)':x='(iw-ow)*0.4':y='(ih-oh)*0.5'," +
+        "pad=1080:1920:x='(ow-iw)*0.4':y='(oh-ih)*0.5':color=black,setsar=1,fps=30,format=yuv420p[v]",
+    );
+  });
+
+  it('lets a clip override the canvas fit', () => {
+    const { fc } = framed({ width: 1080, height: 1920, fit: 'cover' }, { fit: 'contain' });
+    expect(fc).toContain('scale=1080:1920:force_original_aspect_ratio=decrease,pad=');
+    const { fc: covered } = framed({ width: 1080, height: 1920 }, { fit: 'cover' });
+    expect(covered).toContain('force_original_aspect_ratio=increase');
+  });
+
+  it('zooms by scaling the target size, rounded to even pixels', () => {
+    const { fc } = framed({ width: 1080, height: 1350 }, { scale: 1.15 });
+    expect(fc).toContain(
+      'scale=1242:1552:force_original_aspect_ratio=decrease:force_divisible_by=2',
+    );
+    const { fc: tiny } = framed({}, { scale: 0.0001 });
+    expect(tiny).toContain('scale=2:2:');
+  });
+
+  it('quotes the crop and pad expressions so their commas survive the graph parser', () => {
+    const { fc } = framed({ fit: 'cover', width: 1080, height: 1080 }, { x: 0, y: 1 });
+    const crop = parseFilter(fc.slice(fc.indexOf('crop=')));
+    expect(crop.options).toMatchObject({
+      w: 'min(iw,1080)',
+      h: 'min(ih,1080)',
+      x: '(iw-ow)*0',
+      y: '(ih-oh)*1',
+    });
+    // The graph parser stops at the comma AFTER the quoted crop, not inside it.
+    expect(crop.rest.startsWith(',pad=1080:1080:')).toBe(true);
+    expect(fc).toContain("pad=1080:1080:x='(ow-iw)*0':y='(oh-ih)*1':color=black");
+  });
+
+  it('keeps captions and title cards at canvas size on a cover canvas', () => {
+    const comp = applyOps(emptyComposition({ width: 1080, height: 1920, fit: 'cover' }), [
+      { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+      { op: 'addTrack', track: videoTrack({ id: 'captions' }) },
+      { op: 'addClip', trackId: 'v0', clip: colorClip({ id: 'k', durationSec: 1, startSec: 0 }) },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'a', mediaId: M1, sourceOutSec: 2, startSec: 1 }),
+      },
+      {
+        op: 'addClip',
+        trackId: 'captions',
+        clip: textClip({ id: 'cap', text: 'Hello', durationSec: 1, startSec: 1.5 }),
+      },
+    ]);
+    const plan = compileTimeline(comp, ctx({ fontFor: () => '/fonts/x.ttf' }));
+    const graph = (i: number) => {
+      const args = plan.steps[i]?.args ?? [];
+      return args[args.indexOf('-filter_complex') + 1] ?? '';
+    };
+    expect(graph(0)).toContain('force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2');
+    expect(graph(1)).toContain('force_original_aspect_ratio=increase');
+    expect(graph(1)).toContain('drawtext=');
+    expect(clipFraming(comp, comp.tracks[0]?.clips[0] as never).fit).toBe('contain');
   });
 });

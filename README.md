@@ -39,6 +39,7 @@ Version 0.4.0 turns a raw talking-head recording into a clean, captioned cut tha
 | **Edit by transcript** | Cuts a range of words out of a clip | `clip timeline cut-words` |
 | **Remove repeated takes** | Cuts the earlier take of each phrase said twice in a row | `clip timeline remove-retakes` |
 | **Captions** | Burned-in captions timed to the words, as short phrases or one word at a time | `clip timeline captions` |
+| **Reframe** | Turns a landscape cut into 9:16, 1:1 or 4:5, filling the frame and choosing the part that shows; zoom and position per clip | `clip timeline reframe` |
 | **Cut check** | Flags cuts where a word may be clipped, with a contact sheet of the frames on each side | `clip timeline check` |
 | **Export to Final Cut Pro and DaVinci Resolve** | FCPXML 1.10 project | `clip timeline export --format fcpxml` |
 | **Export to Premiere Pro** | Final Cut Pro 7 XML project, captions as `.srt` files | `clip timeline export --format xmeml` |
@@ -135,11 +136,12 @@ clip timeline transcribe clip_ec2f047d       # each word with its time, plus rep
 clip timeline remove-retakes clip_ec2f047d   # cut the earlier take of each repeated phrase
 clip timeline silence clip_ec2f047d          # cut the pauses
 clip timeline captions                       # caption every transcribed clip
+clip timeline reframe 9:16 --x 0.4           # vertical for Shorts / Reels / TikTok
 clip timeline check --sheet cuts.jpg         # flag cuts that may clip a word
 clip timeline export talk-clean.mp4          # render the cut
-clip timeline export talk.fcpxml             # or open it in Final Cut Pro / DaVinci Resolve
-clip timeline export talk.xml                # or in Premiere Pro
 ```
+
+To finish in a pro editor instead, skip `reframe` and run `clip timeline export talk.fcpxml` (Final Cut Pro, DaVinci Resolve) or `clip timeline export talk.xml` (Premiere Pro); a reframed cut exports as mp4 only.
 
 A cut splits the clip into pieces: the first keeps its id, and `clip timeline show` lists the rest, so run `silence` on each piece you want tightened (in chat, the agent does this for you). `clip timeline undo` reverses any step.
 
@@ -314,7 +316,7 @@ This release is feature-complete for local editing — a dark timeline editor (v
 No hardcoded limit. FFmpeg streams the file rather than loading it into memory, and the browser UI streams uploads to disk — multi-GB recordings work fine. This release isn't tuned for projects with hundreds of clips or runtime above 30 minutes; for those, drive the CLI directly.
 
 **Does it support 4K, HDR, or vertical (TikTok / Reels) formats?**
-4K and vertical aspect ratios work out of the box — `render` takes a `maxWidth` and preserves the source aspect ratio. HDR pass-through works; deliberate HDR-to-SDR tone-mapping isn't a named tool yet.
+Yes. 4K works out of the box. `clip timeline reframe 9:16` turns a landscape timeline vertical (also 1:1 and 4:5): the picture fills the frame, `--x` picks which part of it shows, and `clip timeline framing <clipId>` sets one clip's zoom and position. Vertical source footage edits as is on a vertical timeline (`clip timeline new --width 1080 --height 1920`). HDR pass-through works; deliberate HDR-to-SDR tone-mapping isn't a named tool yet.
 
 ### Privacy & data
 
@@ -370,7 +372,7 @@ MakeMyClip Editor is built for that job: an open-source video editor that Claude
 
 ### Is there an MCP server for video editing?
 
-Yes. `npx -y @makemyclip/editor mcp` starts MakeMyClip Editor's local MCP server over stdio for Claude Desktop, Cursor, or any MCP client. Its tools show the timeline, edit it (add media, trim, split, remove silence, cut words, remove retakes, caption speech, transitions), check the cuts, transcribe, undo, redo, and export to mp4, FCPXML or Premiere XML. Media stays in one workspace folder, and no API key is needed.
+Yes. `npx -y @makemyclip/editor mcp` starts MakeMyClip Editor's local MCP server over stdio for Claude Desktop, Cursor, or any MCP client. Its tools show the timeline, edit it (add media, trim, split, remove silence, cut words, remove retakes, caption speech, reframe to 9:16, transitions), check the cuts, transcribe, undo, redo, and export to mp4, FCPXML or Premiere XML. Media stays in one workspace folder, and no API key is needed.
 
 ### How do I remove silence from a video automatically?
 
@@ -386,7 +388,7 @@ Yes. After transcription, MakeMyClip Editor's `clip timeline captions` (or the U
 
 ### Can I finish an AI edit in DaVinci Resolve, Premiere Pro or Final Cut Pro?
 
-Yes. MakeMyClip Editor's `clip timeline export cut.fcpxml` writes FCPXML 1.10 for Final Cut Pro and DaVinci Resolve, and `clip timeline export cut.xml` writes Final Cut Pro 7 XML for Premiere Pro. Both keep the cuts, gaps, fades, volume, and cross dissolves, and point at your original files by path. Anything the format can't hold (speed, color adjustments, chroma key) is refused with the fix to make.
+Yes. MakeMyClip Editor's `clip timeline export cut.fcpxml` writes FCPXML 1.10 for Final Cut Pro and DaVinci Resolve, and `clip timeline export cut.xml` writes Final Cut Pro 7 XML for Premiere Pro. Both keep the cuts, gaps, fades, volume, and cross dissolves, and point at your original files by path. Anything the format can't hold (speed, color adjustments, chroma key, a reframe's fill, zoom or position) is refused with the fix to make.
 
 ### How does MakeMyClip Editor compare to Descript?
 

@@ -1,12 +1,14 @@
 import { appendOp } from '../session/store.js';
-import type { MediaInfo } from '../timeline/compile.js';
+import type { Framing, MediaInfo } from '../timeline/compile.js';
 import {
   type Composition,
   clipEndSec,
   compositionDuration,
+  type Fit,
   findClip,
 } from '../timeline/composition.js';
 import { buildMediaMap, buildMediaRefs } from '../timeline/media-registry.js';
+import { ownFraming } from '../timeline/reframe.js';
 import type { MediaId, MediaRef } from '../timeline/schema.js';
 import { analyzeSilence } from '../timeline/silence.js';
 import { storedTranscriptForClip } from '../timeline/transcript.js';
@@ -90,11 +92,11 @@ export async function confinedMediaRefs(comp: Composition): Promise<Map<MediaId,
 export interface CompositionSummary {
   rev: number;
   durationSec: number;
-  canvas: { width: number; height: number; fps: number };
+  canvas: { width: number; height: number; fps: number; fit: Fit };
   tracks: {
     id: string;
     kind: string;
-    clips: { id: string; kind: string; startSec: number; endSec: number }[];
+    clips: { id: string; kind: string; startSec: number; endSec: number; framing?: Framing }[];
   }[];
 }
 
@@ -103,16 +105,20 @@ export function summarizeComposition(comp: Composition): CompositionSummary {
   return {
     rev: comp.rev,
     durationSec: compositionDuration(comp),
-    canvas: { width: comp.width, height: comp.height, fps: comp.fps },
+    canvas: { width: comp.width, height: comp.height, fps: comp.fps, fit: comp.fit },
     tracks: comp.tracks.map((t) => ({
       id: t.id,
       kind: t.kind,
-      clips: t.clips.map((c) => ({
-        id: c.id,
-        kind: c.kind,
-        startSec: c.startSec,
-        endSec: clipEndSec(c),
-      })),
+      clips: t.clips.map((c) => {
+        const framing = ownFraming(comp, c);
+        return {
+          id: c.id,
+          kind: c.kind,
+          startSec: c.startSec,
+          endSec: clipEndSec(c),
+          ...(framing ? { framing } : {}),
+        };
+      }),
     })),
   };
 }

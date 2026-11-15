@@ -1,4 +1,4 @@
-import { videoLayers } from './compile.js';
+import { clipFraming, isDefaultFraming, videoLayers } from './compile.js';
 import {
   type Clip,
   type Composition,
@@ -277,18 +277,20 @@ const CARRIED_TRANSITIONS: ReadonlySet<TransitionKind> = new Set(['fade', 'disso
 /** Tolerance (seconds) for abutting clips, as in the export compiler. */
 const ABUT_EPSILON = 1e-4;
 
-function isIdentityTransform(clip: Clip): boolean {
-  const t = clip.transform;
-  if (!t) return true;
-  return t.scale === 1 && t.x === 0.5 && t.y === 0.5 && t.rotationDeg === 0 && t.opacity === 1;
-}
-
-/** Refuse a clip whose effects or placement an interchange file can't carry. */
+/** Refuse a clip whose effects or placement an interchange file can't carry.
+ *  A media clip's framing is checked against its source in `assertFramingCarried`. */
 function assertCarried(clip: Clip): void {
-  if (!isIdentityTransform(clip)) {
+  const t = clip.transform;
+  if (t && (t.rotationDeg !== 0 || t.opacity !== 1)) {
     throw new InterchangeError(
-      `Clip "${clip.id}" has a transform (scale, position, rotation or opacity), which interchange export doesn't carry yet. ` +
-        'Reset the transform, or export an mp4 instead.',
+      `Clip "${clip.id}" is rotated or partly transparent, which interchange export doesn't carry yet. ` +
+        'Reset its transform, or export an mp4 instead.',
+    );
+  }
+  if (clip.kind !== 'media' && t && (t.scale !== 1 || t.x !== 0.5 || t.y !== 0.5)) {
+    throw new InterchangeError(
+      `Clip "${clip.id}" has a zoom or position, which interchange export doesn't carry yet. ` +
+        'Reset its transform, or export an mp4 instead.',
     );
   }
   for (const effect of clip.effects) {
@@ -311,6 +313,23 @@ function assertCarried(clip: Clip): void {
       );
     }
   }
+}
+
+/**
+ * Refuse a media clip framed any way but whole, centered and unzoomed: the
+ * sequence holds each clip that way, and editors apply a source's rotation tag
+ * before fitting it. Even `cover` on a clip of the canvas's shape is refused,
+ * since the probed size is the coded one and a rotated phone clip would be
+ * cropped in the mp4 but not in the editor.
+ */
+function assertFramingCarried(comp: Composition, clip: Clip): void {
+  const f = clipFraming(comp, clip);
+  if (isDefaultFraming(f)) return;
+  throw new InterchangeError(
+    `Clip "${clip.id}" is reframed (${f.fit}, zoom ${f.scale}, position ${f.x}/${f.y}), which interchange export doesn't carry yet: ` +
+      'editors place each clip whole and centered. Export an mp4, or set the timeline to contain ' +
+      '(clip timeline reframe <shape> --fit contain) and reset the clip (clip timeline framing <clipId> --reset).',
+  );
 }
 
 function colorOf(value: string, what: string): Rgba {
@@ -539,6 +558,7 @@ export function buildLayout(comp: Composition, media: Map<MediaId, InterchangeMe
             'so an editor would find no media there. Trim the clip to the source.',
         );
       }
+      assertFramingCarried(comp, clip);
       used.set(clip.mediaId, info);
       const gain = clip.effects.reduce((g, e) => (e.type === 'volume' ? g * e.gain : g), 1);
       spine.push({
