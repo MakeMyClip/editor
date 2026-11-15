@@ -41,12 +41,13 @@ Version 0.5.0 turns a raw talking-head recording into a clean, captioned cut: ve
 | **Captions** | Burned-in captions timed to the words, as short phrases or one word at a time | `clip timeline captions` |
 | **Reframe** | Turns a landscape cut into 9:16, 1:1 or 4:5, filling the frame and choosing the part that shows; zoom and position per clip | `clip timeline reframe` |
 | **Loudness** | Evens out the exported mp4's volume to a target (-14 LUFS for YouTube, Shorts, Reels and TikTok; -16 for podcasts), measured in two passes | `clip timeline loudness` |
+| **Shorts from a long recording** | Turns ranges of words from a long recording into a vertical short on a timeline of its own: captioned, at -14 LUFS, with the cuts already made on the recording; the long cut stays as it is | `clip timeline short` |
 | **Cut check** | Flags cuts where a word may be clipped, with a contact sheet of the frames on each side | `clip timeline check` |
 | **Export to Final Cut Pro and DaVinci Resolve** | FCPXML 1.10 project | `clip timeline export --format fcpxml` |
 | **Export to Premiere Pro** | Final Cut Pro 7 XML project, captions as `.srt` files | `clip timeline export --format xmeml` |
 | **Render** | mp4 of the finished cut | `clip timeline export` |
 
-All of it works from chat (the Claude Code skill or the MCP server), the CLI, and the browser UI; the cut check isn't in the UI yet. Every edit is one step on a non-destructive timeline that `undo` and `redo` walk through. Underneath sit [19 single-file FFmpeg tools](#all-19-tools) for everything else: trim, split, concat, transitions, text and title cards, zoom/pan, overlay, speed, color, chroma key, stabilize, and render.
+All of it works from chat (the Claude Code skill or the MCP server), the CLI, and the browser UI; the cut check and shorts aren't in the UI yet. Every edit is one step on a non-destructive timeline that `undo` and `redo` walk through. Underneath sit [19 single-file FFmpeg tools](#all-19-tools) for everything else: trim, split, concat, transitions, text and title cards, zoom/pan, overlay, speed, color, chroma key, stabilize, and render.
 
 ---
 
@@ -146,6 +147,29 @@ clip timeline export talk-clean.mp4          # render the cut
 To finish in a pro editor instead, skip `reframe` and run `clip timeline export talk.fcpxml` (Final Cut Pro, DaVinci Resolve) or `clip timeline export talk.xml` (Premiere Pro); a reframed cut exports as mp4 only.
 
 A cut splits the clip into pieces: the first keeps its id, and `clip timeline show` lists the rest, so run `silence` on each piece you want tightened (in chat, the agent does this for you). `clip timeline undo` reverses any step.
+
+---
+
+## Quick start: a long recording → vertical shorts
+
+Each short is a timeline of its own, cut from the main timeline's clips, so the pauses and retakes you cut there stay cut. In Claude Code or Claude Desktop, ask:
+
+> *Transcribe podcast.mp4 and cut the pauses. Then find the three strongest moments, 20 to 60 seconds each, and make each one a short.*
+
+The same steps from the CLI:
+
+```bash
+clip timeline new
+clip timeline add-media podcast.mp4                  # prints the clip id, e.g. clip_ec2f047d
+clip timeline transcribe clip_ec2f047d               # each word with its index and time
+clip timeline silence clip_ec2f047d                  # cut the pauses on main
+clip timeline short best-1 clip_ec2f047d 1400 1478 --x 0.4   # words 1400–1478 as a 9:16 short
+clip timeline --timeline best-1 frame 3 check.jpg    # look at it; move --x if the speaker is off
+clip timeline --timeline best-1 export best-1.mp4
+clip timeline list                                   # main and every short
+```
+
+`short` starts 0.25 s before the first word and ends with the last, fills the 9:16 frame (`--x` picks the part that shows), sets -14 LUFS and burns in captions. Give several `<clipId> <from> <to>` ranges to join moments, in the order you give them. Any command takes `--timeline <id>` to work on a short, `clip timeline --timeline best-1 undo` takes the short apart again, and `short best-1 … --replace` rebuilds it.
 
 ---
 
@@ -374,7 +398,7 @@ MakeMyClip Editor is built for that job: an open-source video editor that Claude
 
 ### Is there an MCP server for video editing?
 
-Yes. `npx -y @makemyclip/editor mcp` starts MakeMyClip Editor's local MCP server over stdio for Claude Desktop, Cursor, or any MCP client. Its tools show the timeline, edit it (add media, trim, split, remove silence, cut words, remove retakes, caption speech, reframe to 9:16, set loudness, transitions), check the cuts, transcribe, undo, redo, and export to mp4, FCPXML or Premiere XML. Media stays in one workspace folder, and no API key is needed.
+Yes. `npx -y @makemyclip/editor mcp` starts MakeMyClip Editor's local MCP server over stdio for Claude Desktop, Cursor, or any MCP client. Its tools show the timeline, edit it (add media, trim, split, remove silence, cut words, remove retakes, caption speech, reframe to 9:16, set loudness, make shorts, transitions), check the cuts, transcribe, undo, redo, and export to mp4, FCPXML or Premiere XML. Media stays in one workspace folder, and no API key is needed.
 
 ### How do I remove silence from a video automatically?
 
@@ -387,6 +411,10 @@ Yes. MakeMyClip Editor transcribes with whisper.cpp on your machine; install it 
 ### Can Claude add captions or subtitles to a video?
 
 Yes. After transcription, MakeMyClip Editor's `clip timeline captions` (or the UI's Captions button) puts captions timed to the words on a track above the video, and export burns them in. Captions come as short phrases or one word at a time, with your choice of size, color, position, and background. Non-Latin scripts use an installed font that has the glyphs. In the Premiere export, captions become `.srt` files. On Linux, the bundled FFmpeg can't draw text, so set `MAKEMYCLIP_FFMPEG_PATH` to an FFmpeg built with libfreetype and libharfbuzz.
+
+### Can it cut Shorts or Reels out of a podcast?
+
+Yes. Transcribe the recording, then `clip timeline short best-1 <clipId> <fromWord> <toWord>` (or the `make_short` verb from chat) turns that range of words into a vertical short on a timeline of its own: 9:16, filling the frame, captioned, normalized to -14 LUFS, with the silence and retake cuts already made on the recording. Make as many as you like; the long cut stays untouched, and each short exports on its own. You or the agent pick the moments: nothing scores highlights for you, and nothing is uploaded.
 
 ### Can I finish an AI edit in DaVinci Resolve, Premiere Pro or Final Cut Pro?
 
