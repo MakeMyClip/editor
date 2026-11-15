@@ -93,6 +93,7 @@ export interface CompositionSummary {
   rev: number;
   durationSec: number;
   canvas: { width: number; height: number; fps: number; fit: Fit };
+  loudness: Composition['loudness'];
   tracks: {
     id: string;
     kind: string;
@@ -106,6 +107,7 @@ export function summarizeComposition(comp: Composition): CompositionSummary {
     rev: comp.rev,
     durationSec: compositionDuration(comp),
     canvas: { width: comp.width, height: comp.height, fps: comp.fps, fit: comp.fit },
+    loudness: comp.loudness,
     tracks: comp.tracks.map((t) => ({
       id: t.id,
       kind: t.kind,

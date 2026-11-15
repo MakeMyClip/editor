@@ -83,5 +83,7 @@ export interface Composition {
   background: string;
   /** How media fill the canvas unless a clip's transform says otherwise. */
   fit: Fit;
+  /** Loudness the mp4 export normalizes to, or null to keep the clips' levels. */
+  loudness: { targetLufs: number } | null;
   tracks: Track[];
 }

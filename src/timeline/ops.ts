@@ -16,6 +16,7 @@ import {
   MediaClipSchema,
   makeClipId,
   makeTrackId,
+  TargetLufsSchema,
   type TextClip,
   TextClipSchema,
   type TextStyle,
@@ -67,7 +68,8 @@ export type CompositionOp =
   | { op: 'setTransform'; clipId: string; transform: Partial<Transform> }
   | { op: 'clearTransform'; clipId: string }
   | { op: 'addTransition'; trackId: string; transition: Transition }
-  | { op: 'removeTransition'; trackId: string; afterClipId: string };
+  | { op: 'removeTransition'; trackId: string; afterClipId: string }
+  | { op: 'setLoudness'; targetLufs: number | null };
 
 export type CompositionOpKind = CompositionOp['op'];
 
@@ -153,6 +155,7 @@ export const CompositionOpSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('clearTransform'), clipId: z.string() }),
   z.object({ op: z.literal('addTransition'), trackId: z.string(), transition: TransitionSchema }),
   z.object({ op: z.literal('removeTransition'), trackId: z.string(), afterClipId: z.string() }),
+  z.object({ op: z.literal('setLoudness'), targetLufs: TargetLufsSchema.nullable() }),
 ]);
 
 /** Thrown when an op references a missing entity or violates a clip invariant. */
@@ -347,6 +350,9 @@ export function applyOp(comp: Composition, op: CompositionOp): Composition {
       track.transitions = track.transitions.filter((t) => t.afterClipId !== op.afterClipId);
       break;
     }
+    case 'setLoudness':
+      draft.loudness = op.targetLufs === null ? null : { targetLufs: op.targetLufs };
+      break;
     default: {
       const _exhaustive: never = op;
       throw new CompositionOpError(`Unknown op: ${JSON.stringify(_exhaustive)}`);
@@ -565,6 +571,8 @@ export function invertOp(comp: Composition, op: CompositionOp): CompositionOp[] 
       if (!removed) return []; // removed nothing — no-op.
       return [{ op: 'addTransition', trackId: op.trackId, transition: structuredClone(removed) }];
     }
+    case 'setLoudness':
+      return [{ op: 'setLoudness', targetLufs: comp.loudness?.targetLufs ?? null }];
     default: {
       const _exhaustive: never = op;
       throw new CompositionOpError(`Cannot invert unknown op: ${JSON.stringify(_exhaustive)}`);

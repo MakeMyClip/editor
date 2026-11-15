@@ -20,6 +20,7 @@
 - **Remove repeated takes:** `clip timeline remove-retakes <clipId>` cuts the earlier take of each phrase said twice in a row
 - **Captions:** `clip timeline captions` burns in captions timed to the words (short phrases or one word at a time)
 - **Reframe:** `clip timeline reframe 9:16` turns a landscape cut vertical (also 1:1, 4:5); `--x` picks the part that shows, `clip timeline framing <clipId>` sets one clip's zoom and position
+- **Loudness:** `clip timeline loudness -14` normalizes the exported mp4 to -14 LUFS (or `-16` for podcasts) in two passes
 - **Cut check:** `clip timeline check --sheet cuts.jpg` flags cuts that may clip a word and writes a contact sheet
 - **Export to pro editors:** `clip timeline export --format fcpxml` (Final Cut Pro, DaVinci Resolve) or `--format xmeml` (Premiere Pro; captions as .srt)
 - Every timeline edit is one undoable step (`clip timeline undo` / `redo`), from the CLI, the MCP server or the browser UI

@@ -420,12 +420,18 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       const target = output ? resolveInWorkspace(output) : newOutputPath('timeline-export', 'mp4');
       const plan = compileTimeline(comp, { media, dir: getWorkspace(), output: target });
       const result = await runPlan(plan);
+      const loudness = result.loudness ? { loudness: result.loudness } : {};
       const entry = await appendOp({
         tool: 'timeline_export',
         args: { rev: comp.rev },
-        result: { path: result.output, durationSec: plan.durationSec },
+        result: { path: result.output, durationSec: plan.durationSec, ...loudness },
       });
-      return c.json({ id: entry.id, output: result.output, durationSec: plan.durationSec });
+      return c.json({
+        id: entry.id,
+        output: result.output,
+        durationSec: plan.durationSec,
+        ...loudness,
+      });
     } catch (err) {
       if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
       if (err instanceof CompileError) return c.json({ error: err.message }, 422);

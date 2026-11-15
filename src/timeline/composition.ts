@@ -189,6 +189,12 @@ export const TrackSchema = z.object({
 });
 export type Track = z.infer<typeof TrackSchema>;
 
+/** Integrated loudness targets export can normalize to, in LUFS: -14 matches
+ *  YouTube, Shorts, Reels and TikTok, -16 podcasts. */
+export const LOUDNESS_MIN_LUFS = -30;
+export const LOUDNESS_MAX_LUFS = -9;
+export const TargetLufsSchema = z.number().min(LOUDNESS_MIN_LUFS).max(LOUDNESS_MAX_LUFS);
+
 export const CompositionSchema = z.object({
   version: z.literal(COMPOSITION_VERSION),
   /**
@@ -205,6 +211,8 @@ export const CompositionSchema = z.object({
   background: z.string().default('black'),
   /** How media clips fill the canvas unless a clip's transform says otherwise. */
   fit: FitSchema.default('contain'),
+  /** Normalize the exported mp4 to this integrated loudness, or null to leave levels as they are. */
+  loudness: z.object({ targetLufs: TargetLufsSchema }).nullable().default(null),
   tracks: z.array(TrackSchema).default([]),
 });
 export type Composition = z.infer<typeof CompositionSchema>;

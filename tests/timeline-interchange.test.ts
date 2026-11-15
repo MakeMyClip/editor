@@ -530,6 +530,18 @@ describe('interchange — FCPXML', () => {
   });
 });
 
+describe('interchange — loudness', () => {
+  it('notes that loudness normalization stays with the mp4', () => {
+    const comp = doc([{ id: 'v0', clips: [media('a', 0, 0, 3)] }], {
+      loudness: { targetLufs: -14 },
+    });
+    expect(exportAs('fcpxml', comp).notes.join(' ')).toMatch(/-14 LUFS.*mp4 export only/);
+    expect(exportAs('xmeml', doc([{ id: 'v0', clips: [media('a', 0, 0, 3)] }])).notes).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/LUFS/)]),
+    );
+  });
+});
+
 describe('interchange — refusals', () => {
   const refuse = (comp: Composition, pattern: RegExp, sources = MEDIA): void => {
     expect(() => exportAs('fcpxml', comp, sources)).toThrow(InterchangeError);

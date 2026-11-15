@@ -61,6 +61,13 @@ describe('invertOp — per-op round-trip (apply then inverse = identity)', () =>
     expectRoundtrip(richDoc(), { op: 'setCanvas', width: 1080, fps: 24 });
   });
 
+  it('setLoudness on and off', () => {
+    expectRoundtrip(richDoc(), { op: 'setLoudness', targetLufs: -14 });
+    const on = applyOp(richDoc(), { op: 'setLoudness', targetLufs: -16 });
+    expectRoundtrip(on, { op: 'setLoudness', targetLufs: null });
+    expectRoundtrip(on, { op: 'setLoudness', targetLufs: -14 });
+  });
+
   it('setCanvas fit', () => {
     expectRoundtrip(richDoc(), { op: 'setCanvas', width: 1080, height: 1920, fit: 'cover' });
   });

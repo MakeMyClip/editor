@@ -1,14 +1,36 @@
 import { randomBytes } from 'node:crypto';
-import { unlink, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { rename, unlink, writeFile } from 'node:fs/promises';
+import { dirname, extname, join } from 'node:path';
+import {
+  buildLoudnormApplyArgs,
+  buildLoudnormMeasureArgs,
+  parseLoudnormJson,
+} from '../ffmpeg/args/loudnorm.js';
 import { filterGraphFileOption, requireDrawtext, runFfmpeg } from '../ffmpeg/run.js';
 import type { FfmpegPlan } from './compile.js';
+
+export interface LoudnessResult {
+  targetLufs: number;
+  /** Integrated loudness before normalizing; null when silent or too short to measure. */
+  inputLufs: number | null;
+  /** Integrated loudness after, as loudnorm reports it; null when skipped. */
+  outputLufs: number | null;
+  /** True peak after, dBTP; null when skipped. */
+  truePeakDb: number | null;
+  /** `dynamic` when loudnorm couldn't apply one gain (see ffmpeg/args/loudnorm.ts);
+   *  `skipped` when the audio was silent, near-silent or too short to measure. */
+  mode: 'linear' | 'dynamic' | 'skipped';
+}
 
 export interface RunPlanResult {
   output: string;
   steps: number;
   durationMs: number;
+  loudness?: LoudnessResult;
 }
+
+/** Quieter than this, an export is room tone at most: boosting it raises only noise. */
+const NEAR_SILENT_LUFS = -50;
 
 /** Longest filtergraph passed inline. Many captions make one long graph, and
  *  Windows caps a whole command line at 32 KiB (Linux one argument at 128 KiB). */
@@ -67,10 +89,64 @@ export async function runPlan(plan: FfmpegPlan): Promise<RunPlanResult> {
       }
       await runFfmpeg(args);
     }
-    return { output: plan.output, steps: plan.steps.length, durationMs: Date.now() - start };
+    const loudness = plan.loudness
+      ? await normalizeLoudness(plan.output, plan.loudness.targetLufs, cleanup)
+      : undefined;
+    return {
+      output: plan.output,
+      steps: plan.steps.length,
+      durationMs: Date.now() - start,
+      ...(loudness ? { loudness } : {}),
+    };
   } finally {
     for (const path of cleanup) {
       await unlink(path).catch(() => undefined);
     }
+  }
+}
+
+/**
+ * Measure the finished export, then rewrite it at the target loudness through a
+ * temp file beside it (same folder and extension, so the rename stays on one
+ * device and the container doesn't change). If this pass fails the export is
+ * removed too, so a file at the original levels is never left looking done.
+ */
+async function normalizeLoudness(
+  output: string,
+  targetLufs: number,
+  cleanup: string[],
+): Promise<LoudnessResult> {
+  try {
+    const measure = await runFfmpeg(buildLoudnormMeasureArgs({ input: output, targetLufs }));
+    const measured = parseLoudnormJson(measure.stderr);
+    if (!measured || measured.inputI < NEAR_SILENT_LUFS) {
+      return {
+        targetLufs,
+        inputLufs: measured?.inputI ?? null,
+        outputLufs: null,
+        truePeakDb: null,
+        mode: 'skipped',
+      };
+    }
+    const temp = join(
+      dirname(output),
+      `.loudnorm-${randomBytes(4).toString('hex')}${extname(output)}`,
+    );
+    cleanup.push(temp);
+    const applied = await runFfmpeg(
+      buildLoudnormApplyArgs({ input: output, output: temp, targetLufs, measured }),
+    );
+    await rename(temp, output);
+    const after = parseLoudnormJson(applied.stderr);
+    return {
+      targetLufs,
+      inputLufs: measured.inputI,
+      outputLufs: after?.outputI ?? null,
+      truePeakDb: after?.outputTp ?? null,
+      mode: after?.mode ?? measured.mode,
+    };
+  } catch (err) {
+    await unlink(output).catch(() => undefined);
+    throw err;
   }
 }

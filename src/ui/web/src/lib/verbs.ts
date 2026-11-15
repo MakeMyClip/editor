@@ -37,6 +37,7 @@ export type Verb =
       y?: number;
       reset?: boolean;
     }
+  | { verb: 'set_loudness'; targetLufs: number | null }
   | {
       verb: 'transition';
       afterClipId: string;

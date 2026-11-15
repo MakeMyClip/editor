@@ -40,6 +40,7 @@ Version 0.4.0 turns a raw talking-head recording into a clean, captioned cut tha
 | **Remove repeated takes** | Cuts the earlier take of each phrase said twice in a row | `clip timeline remove-retakes` |
 | **Captions** | Burned-in captions timed to the words, as short phrases or one word at a time | `clip timeline captions` |
 | **Reframe** | Turns a landscape cut into 9:16, 1:1 or 4:5, filling the frame and choosing the part that shows; zoom and position per clip | `clip timeline reframe` |
+| **Loudness** | Evens out the exported mp4's volume to a target (-14 LUFS for YouTube, Shorts, Reels and TikTok; -16 for podcasts), measured in two passes | `clip timeline loudness` |
 | **Cut check** | Flags cuts where a word may be clipped, with a contact sheet of the frames on each side | `clip timeline check` |
 | **Export to Final Cut Pro and DaVinci Resolve** | FCPXML 1.10 project | `clip timeline export --format fcpxml` |
 | **Export to Premiere Pro** | Final Cut Pro 7 XML project, captions as `.srt` files | `clip timeline export --format xmeml` |
@@ -137,6 +138,7 @@ clip timeline remove-retakes clip_ec2f047d   # cut the earlier take of each repe
 clip timeline silence clip_ec2f047d          # cut the pauses
 clip timeline captions                       # caption every transcribed clip
 clip timeline reframe 9:16 --x 0.4           # vertical for Shorts / Reels / TikTok
+clip timeline loudness -14                   # even out the volume on export
 clip timeline check --sheet cuts.jpg         # flag cuts that may clip a word
 clip timeline export talk-clean.mp4          # render the cut
 ```
@@ -183,7 +185,7 @@ Same registry, same session log, same output.
 
 Plus four meta-ops not in the registry: `snapshot`, `undo`, `inspect`, `delete`.
 
-The browser UI is a dark timeline editor: drag-drop import, a monitor (the composited frame at the playhead), an editable timeline (select a clip to trim / split / move / transition / remove, frame it (fill, zoom, position), cut its silences, or cut words and retakes from its transcript), the output shape (16:9, 9:16, 1:1 or 4:5), captions from transcripts, one-click export (an mp4, or a project for Final Cut Pro, DaVinci Resolve or Premiere Pro), timeline undo/redo, snapshot, and keyboard shortcuts.
+The browser UI is a dark timeline editor: drag-drop import, a monitor (the composited frame at the playhead), an editable timeline (select a clip to trim / split / move / transition / remove, frame it (fill, zoom, position), cut its silences, or cut words and retakes from its transcript), the output shape (16:9, 9:16, 1:1 or 4:5) and loudness, captions from transcripts, one-click export (an mp4, or a project for Final Cut Pro, DaVinci Resolve or Premiere Pro), timeline undo/redo, snapshot, and keyboard shortcuts.
 
 ---
 
@@ -372,7 +374,7 @@ MakeMyClip Editor is built for that job: an open-source video editor that Claude
 
 ### Is there an MCP server for video editing?
 
-Yes. `npx -y @makemyclip/editor mcp` starts MakeMyClip Editor's local MCP server over stdio for Claude Desktop, Cursor, or any MCP client. Its tools show the timeline, edit it (add media, trim, split, remove silence, cut words, remove retakes, caption speech, reframe to 9:16, transitions), check the cuts, transcribe, undo, redo, and export to mp4, FCPXML or Premiere XML. Media stays in one workspace folder, and no API key is needed.
+Yes. `npx -y @makemyclip/editor mcp` starts MakeMyClip Editor's local MCP server over stdio for Claude Desktop, Cursor, or any MCP client. Its tools show the timeline, edit it (add media, trim, split, remove silence, cut words, remove retakes, caption speech, reframe to 9:16, set loudness, transitions), check the cuts, transcribe, undo, redo, and export to mp4, FCPXML or Premiere XML. Media stays in one workspace folder, and no API key is needed.
 
 ### How do I remove silence from a video automatically?
 
