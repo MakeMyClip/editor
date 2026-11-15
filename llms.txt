@@ -4,15 +4,15 @@
 
 ## What it is
 
-- **Name:** MakeMyClip Editor (npm `@makemyclip/editor`, current release v0.4.0)
+- **Name:** MakeMyClip Editor (npm `@makemyclip/editor`, current release v0.5.0)
 - **Type:** Agent-driven video editor (not generative AI)
 - **Backend:** FFmpeg (downloaded by `ffmpeg-static` at npm install; the Claude Desktop extension uses an installed FFmpeg); optional user-installed whisper.cpp for transcription
 - **Surfaces:** Claude Code skill · `clip` CLI · browser UI at `127.0.0.1:5573` · MCP server (`clip mcp`)
 - **Agent access:** Claude Code skill + MCP server (`clip mcp`); no API key — the editor embeds no language model, it runs on whichever Claude you already use
-- **Tests:** 741 passing
+- **Tests:** 859 passing
 - **License:** MIT (code); FFmpeg runs as a subprocess under its own license (GPLv3 builds from `ffmpeg-static`, except a nonfree Apple Silicon build; the `.mcpb` ships no FFmpeg)
 
-## What v0.4.0 does
+## What v0.5.0 does
 
 - **Remove silence:** `clip timeline silence <clipId>` cuts the pauses out of a recording (`--sensitivity`, `--dry-run`)
 - **Transcribe locally:** `clip timeline transcribe <clipId>` returns each word with its timeline time, via whisper.cpp on the user's machine
