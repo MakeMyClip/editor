@@ -50,6 +50,7 @@ import {
 } from './timeline/interchange.js';
 import { buildMediaMap, buildMediaRefs } from './timeline/media-registry.js';
 import { colorClip, mediaClip, textClip } from './timeline/ops.js';
+import { measureSpeechLevels } from './timeline/pauses.js';
 import {
   AspectSchema,
   type FramingFit,
@@ -68,6 +69,7 @@ import {
   findRetakes,
   planWordCut,
   storedTranscriptForClip,
+  timelineOutline,
   transcribeClip,
 } from './timeline/transcript.js';
 import { DEFAULT_VERB_TRACK as DEFAULT_TRACK, ensureTrack, trackEnd } from './timeline/verbs.js';
@@ -90,7 +92,7 @@ Every command works on the main timeline unless --timeline <id> names another
   clip timeline remove <clipId>
   clip timeline silence <clipId> [--sensitivity 0..1] [--dry-run]
   clip timeline check [--sheet <output.jpg>]
-  clip timeline transcribe <clipId> [--model <model.bin>] [--language <code>]
+  clip timeline transcribe [<clipId>] [--sentences] [--from S] [--to S] [--model <model.bin>] [--language <code>]
   clip timeline cut-words <clipId> <fromIndex> <toIndex> [--transcript <id>]
   clip timeline remove-retakes <clipId> [--dry-run] [--transcript <id>]
   clip timeline captions [<clipId>] [--words N] [--track T] [--font N --color C --anchor A --background C|none --margin PX] [--dry-run]
@@ -115,7 +117,7 @@ interface Parsed {
 }
 
 /** Flags that take no value, so they don't swallow the next argument. */
-const BOOLEAN_FLAGS = new Set(['dry-run', 'reset', 'no-captions', 'replace']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'reset', 'no-captions', 'replace', 'sentences']);
 
 function parseArgs(args: string[]): Parsed {
   const positional: string[] = [];
@@ -180,6 +182,15 @@ function timelineId(value: string): string {
     );
   }
   return parsed.data;
+}
+
+/** Timeline time as m:ss, or h:mm:ss from an hour. */
+function clock(sec: number): string {
+  const whole = Math.floor(sec);
+  const s = String(whole % 60).padStart(2, '0');
+  const m = Math.floor(whole / 60) % 60;
+  const h = Math.floor(whole / 3600);
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
 }
 
 function wordIndex(value: string | undefined): number {
@@ -567,7 +578,15 @@ export async function runTimeline(args: string[]): Promise<void> {
             flags.loudness === undefined ? undefined : loudnessValue(flags.loudness, usage),
           replace: flags.replace === 'true',
         },
-        (comp, clipId, transcriptId) => storedTranscriptForClip(comp, clipId, media, transcriptId),
+        {
+          transcript: (comp, clipId, transcriptId) =>
+            storedTranscriptForClip(comp, clipId, media, transcriptId),
+          levels: async (comp, clipId, aroundSec) => {
+            const clip = findClip(comp, clipId)?.clip;
+            const info = clip?.kind === 'media' ? media.get(clip.mediaId) : undefined;
+            return info?.hasAudio ? measureSpeechLevels(info.path, aroundSec) : null;
+          },
+        },
       );
       const report = {
         timeline: target,
@@ -621,18 +640,38 @@ export async function runTimeline(args: string[]): Promise<void> {
 
     case 'transcribe': {
       const [clipId] = positional;
-      if (!clipId) {
-        throw new Error(
-          'Usage: clip timeline transcribe <clipId> [--model <model.bin>] [--language <code>]',
+      const comp = await readComposition(timeline);
+      const opts = {
+        model: flags.model ? resolveInput(flags.model) : undefined,
+        language: flags.language || undefined,
+      };
+      if (clipId && flags.sentences !== 'true') {
+        out(await transcribeClip(comp, clipId, await buildMediaMap(), opts));
+        return;
+      }
+      // One line per sentence, cheap to read and to `head`: no page limit here.
+      const outline = await timelineOutline(comp, await buildMediaMap(), {
+        ...opts,
+        clipId,
+        fromSec: optionalNum('from', flags.from),
+        toSec: optionalNum('to', flags.to),
+        maxBytes: Number.POSITIVE_INFINITY,
+      });
+      const lines = Object.entries(outline.transcriptIds).map(
+        ([mediaId, id]) => `transcript ${mediaId}: ${id}`,
+      );
+      for (const s of outline.sentences) {
+        // With more than one source, its media id, to match a transcript line.
+        const source = s.mediaId ? `  ${s.mediaId}` : '';
+        lines.push(
+          `${clock(s.startSec)}  #${s.fromIndex}–${s.toIndex}  ${s.clipId}${source}  ${s.text}`,
         );
       }
-      const comp = await readComposition(timeline);
-      out(
-        await transcribeClip(comp, clipId, await buildMediaMap(), {
-          model: flags.model ? resolveInput(flags.model) : undefined,
-          language: flags.language || undefined,
-        }),
-      );
+      // `| head` closes the pipe early: that ends the listing, not with an error.
+      process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code !== 'EPIPE') throw err;
+      });
+      process.stdout.write(lines.length > 0 ? `${lines.join('\n')}\n` : '');
       return;
     }
 

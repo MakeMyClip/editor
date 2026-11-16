@@ -30,8 +30,8 @@ const CAPTION_BOX_PX = 12;
  *  buttons and progress bar at the bottom, the action column at the sides. */
 const PORTRAIT_BOTTOM_SHARE = 0.25;
 const PORTRAIT_SIDE_SHARE = 0.14;
-/** A pause this long between words starts a new caption. */
-const PAUSE_SEC = 0.7;
+/** A pause this long between words starts a new caption, or a new sentence. */
+export const PAUSE_SEC = 0.7;
 /** How long a caption stays up after its last word, unless the next one starts. */
 const HOLD_SEC = 0.4;
 /** Shortest caption shown. */
@@ -332,7 +332,9 @@ export function joinWords(texts: string[]): string {
   return out;
 }
 
-function endsSentence(text: string): boolean {
+/** Whether a word ends a sentence: it ends in . ! ? … (or 。！？), maybe
+ *  followed by a closing quote or bracket. */
+export function endsSentence(text: string): boolean {
   return /[.!?。！？…]["')\]」』]?$/u.test(text);
 }
 

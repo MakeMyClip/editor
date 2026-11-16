@@ -9,15 +9,14 @@ The open-source AI video editor for Claude Code and any MCP client: remove silen
 
 <p align="center">
   <a href="https://skills.sh/makemyclip/editor"><img src="https://skills.sh/b/makemyclip/editor" alt="skills.sh"></a>
+  <a href="https://www.npmjs.com/package/@makemyclip/editor"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.npmjs.org%2Fdownloads%2Fpoint%2Flast-week%2F%40makemyclip%2Feditor&query=%24.downloads&label=npm&labelColor=CB3837&color=CB3837&logo=npm&logoColor=white" alt="npm weekly downloads"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="./package.json"><img src="https://img.shields.io/badge/node-%E2%89%A524-brightgreen" alt="Node 24+"></a>
-  <a href="https://www.npmjs.com/package/@makemyclip/editor"><img src="https://img.shields.io/npm/v/@makemyclip/editor.svg" alt="npm"></a>
   <img src="https://img.shields.io/badge/tests-859%20passing-brightgreen" alt="Tests: 859 passing">
-  <img src="https://img.shields.io/badge/telemetry-none-brightgreen" alt="Telemetry: none">
 </p>
 
 <p align="center">
-  <img src="./docs/hero.png" alt="MakeMyClip Editor — chat-driven video editing demo (real screencast coming soon)" width="720" />
+  <img src="./docs/hero.png" alt="Chat with your video editor: a request to cut the pauses and add captions, the reply, and the editor's monitor and timeline" width="720" />
 </p>
 
 **MakeMyClip Editor is a free, open-source (MIT) video editor that AI agents drive.** You ask Claude to edit a recording; it calls the editor's tools, and FFmpeg and a local whisper.cpp do the work on your computer. It ships as a Claude Code skill, the `clip` CLI, an MCP server, and a browser timeline editor. No cloud upload, no account, no API key, no telemetry, no generative AI.
@@ -86,7 +85,7 @@ clip ui   # opens http://127.0.0.1:5573
 
 Put your videos in the extension's **Media folder** (by default `Documents/MakeMyClip`); the editor reads and writes only there. The extension doesn't include FFmpeg (see [License](#license)): it finds the one Homebrew, MacPorts, winget, Scoop or Chocolatey installed, or you pick it in the extension's settings, along with the optional whisper model.
 
-**As an MCP server** (drive it from Claude Desktop / Cursor / any MCP client — no API key, on your existing Claude):
+**As an MCP server** (drive it from Claude Desktop / Cursor / Codex / any MCP client — no API key, on the plan you already have):
 
 ```jsonc
 // claude_desktop_config.json → "mcpServers"
@@ -100,6 +99,15 @@ Put your videos in the extension's **Media folder** (by default `Documents/MakeM
     }
   }
 }
+```
+
+Codex (the CLI and the IDE extension) reads the same server from `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.makemyclip-editor]
+command = "npx"
+args = ["-y", "@makemyclip/editor", "mcp"]
+env = { MAKEMYCLIP_WORKSPACE = "/path/to/your/media", MAKEMYCLIP_WHISPER_MODEL = "/path/to/ggml-base.en.bin" }
 ```
 
 It is listed in the [official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.MakeMyClip/editor) as `io.github.MakeMyClip/editor`, so MCP clients that browse the registry can install it from there. The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The MCP server exposes the timeline tools (show / edit / check / transcribe / undo / redo / export) and a `doctor` setup check over stdio; media stays confined to `MAKEMYCLIP_WORKSPACE`, and `MAKEMYCLIP_WHISPER_MODEL` is only needed for transcription and captions. Everything runs locally and offline — no API key.
@@ -161,15 +169,16 @@ The same steps from the CLI:
 ```bash
 clip timeline new
 clip timeline add-media podcast.mp4                  # prints the clip id, e.g. clip_ec2f047d
-clip timeline transcribe clip_ec2f047d               # each word with its index and time
+clip timeline transcribe clip_ec2f047d               # transcribe it (once per file)
 clip timeline silence clip_ec2f047d                  # cut the pauses on main
+clip timeline transcribe --sentences | head -80      # one line per sentence: time, word indices, text
 clip timeline short best-1 clip_ec2f047d 1400 1478 --x 0.4   # words 1400–1478 as a 9:16 short
 clip timeline --timeline best-1 frame 3 check.jpg    # look at it; move --x if the speaker is off
 clip timeline --timeline best-1 export best-1.mp4
 clip timeline list                                   # main and every short
 ```
 
-`short` starts 0.25 s before the first word and ends with the last, fills the 9:16 frame (`--x` picks the part that shows), sets -14 LUFS and burns in captions. Give several `<clipId> <from> <to>` ranges to join moments, in the order you give them. Any command takes `--timeline <id>` to work on a short, `clip timeline --timeline best-1 undo` takes the short apart again, and `short best-1 … --replace` rebuilds it.
+`short` cuts each edge inside the pause the audio shows there, keeping 0.1 s of room tone (where there's no clear pause it follows the transcript and warns), fills the 9:16 frame (`--x` picks the part that shows), sets -14 LUFS and burns in captions. Give several `<clipId> <from> <to>` ranges to join moments, in the order you give them. Any command takes `--timeline <id>` to work on a short, `clip timeline --timeline best-1 undo` takes the short apart again, and `short best-1 … --replace` rebuilds it.
 
 ---
 
@@ -210,6 +219,10 @@ Same registry, same session log, same output.
 Plus four meta-ops not in the registry: `snapshot`, `undo`, `inspect`, `delete`.
 
 The browser UI is a dark timeline editor: drag-drop import, a monitor (the composited frame at the playhead), an editable timeline (select a clip to trim / split / move / transition / remove, frame it (fill, zoom, position), cut its silences, or cut words and retakes from its transcript), the output shape (16:9, 9:16, 1:1 or 4:5) and loudness, captions from transcripts, one-click export (an mp4, or a project for Final Cut Pro, DaVinci Resolve or Premiere Pro), timeline undo/redo, snapshot, and keyboard shortcuts.
+
+<p align="center">
+  <img src="./docs/ui-screenshot.jpg" alt="The browser editor: imported clips, the monitor showing a captioned frame, and a timeline with video, title and caption tracks" width="720" />
+</p>
 
 ---
 

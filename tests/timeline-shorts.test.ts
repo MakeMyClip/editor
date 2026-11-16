@@ -99,8 +99,7 @@ async function plan(
     opts.target ?? emptyComposition(),
     source,
     { captions: false, ...request },
-    lookupFor(opts.transcripts ?? [SPACED]),
-    counter(),
+    { transcript: lookupFor(opts.transcripts ?? [SPACED]), mintId: counter() },
   );
 }
 
@@ -295,6 +294,13 @@ describe('planShort: cut from the source timeline', () => {
     const split = sourceOf([clipOf('c1', 0, 4, 0), clipOf('c2', 4, 10, 4)]);
     const short = await plan(split, { ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 4 }] });
     expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 2.75, sourceOutSec: 5.5 }]);
+    // …and captions the range once.
+    const captioned = await plan(split, {
+      ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 4 }],
+      captions: true,
+    });
+    const texts = addedClips(captioned.ops).flatMap((c) => (c.kind === 'text' ? [c.text] : []));
+    expect(texts).toEqual(['w2 w3 w4']);
   });
 
   it('keeps color and volume, and drops the fades of the source clip', async () => {
@@ -333,8 +339,7 @@ describe('planShort: the edit', () => {
       emptyComposition(),
       whole,
       { ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 4 }], x: 0.3 },
-      lookupFor([SPACED]),
-      counter(),
+      { transcript: lookupFor([SPACED]), mintId: counter() },
     );
     expect(short.ops).toEqual([
       { op: 'setCanvas', width: 1080, height: 1920, fps: 30, background: 'black', fit: 'cover' },
@@ -373,7 +378,46 @@ describe('planShort: the edit', () => {
       },
     ]);
     expect(short.captions).toBe(1);
-    expect(short.warnings).toEqual([]);
+    expect(short.warnings).toEqual([
+      'Range 1 starts mid-sentence, between "w1" and "w2" (word 2).',
+      'Range 1 ends mid-sentence, between "w4" and "w5" (word 4).',
+    ]);
+  });
+
+  it('warns only where a range cuts into a sentence', async () => {
+    // "One two. Three four five. Six" with a long pause before "Six".
+    const said = {
+      ...transcriptOf(M, [
+        [1, 1.4],
+        [1.5, 1.9],
+        [2.2, 2.6],
+        [2.7, 3.1],
+        [3.2, 3.6],
+        [4.6, 5],
+      ]),
+    };
+    said.words = said.words.map((w, i) => ({
+      ...w,
+      text: ['One', 'two.', 'Three', 'four', 'five.', 'Six'][i] ?? w.text,
+    }));
+    const warnings = async (fromIndex: number, toIndex: number): Promise<string[]> =>
+      (
+        await plan(
+          sourceOf([clipOf('c1', 0, 30, 0)]),
+          { ranges: [{ clipId: 'c1', fromIndex, toIndex }] },
+          { transcripts: [said] },
+        )
+      ).warnings;
+    expect(await warnings(2, 4)).toEqual([]); // a whole sentence
+    expect(await warnings(0, 5)).toEqual([]); // the recording's edges
+    expect(await warnings(3, 4)).toEqual([
+      'Range 1 starts mid-sentence, between "Three" and "four" (word 3).',
+    ]);
+    expect(await warnings(2, 3)).toEqual([
+      'Range 1 ends mid-sentence, between "four" and "five." (word 3).',
+    ]);
+    // "five." ends the sentence; the 1 s pause before "Six" ends one too.
+    expect(await warnings(5, 5)).toEqual([]);
   });
 
   it('captions only the asked-for words, not the word the lead reaches into', async () => {
@@ -388,8 +432,7 @@ describe('planShort: the edit', () => {
       emptyComposition(),
       whole,
       { ranges: [{ clipId: 'c1', fromIndex: 1, toIndex: 2 }] },
-      lookupFor([abutting]),
-      counter(),
+      { transcript: lookupFor([abutting]), mintId: counter() },
     );
     expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 0.75, sourceOutSec: 2 }]);
     const captions = addedClips(short.ops).filter((c) => c.kind === 'text');
@@ -411,8 +454,7 @@ describe('planShort: the edit', () => {
           { clipId: 'c1', fromIndex: 0, toIndex: 0 },
         ],
       },
-      lookupFor([abutting]),
-      counter(),
+      { transcript: lookupFor([abutting]), mintId: counter() },
     );
     expect(short.pieces).toEqual([
       { mediaId: M, sourceInSec: 0.75, sourceOutSec: 2 },
@@ -475,6 +517,211 @@ describe('planShort: the edit', () => {
   });
 });
 
+/** Speech at [start, end] spans at -20 dB over -60 dB room tone, measured the way
+ *  the levels capability measures it: 1.5 s before a time to 1 s after. */
+function levelsFrom(spans: [number, number][]): SpeechLevelsLookup {
+  return async (_comp, _clipId, aroundSec) => {
+    const fromSec = Math.max(0, aroundSec - 1.5);
+    const frames = Math.round((aroundSec + 1 - fromSec) / 0.01);
+    const db = Array.from({ length: frames }, (_, i) => {
+      const t = fromSec + (i + 0.5) * 0.01;
+      return spans.some(([a, b]) => t >= a && t < b) ? -20 : -60;
+    });
+    return { fromSec, frameSec: 0.01, db };
+  };
+}
+
+describe('planShort: edges in the pauses', () => {
+  const whole = sourceOf([clipOf('c1', 0, 30, 0)]);
+  // Word i is spoken from i+0.1 to i+0.9 s; whisper, 0.3 s late as at sentence
+  // ends, puts it at [i+0.3, i+1.3), each word running into the next.
+  const late = (texts: string[]): Transcript => {
+    const t = transcriptOf(
+      M,
+      texts.map((_, i): [number, number] => [i + 0.3, i + 1.3]),
+    );
+    return { ...t, words: t.words.map((w, i) => ({ ...w, text: `${w.text}${texts[i]}` })) };
+  };
+  const spoken = Array.from({ length: 10 }, (_, i): [number, number] => [i + 0.1, i + 0.9]);
+  const sentences = (t: Transcript): Transcript => ({
+    ...t,
+    words: t.words.map((w, i) => ({ ...w, text: `w${i}.` })),
+  });
+
+  async function snap(
+    transcript: Transcript,
+    levels: SpeechLevelsLookup | undefined,
+    range = { clipId: 'c1', fromIndex: 3, toIndex: 5 },
+    captions = false,
+  ) {
+    return planShort(
+      emptyComposition(),
+      whole,
+      { ranges: [range], captions },
+      { transcript: lookupFor([transcript]), levels, mintId: counter() },
+    );
+  }
+
+  it('moves both edges into the pauses, off the next sentence', async () => {
+    const short = await snap(late(Array(10).fill('')), levelsFrom(spoken));
+    // The pause before word 3 is 2.9–3.1 and the one after word 5 is 5.9–6.1:
+    // 0.1 s of room tone inside each, where the transcript alone gives 3.05–6.3.
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 3, sourceOutSec: 6 }]);
+    expect(short.warnings.some((w) => w.includes('pause'))).toBe(false);
+  });
+
+  it('keeps the transcript edges with a warning where the audio shows no pause', async () => {
+    const talking = levelsFrom([[0, 30]]);
+    const short = await snap(sentences(late(Array(10).fill(''))), talking);
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 3.05, sourceOutSec: 6.3 }]);
+    expect(short.warnings).toEqual([
+      'Range 1: no clear pause before "w3.", so its start follows the transcript and may clip that word or keep the end of "w2.". Look at it or listen.',
+      'Range 1: no clear pause after "w5.", so its end follows the transcript and may keep the start of "w6.". Look at it or listen.',
+    ]);
+  });
+
+  it('warns once where a range was cut mid-sentence anyway', async () => {
+    const short = await snap(late(Array(10).fill('')), levelsFrom([[0, 30]]));
+    expect(short.warnings).toEqual([
+      'Range 1 starts mid-sentence, between "w2" and "w3" (word 3).',
+      'Range 1 ends mid-sentence, between "w5" and "w6" (word 5).',
+    ]);
+  });
+
+  it('follows the transcript, quietly, for a source without sound', async () => {
+    const short = await snap(late(Array(10).fill('.')), async () => null);
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 3.05, sourceOutSec: 6.3 }]);
+    expect(short.warnings).toEqual([]);
+  });
+
+  it('still makes the short when the audio can’t be measured', async () => {
+    const short = await snap(late(Array(10).fill('.')), async () => {
+      throw new Error('FFmpeg failed');
+    });
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 3.05, sourceOutSec: 6.3 }]);
+    expect(short.warnings).toEqual([
+      "Range 1: its audio couldn't be measured, so its edges follow the transcript. Look at it or listen.",
+    ]);
+  });
+
+  it('keeps every word’s caption, in order, one word at a time', async () => {
+    // Cut at 5.7: the word before the last starts at 5.6, the last at 5.8.
+    const transcript = transcriptOf(M, [
+      [0.3, 1.3],
+      [1.3, 2.3],
+      [2.3, 3.3],
+      [3.3, 5.6],
+      [5.6, 5.8],
+      [5.8, 6.4],
+      [6.4, 7.4],
+    ]);
+    const speech: [number, number][] = [
+      [0.1, 0.9],
+      [1.1, 1.9],
+      [2.1, 2.9],
+      [3.1, 3.9],
+      [4.1, 4.8],
+      [4.9, 5.6],
+      [6.2, 7],
+    ];
+    const short = await planShort(
+      emptyComposition(),
+      whole,
+      { ranges: [{ clipId: 'c1', fromIndex: 3, toIndex: 5 }], maxWords: 1 },
+      { transcript: lookupFor([transcript]), levels: levelsFrom(speech), mintId: counter() },
+    );
+    expect(short.pieces.at(-1)?.sourceOutSec).toBe(5.7);
+    const texts = addedClips(short.ops).flatMap((c) => (c.kind === 'text' ? [c.text] : []));
+    expect(texts).toEqual(['w3', 'w4', 'w5']);
+  });
+
+  it('keeps a one-word range whose word whisper places past its cut', async () => {
+    // The word is spoken 5.2–5.6; whisper says 5.72–6.4. Its start finds two
+    // pauses (ambiguous, so the transcript's), its end the pause at 5.6.
+    const transcript = transcriptOf(M, [
+      [0.3, 1.3],
+      [1.3, 2.3],
+      [2.3, 3.3],
+      [3.3, 4.3],
+      [4.3, 5.72],
+      [5.72, 6.4],
+      [6.4, 7.4],
+    ]);
+    const speech: [number, number][] = [
+      [0.1, 0.9],
+      [1.1, 1.9],
+      [2.1, 2.9],
+      [3.1, 3.9],
+      [4.1, 4.9],
+      [5.2, 5.6],
+      [6.2, 7],
+    ];
+    const short = await snap(transcript, levelsFrom(speech), {
+      clipId: 'c1',
+      fromIndex: 5,
+      toIndex: 5,
+    });
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 5.47, sourceOutSec: 5.7 }]);
+  });
+
+  it('keeps both captions when the last two words crowd the cut', async () => {
+    // Cut at 6.0; whisper puts the last two words at 5.99 and 6.1.
+    const transcript = transcriptOf(M, [
+      [0.3, 1.3],
+      [1.3, 2.3],
+      [2.3, 3.3],
+      [3.3, 5.99],
+      [5.99, 6.1],
+      [6.1, 6.5],
+      [6.5, 7.5],
+    ]);
+    const speech: [number, number][] = [
+      [0.1, 0.9],
+      [1.1, 1.9],
+      [2.1, 2.9],
+      [3.1, 3.9],
+      [4.1, 5],
+      [5.1, 5.9],
+      [6.3, 7],
+    ];
+    const short = await planShort(
+      emptyComposition(),
+      whole,
+      { ranges: [{ clipId: 'c1', fromIndex: 3, toIndex: 5 }], maxWords: 1 },
+      { transcript: lookupFor([transcript]), levels: levelsFrom(speech), mintId: counter() },
+    );
+    expect(short.pieces.at(-1)?.sourceOutSec).toBe(6);
+    const texts = addedClips(short.ops).flatMap((c) => (c.kind === 'text' ? [c.text] : []));
+    expect(texts).toEqual(['w3', 'w4', 'w5']);
+  });
+
+  it('keeps the caption of a last word whisper places past the cut', async () => {
+    // Speech of word 5 ends at 5.6; whisper starts it at 5.8.
+    const transcript = transcriptOf(M, [
+      [0.3, 1.3],
+      [1.3, 2.3],
+      [2.3, 3.3],
+      [3.3, 4.3],
+      [4.3, 5.8],
+      [5.8, 6.4],
+      [6.4, 7.4],
+    ]);
+    const speech: [number, number][] = [
+      [0.1, 0.9],
+      [1.1, 1.9],
+      [2.1, 2.9],
+      [3.1, 3.9],
+      [4.1, 5.1],
+      [5.2, 5.6],
+      [6.2, 7],
+    ];
+    const short = await snap(transcript, levelsFrom(speech), undefined, true);
+    expect(short.pieces.at(-1)?.sourceOutSec).toBe(5.7);
+    const texts = addedClips(short.ops).flatMap((c) => (c.kind === 'text' ? [c.text] : []));
+    expect(texts.join(' ')).toContain('w5');
+  });
+});
+
 describe('checkShortTimelines', () => {
   it('refuses main as the short, and the short as its own source', () => {
     expect(() => checkShortTimelines('main')).toThrow(/not main/);
@@ -497,6 +744,7 @@ describe('make_short verb', () => {
       ...(await lookupFor([SPACED])(comp, clipId, transcriptId)),
       media: new Map(),
     }),
+    speechLevels: async () => null,
     readTimeline: async (id) => {
       const doc = sources[id];
       if (!doc) throw new NoTimelineError(id);
@@ -574,6 +822,7 @@ describe('make_short on the store', () => {
       media: new Map(),
     }),
     readTimeline: (id) => readComposition(id),
+    speechLevels: async () => null,
     defaultTrack: 'v0',
   };
   const makeShort = {

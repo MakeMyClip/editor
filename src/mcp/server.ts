@@ -32,7 +32,7 @@ import { reviewCuts } from '../timeline/review.js';
 import { runPlan } from '../timeline/run-plan.js';
 import { MAIN_TIMELINE, TimelineIdSchema } from '../timeline/schema.js';
 import { ShortError } from '../timeline/shorts.js';
-import { transcribeClip } from '../timeline/transcript.js';
+import { timelineOutline, transcribeClip } from '../timeline/transcript.js';
 import { EditableVerbSchema } from '../timeline/verbs.js';
 import { doctor } from '../tools/doctor.js';
 import { WhisperLanguageSchema } from '../transcribe/whisper.js';
@@ -218,15 +218,16 @@ export function buildMcpServer(): McpServer {
       title: 'Edit the timeline',
       description:
         'Apply one or more editing verbs to the document as ONE undoable change. Verbs: add_media, add_text, add_color, trim, move, split, remove, remove_silence, cut_words, remove_retakes, caption_speech, reframe, set_framing, set_loudness, transition. remove_silence cuts the pauses out of a media clip (sensitivity 0–1, default 0.5) and moves later clips on its track up; it applies nothing when no pause is found. cut_words cuts words fromIndex..toIndex out of a clip, sending the transcriptId from the timeline_transcript call they came from; remove_retakes cuts the earlier take of each phrase said twice in a row. caption_speech turns stored transcripts into captions on a track above the video (short phrases, or one word at a time with maxWords 1), replacing captions already there; export burns them in. Captions do not move with later cuts, so caption after cutting, or run it again after a cut. On a portrait canvas they sit above the bottom quarter and stay narrow enough to keep clear of the Shorts, Reels and TikTok overlays (margin sets the distance from the edge), and their width follows the font size. reframe changes the output shape (aspect 9:16 for Shorts/Reels/TikTok, 1:1, 4:5, 16:9) and fills it (fit cover, the default, crops; contain shows bars); x/y (0 = left/top, 0.5 = center, 1 = right/bottom) pick the part of every current media clip that shows. set_framing sets the fit, zoom (scale 0.1–4) and position of one media clip. Check the result with timeline_show atSec. set_loudness sets the integrated loudness the mp4 export normalizes to (targetLufs -14 for YouTube/Shorts/Reels/TikTok, -16 for podcasts, null for off). ' +
-        'make_short turns a long recording into a vertical short on a timeline of its own: send it with `timeline` set to a new id such as "best-1" (never main). It plays the given word ranges (indices from timeline_transcript on the source timeline, default main) with a little padding, cut from the source\'s clips so its silence and retake cuts carry in, on a 9:16 canvas filled edge to edge (x picks the part of the frame that shows), normalized to -14 LUFS, with captions. Pick whole sentences (15–60 s in all is typical), look at a frame with timeline_show (same timeline, atSec), then adjust with reframe x. Undo on that timeline removes it; replace rebuilds it. Every other verb also takes `timeline`, so a short can be edited like main. ' +
+        "make_short turns a long recording into a vertical short on a timeline of its own: send it with `timeline` set to a new id such as \"best-1\" (never main). It plays the given word ranges (read the source timeline's sentences with timeline_transcript and no clipId; the source defaults to main) with a little padding, cut from the source's clips so its silence and retake cuts carry in, on a 9:16 canvas filled edge to edge (x picks the part of the frame that shows), normalized to -14 LUFS, with captions. Pick whole sentences (15–60 s in all is typical); the result's warnings name a range that starts or ends mid-sentence. Look at a frame with timeline_show (same timeline, atSec), then adjust with reframe x. Undo on that timeline removes it; replace rebuilds it. Every other verb also takes `timeline`, so a short can be edited like main. " +
         'Batch related verbs into a single call. Media paths must be inside the workspace. Returns the updated document summary, including whether it can now render.',
       inputSchema: { timeline: timelineInput, verbs: z.array(EditableVerbSchema).min(1) },
     },
     async ({ timeline = MAIN_TIMELINE, verbs }) =>
       answeringTimelineErrors(async () => {
-        const { doc, ops } = await applyVerbs(verbs, makeVerbContext(), timeline);
+        const { doc, ops, warnings } = await applyVerbs(verbs, makeVerbContext(), timeline);
         return jsonResult({
           applied: ops.length,
+          ...(warnings.length > 0 ? { warnings } : {}),
           document: await describeComposition(doc, timeline),
         });
       }),
@@ -235,21 +236,50 @@ export function buildMcpServer(): McpServer {
   server.registerTool(
     'timeline_transcript',
     {
-      title: 'Transcribe a clip',
+      title: 'Transcribe the speech',
       description:
-        "Transcribe a media clip's speech with the local whisper.cpp and return its words with timeline times. Optional feature: if whisper.cpp or a model isn't set up, the error says how. The first call per source file takes a while; later calls reuse the stored transcript. A word's `index` is stable for its source file.",
+        "Transcribe the timeline's speech with the local whisper.cpp. Without clipId it returns the timeline as sentences: each with its timeline start and end, the clip it starts in, its word indices fromIndex..toIndex and its text, one page of about 40 KB at a time. Pass nextFromSec as fromSec for the next page, or fromSec/toSec for a stretch of the timeline. Read it to pick a short's moments, then send whole sentences' indices to make_short. " +
+        "With clipId it returns that clip's words (view 'words'), each with its index and timeline time, plus phrases said twice in a row (retakes); view 'sentences' gives that clip's sentences instead. " +
+        "transcriptIds (by source; with more than one source each sentence names its mediaId) and transcriptId identify the transcript: send one back with an edit by index so it is refused, not misplaced, if the source was transcribed again. A word's `index` is stable for its source file. Optional feature: if whisper.cpp or a model isn't set up, the error says how. The first call per source file takes a while; later calls reuse the stored transcript.",
       inputSchema: {
         timeline: timelineInput,
-        clipId: z.string().describe('Media clip to transcribe.'),
+        clipId: z
+          .string()
+          .optional()
+          .describe("Media clip to transcribe. Leave out for the whole timeline's sentences."),
+        view: z
+          .enum(['words', 'sentences'])
+          .optional()
+          .describe('words (default with a clipId) or sentences (default without one).'),
+        fromSec: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe("Sentences starting at or after this timeline time (a page's nextFromSec)."),
+        toSec: z
+          .number()
+          .positive()
+          .optional()
+          .describe('Sentences starting before this timeline time.'),
         language: WhisperLanguageSchema.optional(),
       },
     },
-    async ({ timeline = MAIN_TIMELINE, clipId, language }) =>
+    async ({ timeline = MAIN_TIMELINE, clipId, view, fromSec, toSec, language }) =>
       answeringTimelineErrors(async () => {
         const comp = await readComposition(timeline);
-        return jsonResult(
-          await transcribeClip(comp, clipId, await confinedMediaMap(comp), { language }),
-        );
+        const media = await confinedMediaMap(comp);
+        if ((view ?? (clipId ? 'words' : 'sentences')) === 'words') {
+          if (!clipId) {
+            return jsonResult({
+              error: "The words view needs a clipId. Leave view out for the timeline's sentences.",
+            });
+          }
+          return jsonResult(await transcribeClip(comp, clipId, media, { language }));
+        }
+        const outline = await timelineOutline(comp, media, { clipId, fromSec, toSec, language });
+        // Compact, as the page size is counted: a long recording's outline is
+        // what has to fit in one result.
+        return { content: [{ type: 'text' as const, text: JSON.stringify(outline) }] };
       }),
   );
 

@@ -323,6 +323,7 @@ interface FadeSuppression {
 function effectFilters(
   clip: Clip,
   outDur: number,
+  fps: number,
   suppress: FadeSuppression = { in: false, out: false },
 ): FilterChains {
   const video: string[] = [];
@@ -344,7 +345,10 @@ function effectFilters(
   if (clip.kind === 'media') {
     const f = speedFactor(clip.effects);
     if (f !== 1) {
-      video.push(`setpts=PTS/${f}`);
+      // Back to the canvas rate right away: retimed frames otherwise reach the
+      // encoder off its frame grid, and which ones it drops or repeats varies,
+      // so a frame preview couldn't show the frame export plays.
+      video.push(`setpts=PTS/${f}`, `fps=${fps}`);
       audio.push(atempoChain(f));
     }
   }
@@ -401,6 +405,59 @@ function segPath(dir: string, index: number, clipId: string, tag?: string): stri
 }
 
 /**
+ * A clip's segment filters after its input: the video chain (framing onto the
+ * canvas, a text clip's own text, effects, then the text over it) and the audio
+ * effects. Shared by export and the frame preview, so a preview can't drift
+ * from what export draws.
+ */
+function clipChains(
+  comp: Composition,
+  clip: Clip,
+  index: number,
+  ctx: CompileContext,
+  overlays: TextClip[],
+  fadeSuppress: FadeSuppression = { in: false, out: false },
+): { chain: string; audio: string[]; textFiles: StepSideFile[] } {
+  const outDur = outputDuration(clip);
+  const { width, height, fps, background } = comp;
+  const { video: fx, audio } = effectFilters(clip, outDur, fps, fadeSuppress);
+  const textFiles: StepSideFile[] = [];
+
+  if (clip.kind === 'text') {
+    const textfile = resolve(ctx.dir, `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}.txt`);
+    textFiles.push({ path: textfile, content: clip.text });
+    fx.unshift(drawtextFilter(textfile, clip, fontFor(ctx, clip, false)));
+  }
+
+  // Overlay times are timeline seconds; the segment runs in output time, which
+  // a speed effect scales.
+  const ratio = clipDuration(clip) > 0 ? outDur / clipDuration(clip) : 1;
+  const end = clipEndSec(clip);
+  for (const overlay of overlays) {
+    const from = Math.max(overlay.startSec, clip.startSec);
+    const to = Math.min(clipEndSec(overlay), end);
+    if (to - from <= ABUT_EPSILON) continue;
+    const textfile = resolve(
+      ctx.dir,
+      `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}-${overlay.id}.txt`,
+    );
+    textFiles.push({ path: textfile, content: overlay.text });
+    const window = `gte(t,${seconds((from - clip.startSec) * ratio)})*lt(t,${seconds((to - clip.startSec) * ratio)})`;
+    fx.push(drawtextFilter(textfile, overlay, fontFor(ctx, overlay, true), window));
+  }
+
+  // Geometry first: frame onto the canvas, square pixels, lock fps. (No-op-ish
+  // for generated sources that are already canvas-sized, but keeps the chain uniform.)
+  const geometry = [
+    ...framingFilters(clipFraming(comp, clip), width, height, background),
+    'setsar=1',
+    `fps=${fps}`,
+    'format=yuv420p',
+  ];
+  return { chain: [...geometry, ...fx].join(','), audio, textFiles };
+}
+
+/**
  * Normalize one clip to a self-contained segment: canvas-sized video at the
  * composition fps, effects baked in, and a guaranteed stereo AAC audio track
  * (the source's, or generated silence) so the fold can always join segments.
@@ -420,8 +477,11 @@ function buildSegmentStep(
   const outDur = outputDuration(clip);
   const { width, height, fps, background } = comp;
   const out = segPath(ctx.dir, index, clip.id, ctx.tag);
-  const { video: fx, audio: afx } = effectFilters(clip, outDur, fadeSuppress);
-  const textFiles: StepSideFile[] = [];
+  const {
+    chain: videoChain,
+    audio: afx,
+    textFiles,
+  } = clipChains(comp, clip, index, ctx, overlays, fadeSuppress);
 
   const inputArgs: string[] = [];
   let videoSource: string; // filtergraph input label feeding the video chain, e.g. [0:v]
@@ -476,38 +536,8 @@ function buildSegmentStep(
     );
     videoSource = '[0:v]';
     audioSource = '1:a';
-    const textfile = resolve(ctx.dir, `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}.txt`);
-    textFiles.push({ path: textfile, content: clip.text });
-    fx.unshift(drawtextFilter(textfile, clip, fontFor(ctx, clip, false)));
   }
 
-  // Overlay times are timeline seconds; the segment runs in output time, which
-  // a speed effect scales.
-  const ratio = clipDuration(clip) > 0 ? outDur / clipDuration(clip) : 1;
-  const end = clipEndSec(clip);
-  for (const overlay of overlays) {
-    const from = Math.max(overlay.startSec, clip.startSec);
-    const to = Math.min(clipEndSec(overlay), end);
-    if (to - from <= ABUT_EPSILON) continue;
-    const textfile = resolve(
-      ctx.dir,
-      `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}-${overlay.id}.txt`,
-    );
-    textFiles.push({ path: textfile, content: overlay.text });
-    const window = `gte(t,${seconds((from - clip.startSec) * ratio)})*lt(t,${seconds((to - clip.startSec) * ratio)})`;
-    fx.push(drawtextFilter(textfile, overlay, fontFor(ctx, overlay, true), window));
-  }
-
-  // Geometry first: frame onto the canvas, square pixels, lock fps. (No-op-ish
-  // for generated sources that are already canvas-sized, but keeps the chain uniform.)
-  const geometry = [
-    ...framingFilters(clipFraming(comp, clip), width, height, background),
-    'setsar=1',
-    `fps=${fps}`,
-    'format=yuv420p',
-  ];
-
-  const videoChain = [...geometry, ...fx].join(',');
   // Always normalize audio to a uniform stereo/48k layout BEFORE any effects, so
   // the fold's concat/acrossfade can't silently downmix when a source clip is
   // mono (and so every segment exposes a real [a] output). aformat is a harmless
@@ -581,6 +611,13 @@ function even(size: number): number {
 /** Seconds for a filter expression: millisecond precision, no float noise. */
 function seconds(sec: number): string {
   return String(Math.round(sec * 1000) / 1000);
+}
+
+/** How much of the source a frame preview reads before the frame, at least. */
+const FRAME_PREROLL_SEC = 1;
+
+function floorUs(sec: number): number {
+  return Math.floor(sec * 1e6 + 1e-6) / 1e6;
 }
 
 /** The font file for a text clip, with a missing font reported against the clip.
@@ -705,18 +742,18 @@ function assertAbutting(clips: Clip[]): void {
 
 /**
  * Render ONE frame at timeline time `atSec` — the agent's "eyes" on the doc.
- * Goes through the REAL segment path (`buildSegmentStep`) so the preview can't
- * diverge from what export would produce, then extracts a still from that
- * normalized segment. Two steps: encode the active clip's segment, then grab the
- * frame at the mapped offset. Runs the SAME abutting check as export, so it fails
- * (rather than guessing a clip) on an unexportable doc; throws `CompileError` past
- * the end, in a gap, or on an overlap, and inherits the v1 single-video-track /
- * no-compositing guards.
+ * Uses the segment's own video chain (`clipChains`) so the preview can't diverge
+ * from what export would produce. A media clip is one step: seek the source to
+ * the frame and run the chain on a window starting there, with the timestamps
+ * offset so fades and text windows read the time they would in the segment, so
+ * the cost doesn't grow with the clip's length. A text or color card (generated,
+ * and short) is two: encode its segment, then grab the frame from it. Runs the
+ * SAME abutting check as export, so it fails (rather than guessing a clip) on an
+ * unexportable doc; throws `CompileError` past the end, in a gap, or on an
+ * overlap, and inherits the v1 single-video-track / no-compositing guards.
  *
- * Known v1 limits (flag, don't fix here): a frame inside a transition window
- * shows the underlying clip, not the xfade blend; `-ss` is keyframe-accurate
- * (off by up to a GOP) — fine for a thumbnail; and a long clip re-encodes a whole
- * segment to grab one frame.
+ * Known v1 limit (flag, don't fix here): a frame inside a transition window
+ * shows the underlying clip, not the xfade blend.
  */
 export function buildFrameAtPlan(
   comp: Composition,
@@ -741,9 +778,6 @@ export function buildFrameAtPlan(
   }
   assertCompilable(clip);
 
-  // Encode the clip's segment exactly as export would, then extract the frame.
-  const segStep = buildSegmentStep(comp, clip, index, ctx, overlays);
-
   // Map doc-local time to the post-speed SEGMENT timebase. The ratio is 1 unless
   // the clip carries a speed effect, which shortens the segment relative to the
   // document extent — so a frame still lands on the source content the document
@@ -754,9 +788,59 @@ export function buildFrameAtPlan(
   const segTime = clipDur > 0 ? (localDoc * outDur) / clipDur : 0;
   const lastFrame = Math.max(0, outDur - 1 / comp.fps);
   const clamped = Math.max(0, Math.min(segTime, lastFrame));
+  const label = `frame:${clip.id}@${atSec}`;
 
+  if (clip.kind === 'media') {
+    const info = ctx.media.get(clip.mediaId);
+    if (!info) {
+      throw new CompileError(`No media registered for "${clip.mediaId}" (clip "${clip.id}").`);
+    }
+    // Seconds into the clip's source. The seek lands a second before that and
+    // keeps every frame from the keyframe before it (`-noaccurate_seek`), so a
+    // frame that export repeats into this time (a source slower than the
+    // canvas, slow motion, or a screen recording holding a still frame) is
+    // still read; undoing the seek gives source time from the clip's in-point.
+    // Frames before the in-point are dropped, as export's seek drops them. The
+    // chain's speed `setpts` turns source time into segment time, which its
+    // fades and text read, and `trim` takes the frame at the frame's segment
+    // time. Rounded down, to the microsecond, so the seek never passes the
+    // clip's last frame or its out-point.
+    const local = floorUs(clamped * speedFactor(clip.effects));
+    const seek = floorUs(clip.sourceInSec + Math.max(0, local - FRAME_PREROLL_SEC));
+    // The first canvas frame at or after the frame's time (`trim` rounds an
+    // off-grid start to the nearest frame, which could be the one before), but
+    // no later than the segment's last frame: encoding to the clip's length
+    // keeps round(length x fps) frames.
+    const lastIndex = Math.max(0, Math.round(outDur * comp.fps) - 1);
+    const firstFrame = Math.min(Math.ceil(clamped * comp.fps - 1e-6), lastIndex) / comp.fps;
+    const { chain, textFiles } = clipChains(comp, clip, index, ctx, overlays);
+    const frameStep: FfmpegStep = {
+      label,
+      args: [
+        '-y',
+        '-noaccurate_seek',
+        '-ss',
+        String(seek),
+        '-i',
+        info.path,
+        '-filter_complex',
+        // The seek shifted timestamps by (in-point + local) in whole stream
+        // ticks; shifting back by the same rounding leaves them as export's
+        // seek to the in-point does, tick for tick.
+        `[0:v]setpts=PTS+round(${seek}/TB)-round(${floorUs(clip.sourceInSec)}/TB),trim=start=0,${chain},trim=start=${firstFrame}[v]`,
+        ...['-map', '[v]', '-an', '-frames:v', '1', '-q:v', '2'],
+        ctx.output,
+      ],
+      output: ctx.output,
+      textFiles,
+    };
+    return { steps: [frameStep], output: ctx.output, durationSec: 0 };
+  }
+
+  // Encode the card's segment exactly as export would, then extract the frame.
+  const segStep = buildSegmentStep(comp, clip, index, ctx, overlays);
   const frameStep: FfmpegStep = {
-    label: `frame:${clip.id}@${atSec}`,
+    label,
     args: buildPreviewFrameArgs({ input: segStep.output, output: ctx.output, atSec: clamped }),
     output: ctx.output,
     textFiles: [],
