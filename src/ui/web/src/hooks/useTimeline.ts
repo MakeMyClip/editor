@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { withTimeline } from '../lib/timelines.js';
 import type { Composition } from '../types.js';
 
 const EMPTY: Composition = {
@@ -14,34 +15,48 @@ const EMPTY: Composition = {
 };
 
 /**
- * Polls `/api/timeline` (the CompositionDoc — the source of truth for assembled
- * edits) every `intervalMs`. Mirrors `useSession`: returns the latest doc plus
- * loading/error state and a `refresh()` for callers that just mutated it (e.g.
- * after a verb POST) and want the view to update without waiting for the poll.
+ * Polls `/api/timeline` for `timeline` (the CompositionDoc — the source of truth
+ * for assembled edits) every `intervalMs`. Mirrors `useSession`: returns the
+ * latest doc plus loading/error state and a `refresh()` for callers that just
+ * mutated it (e.g. after a verb POST) and want the view to update without
+ * waiting for the poll. `missing` is set when the timeline no longer exists.
  */
-export function useTimeline(intervalMs = 2000): {
+export function useTimeline(
+  timeline: string,
+  intervalMs = 2000,
+): {
   composition: Composition;
   loading: boolean;
   error: string | null;
+  missing: boolean;
   refresh: () => Promise<void>;
 } {
-  const [composition, setComposition] = useState<Composition>(EMPTY);
+  // Kept with the timeline it belongs to, so a switch shows nothing of the last one.
+  const [loaded, setLoaded] = useState<{ timeline: string; doc: Composition } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [missing, setMissing] = useState(false);
+  // A response for a timeline switched away from is dropped, not shown.
+  const wanted = useRef(timeline);
+  wanted.current = timeline;
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/timeline');
+      const res = await fetch(withTimeline('/api/timeline', timeline));
+      if (wanted.current !== timeline) return;
+      setMissing(res.status === 404);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as { document: Composition };
-      setComposition(json.document);
+      if (wanted.current !== timeline) return;
+      setLoaded({ timeline, doc: json.document });
       setError(null);
       setLoading(false);
     } catch (err) {
+      if (wanted.current !== timeline) return;
       setError(err instanceof Error ? err.message : String(err));
       setLoading(false);
     }
-  }, []);
+  }, [timeline]);
 
   useEffect(() => {
     void load();
@@ -49,5 +64,6 @@ export function useTimeline(intervalMs = 2000): {
     return () => window.clearInterval(timer);
   }, [intervalMs, load]);
 
-  return { composition, loading, error, refresh: load };
+  const composition = loaded?.timeline === timeline ? loaded.doc : EMPTY;
+  return { composition, loading, error, missing, refresh: load };
 }

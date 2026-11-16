@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { withTimeline } from '../lib/timelines.js';
 
 type ProjectFormat = 'fcpxml' | 'xmeml';
 
@@ -15,8 +16,8 @@ const PROJECTS: readonly { format: ProjectFormat; label: string; detail: string 
 
 /** POST the export route for an editor project; throws with the server's
  *  message (e.g. the 422 naming what the project can't hold). */
-async function exportProject(format: ProjectFormat): Promise<ProjectExport> {
-  const res = await fetch('/api/timeline/export', {
+async function exportProject(format: ProjectFormat, timeline: string): Promise<ProjectExport> {
+  const res = await fetch(withTimeline('/api/timeline/export', timeline), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ format }),
@@ -35,10 +36,12 @@ const fileName = (path: string): string => path.split(/[\\/]/).pop() ?? path;
  * carries only in part.
  */
 export function ExportButton({
+  timeline,
   busy,
   disabled,
   onExportVideo,
 }: {
+  timeline: string;
   busy: boolean;
   disabled: boolean;
   onExportVideo: () => void;
@@ -72,7 +75,7 @@ export function ExportButton({
     setError(null);
     setCopied(false);
     try {
-      setResult(await exportProject(format));
+      setResult(await exportProject(format, timeline));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

@@ -1,4 +1,5 @@
 import type { Composition, Fit } from '../types.js';
+import { withTimeline } from './timelines.js';
 
 /** A timeline editing verb (mirrors CompositionVerb in src/timeline/verbs.ts).
  *  Loosely typed at the field level — the server validates with Zod, which is the
@@ -44,26 +45,39 @@ export type Verb =
       kind?: string;
       durationSec?: number;
       track?: string;
+    }
+  | {
+      verb: 'make_short';
+      ranges: { clipId: string; fromIndex: number; toIndex: number; transcriptId?: string }[];
+      source?: string;
+      x?: number;
     };
 
 /**
- * POST editing verbs to /api/timeline/verbs — the same op-aware, undoable path
- * the agent and CLI use. Throws with the server's message on a 4xx/5xx (e.g. a
- * 422 for a bad clip reference or a 403 for a workspace-boundary violation) so
- * the caller can surface it. `applied` is the op count; 0 means the verbs changed
- * nothing (e.g. remove_silence found no pause).
+ * POST editing verbs to /api/timeline/verbs for `timeline` — the same op-aware,
+ * undoable path the agent and CLI use. Throws with the server's message on a
+ * 4xx/5xx (e.g. a 422 for a bad clip reference or a 403 for a workspace-boundary
+ * violation) so the caller can surface it. `applied` is the op count; 0 means the
+ * verbs changed nothing (e.g. remove_silence found no pause). `warnings` name what
+ * a verb did that may not have been meant (a short cut mid-sentence).
  */
 export async function applyTimelineVerbs(
   verbs: Verb[],
-): Promise<{ document: Composition; applied: number }> {
-  const res = await fetch('/api/timeline/verbs', {
+  timeline: string,
+): Promise<{ document: Composition; applied: number; warnings: string[] }> {
+  const res = await fetch(withTimeline('/api/timeline/verbs', timeline), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ verbs }),
   });
-  const json = (await res.json()) as { document?: Composition; applied?: number; error?: string };
+  const json = (await res.json()) as {
+    document?: Composition;
+    applied?: number;
+    warnings?: string[];
+    error?: string;
+  };
   if (!res.ok || !json.document) {
     throw new Error(json.error ?? `HTTP ${res.status}`);
   }
-  return { document: json.document, applied: json.applied ?? 0 };
+  return { document: json.document, applied: json.applied ?? 0, warnings: json.warnings ?? [] };
 }
