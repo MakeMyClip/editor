@@ -4,9 +4,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   CaptionError,
+  captionWidthBudget,
+  defaultCaptionStyle,
   groupCaptions,
   joinWords,
   planCaptions,
+  safeArea,
   type TranscriptLookup,
 } from '../src/timeline/captions.js';
 import { checkExportable } from '../src/timeline/compile.js';
@@ -27,7 +30,7 @@ import {
   type Transcript,
   TranscriptError,
 } from '../src/timeline/transcript.js';
-import { lowerVerb, type VerbContext } from '../src/timeline/verbs.js';
+import { EditableVerbSchema, lowerVerb, type VerbContext } from '../src/timeline/verbs.js';
 
 const M = 'm_aaaaaaaaaaaa' as MediaId;
 const N = 'm_bbbbbbbbbbbb' as MediaId;
@@ -328,6 +331,17 @@ describe('caption_speech verb', () => {
     defaultTrack: 'v0',
   });
 
+  it('takes a margin from the edge, keeping the safe sides', async () => {
+    const vertical = applyOps(cutRecording(), [{ op: 'setCanvas', width: 1080, height: 1920 }]);
+    const ops = await lowerVerb(
+      vertical,
+      { verb: 'caption_speech', clipId: 'a', margin: 300 },
+      verbCtx(),
+    );
+    expect(ops[1]).toMatchObject({ clip: { style: { margin: { x: 151, y: 300 } } } });
+    expect(() => EditableVerbSchema.parse({ verb: 'caption_speech', margin: -1 })).toThrow();
+  });
+
   it('lowers style options onto the caption clips', async () => {
     const ops = await lowerVerb(
       cutRecording(),
@@ -373,5 +387,71 @@ describe('caption_speech verb', () => {
       await undoLastDocOp();
       expect((await readComposition()).tracks.map((t) => t.id)).toEqual(['v0']);
     });
+  });
+});
+
+describe('captions on a vertical canvas', () => {
+  const vertical = emptyComposition({ width: 1080, height: 1920 });
+  const landscape = emptyComposition({ width: 1920, height: 1080 });
+
+  it('keep clear of the bottom quarter and 14% at each side on a portrait canvas', () => {
+    expect(safeArea(vertical)).toEqual({ side: 151, bottom: 480 });
+    expect(safeArea(emptyComposition({ width: 720, height: 1280 }))).toEqual({
+      side: 101,
+      bottom: 320,
+    });
+    expect(safeArea(landscape)).toEqual({ side: 40, bottom: 40 });
+    expect(safeArea(emptyComposition({ width: 1080, height: 1080 }))).toEqual({
+      side: 40,
+      bottom: 40,
+    });
+  });
+
+  it('get that margin by default there, and none on landscape (unchanged documents)', () => {
+    expect(defaultCaptionStyle(vertical)).toEqual({
+      fontSize: 54,
+      color: 'white',
+      background: 'black@0.6',
+      anchor: 'bottom-center',
+      margin: { x: 151, y: 480 },
+    });
+    expect('margin' in defaultCaptionStyle(landscape)).toBe(false);
+  });
+
+  it('fit their width to the font: 22 characters at 54 px on 1080x1920, 32 on landscape', () => {
+    expect(captionWidthBudget(vertical, defaultCaptionStyle(vertical))).toBe(22);
+    expect(captionWidthBudget(landscape, defaultCaptionStyle(landscape))).toBe(32);
+    // A larger font shrinks it on any canvas.
+    expect(captionWidthBudget(landscape, { ...defaultCaptionStyle(landscape), fontSize: 96 })).toBe(
+      30,
+    );
+    expect(captionWidthBudget(vertical, { ...defaultCaptionStyle(vertical), fontSize: 96 })).toBe(
+      12,
+    );
+  });
+
+  it('break a line before it passes the width budget', () => {
+    const words = spoken('these words make a caption longer than twenty two');
+    const wide = groupCaptions(words, 30, 12);
+    const narrow = groupCaptions(words, 30, 12, 22);
+    expect(wide.map((c) => c.text)).toEqual([
+      'these words make a caption',
+      'longer than twenty two',
+    ]);
+    expect(narrow.map((c) => c.text)).toEqual([
+      'these words make a',
+      'caption longer than',
+      'twenty two',
+    ]);
+    expect(narrow.every((c) => c.text.length <= 22)).toBe(true);
+  });
+
+  it('are planned with the safe margin and the narrow budget on a portrait timeline', async () => {
+    currentDoc = applyOps(cutRecording(), [{ op: 'setCanvas', width: 1080, height: 1920 }]);
+    const plan = await planCaptions(currentDoc, {}, lookup(new Map([[M, RECORDING]])), counter());
+    const doc = applyOps(currentDoc, plan.ops);
+    for (const clip of doc.tracks[1]?.clips ?? []) {
+      expect(clip.kind === 'text' && clip.style.margin).toEqual({ x: 151, y: 480 });
+    }
   });
 });

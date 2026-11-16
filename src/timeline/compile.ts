@@ -578,8 +578,6 @@ function even(size: number): number {
   return Math.max(2, Math.round(size / 2) * 2);
 }
 
-const CENTER_POS = { x: '(w-text_w)/2', y: '(h-text_h)/2' };
-
 /** Seconds for a filter expression: millisecond precision, no float noise. */
 function seconds(sec: number): string {
   return String(Math.round(sec * 1000) / 1000);
@@ -606,7 +604,7 @@ function drawtextFilter(
   enable?: string,
 ): string {
   const { style } = clip;
-  const pos = ANCHOR_EXPR[style.anchor] ?? CENTER_POS;
+  const pos = anchorPosition(style.anchor, style.margin);
   const opts = [`textfile=${quoteFilterArg(textfile)}`];
   if (fontFile) opts.push(`fontfile=${quoteFilterArg(fontFile)}`);
   opts.push(
@@ -623,18 +621,27 @@ function drawtextFilter(
   return `drawtext=${opts.join(':')}`;
 }
 
-const EDGE = 40;
-const ANCHOR_EXPR: Record<string, { x: string; y: string }> = {
-  'top-left': { x: `${EDGE}`, y: `${EDGE}` },
-  'top-center': { x: '(w-text_w)/2', y: `${EDGE}` },
-  'top-right': { x: `w-text_w-${EDGE}`, y: `${EDGE}` },
-  'center-left': { x: `${EDGE}`, y: '(h-text_h)/2' },
-  center: { x: '(w-text_w)/2', y: '(h-text_h)/2' },
-  'center-right': { x: `w-text_w-${EDGE}`, y: '(h-text_h)/2' },
-  'bottom-left': { x: `${EDGE}`, y: `h-text_h-${EDGE}` },
-  'bottom-center': { x: '(w-text_w)/2', y: `h-text_h-${EDGE}` },
-  'bottom-right': { x: `w-text_w-${EDGE}`, y: `h-text_h-${EDGE}` },
-};
+/** Inset of anchored text from the frame edges when its style sets none. */
+export const TEXT_EDGE_PX = 40;
+
+/** drawtext x/y for an anchor, kept `margin` pixels in from the edges it is
+ *  anchored to. */
+function anchorPosition(
+  anchor: string,
+  margin: { x: number; y: number } = { x: TEXT_EDGE_PX, y: TEXT_EDGE_PX },
+): { x: string; y: string } {
+  const x = anchor.endsWith('left')
+    ? `${margin.x}`
+    : anchor.endsWith('right')
+      ? `w-text_w-${margin.x}`
+      : '(w-text_w)/2';
+  const y = anchor.startsWith('top')
+    ? `${margin.y}`
+    : anchor.startsWith('bottom')
+      ? `h-text_h-${margin.y}`
+      : '(h-text_h)/2';
+  return { x, y };
+}
 
 const CANVAS_BACKGROUND = 'Canvas background';
 

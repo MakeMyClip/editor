@@ -361,7 +361,14 @@ describe('planShort: the edit', () => {
           text: 'w2 w3 w4',
           startSec: 0.25,
           durationSec: 2.5,
-          style: { fontSize: 54, color: 'white', background: 'black@0.6', anchor: 'bottom-center' },
+          style: {
+            fontSize: 54,
+            color: 'white',
+            background: 'black@0.6',
+            anchor: 'bottom-center',
+            // Clear of the vertical feeds' overlays: the bottom quarter, 14% a side.
+            margin: { x: 151, y: 480 },
+          },
         }),
       },
     ]);

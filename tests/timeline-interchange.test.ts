@@ -270,6 +270,30 @@ describe('interchange — FCPXML', () => {
     expect(t1?.getAttribute('ref')).toBe(basic?.getAttribute('id'));
   });
 
+  it('places a title by its margin, as the mp4 does', () => {
+    const root = fcpxml(
+      doc([
+        { id: 'v0', clips: [media('a', 0, 20, 30)] },
+        {
+          id: 'captions',
+          clips: [
+            textClip({
+              id: 't1',
+              text: 'Safe',
+              startSec: 1,
+              durationSec: 2,
+              style: { anchor: 'bottom-center', fontSize: 54, margin: { x: 151, y: 480 } },
+            }),
+          ],
+        },
+      ]),
+    );
+    const title = one(root, 'title');
+    const position = all(title, 'param').find((p) => p.getAttribute('name') === 'Position');
+    // 1080/2 − 480 − 54/2 = 33 px below center.
+    expect(position?.getAttribute('value')).toBe('0 -33');
+  });
+
   it('keeps one title across a transition, in output time', () => {
     const root = fcpxml(
       doc([

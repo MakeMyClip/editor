@@ -132,6 +132,39 @@ describe('compileTimeline — generated clips', () => {
   });
 });
 
+describe('compileTimeline — text margins', () => {
+  const placed = (style: Record<string, unknown>) => {
+    const comp = oneTrack({
+      op: 'addClip',
+      trackId: 'v0',
+      clip: textClip({ id: 't', text: 'Hi', durationSec: 1, startSec: 0, style }),
+    });
+    const step = compileTimeline(comp, ctx({ fontFor: () => undefined })).steps[0];
+    const fc = step?.args[step.args.indexOf('-filter_complex') + 1] ?? '';
+    const options = parseFilter(fc.slice(fc.indexOf('drawtext='))).options;
+    return { x: options.x, y: options.y };
+  };
+
+  it('keeps text its margin in from the edges it is anchored to', () => {
+    const margin = { x: 151, y: 480 };
+    expect(placed({ anchor: 'bottom-center', margin })).toEqual({
+      x: '(w-text_w)/2',
+      y: 'h-text_h-480',
+    });
+    expect(placed({ anchor: 'bottom-left', margin })).toEqual({ x: '151', y: 'h-text_h-480' });
+    expect(placed({ anchor: 'top-right', margin })).toEqual({ x: 'w-text_w-151', y: '480' });
+    expect(placed({ anchor: 'center', margin })).toEqual({
+      x: '(w-text_w)/2',
+      y: '(h-text_h)/2',
+    });
+  });
+
+  it('keeps 40 px without a margin, as before', () => {
+    expect(placed({ anchor: 'bottom-center' })).toEqual({ x: '(w-text_w)/2', y: 'h-text_h-40' });
+    expect(placed({ anchor: 'top-left' })).toEqual({ x: '40', y: '40' });
+  });
+});
+
 describe('compileTimeline — effects', () => {
   it('maps adjust → eq, volume → volume, speed → setpts/atempo, fades → fade/afade', () => {
     const comp = oneTrack(

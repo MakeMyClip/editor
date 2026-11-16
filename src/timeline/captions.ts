@@ -1,4 +1,4 @@
-import { videoLayers } from './compile.js';
+import { TEXT_EDGE_PX, videoLayers } from './compile.js';
 import {
   type Anchor,
   type Clip,
@@ -24,6 +24,15 @@ export const DEFAULT_CAPTION_WORDS = 7;
 
 /** Widest caption, in Latin characters (a CJK character counts as two). */
 const MAX_CAPTION_WIDTH = 32;
+/** Width of a capital in em in the widest common caption fonts (Arial
+ *  capitals measure 0.61 em at 54 px), so the budget holds for all-caps text. */
+const CHAR_EM = 0.62;
+/** The box drawtext draws behind a caption reaches this far past its text. */
+const CAPTION_BOX_PX = 12;
+/** Share of a portrait canvas the vertical feeds' overlays cover: the caption,
+ *  buttons and progress bar at the bottom, the action column at the sides. */
+const PORTRAIT_BOTTOM_SHARE = 0.25;
+const PORTRAIT_SIDE_SHARE = 0.14;
 /** A pause this long between words starts a new caption. */
 const PAUSE_SEC = 0.7;
 /** How long a caption stays up after its last word, unless the next one starts. */
@@ -108,8 +117,9 @@ export async function planCaptions(
   const removed = (track?.clips.length ?? 0) - kept.length;
 
   const style = { ...defaultCaptionStyle(comp), ...request.style };
+  const maxWidth = captionWidthBudget(comp, style);
   const added: CompositionOp[] = sources.flatMap(({ clip, transcript }) =>
-    groupCaptions(clipWords(transcript, clip), clipEndSec(clip), maxWords).map(
+    groupCaptions(clipWords(transcript, clip), clipEndSec(clip), maxWords, maxWidth).map(
       (cue): CompositionOp => ({
         op: 'addClip',
         trackId,
@@ -196,23 +206,58 @@ async function everyTranscribedClip(
   return found;
 }
 
-/** Captions sized to the canvas: white on a dark box, near the bottom. */
-export function defaultCaptionStyle(comp: Composition): TextStyle {
+/**
+ * Where captions stay clear of what a platform draws over the video. On a
+ * portrait canvas (Shorts, Reels, TikTok) that is the bottom quarter and 14%
+ * at each side: none of them publishes pixel specs for organic posts and
+ * third-party estimates conflict, so one conservative box. Other shapes keep
+ * the usual 40 px edge.
+ */
+export function safeArea(comp: Composition): { side: number; bottom: number } {
+  if (comp.height <= comp.width) return { side: TEXT_EDGE_PX, bottom: TEXT_EDGE_PX };
   return {
+    side: Math.round(PORTRAIT_SIDE_SHARE * comp.width),
+    bottom: Math.round(PORTRAIT_BOTTOM_SHARE * comp.height),
+  };
+}
+
+/** Captions sized to the canvas: white on a dark box, near the bottom, and on
+ *  a portrait canvas inside its safe area. */
+export function defaultCaptionStyle(comp: Composition): TextStyle {
+  const style: TextStyle = {
     fontSize: Math.round(Math.min(comp.width, comp.height) / 20),
     color: 'white',
     background: 'black@0.6',
     anchor: 'bottom-center' satisfies Anchor,
   };
+  if (comp.height <= comp.width) return style;
+  const { side, bottom } = safeArea(comp);
+  return { ...style, margin: { x: side, y: bottom } };
+}
+
+/**
+ * The widest caption, in Latin characters, that fits between the style's side
+ * margins at its font size, box included: drawtext doesn't wrap, so a longer
+ * caption runs off the frame or into a platform's buttons. Never more than 32.
+ */
+export function captionWidthBudget(comp: Composition, style: TextStyle): number {
+  const side = style.margin?.x ?? TEXT_EDGE_PX;
+  const room = comp.width - 2 * side - 2 * CAPTION_BOX_PX;
+  return Math.max(1, Math.min(MAX_CAPTION_WIDTH, Math.floor(room / (style.fontSize * CHAR_EM))));
 }
 
 /**
  * Group a clip's words (timeline times) into captions: a new one starts after
- * `maxWords` words, past the width limit, after a pause, or after a sentence
- * ends. Each stays up a moment after its last word, but never into the next
- * one or past `endSec`.
+ * `maxWords` words, past `maxWidth` characters, after a pause, or after a
+ * sentence ends. Each stays up a moment after its last word, but never into
+ * the next one or past `endSec`.
  */
-export function groupCaptions(words: ClipWord[], endSec: number, maxWords: number): CaptionCue[] {
+export function groupCaptions(
+  words: ClipWord[],
+  endSec: number,
+  maxWords: number,
+  maxWidth: number = MAX_CAPTION_WIDTH,
+): CaptionCue[] {
   const groups: ClipWord[][] = [];
   let current: ClipWord[] = [];
   for (const word of words) {
@@ -222,7 +267,7 @@ export function groupCaptions(words: ClipWord[], endSec: number, maxWords: numbe
       (current.length >= maxWords ||
         word.startSec - prev.endSec > PAUSE_SEC ||
         endsSentence(prev.text) ||
-        displayWidth(joinWords([...current, word].map((w) => w.text))) > MAX_CAPTION_WIDTH)
+        displayWidth(joinWords([...current, word].map((w) => w.text))) > maxWidth)
     ) {
       groups.push(current);
       current = [];

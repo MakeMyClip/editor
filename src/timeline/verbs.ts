@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { DEFAULT_CAPTION_TRACK, DEFAULT_CAPTION_WORDS, planCaptions } from './captions.js';
+import {
+  DEFAULT_CAPTION_TRACK,
+  DEFAULT_CAPTION_WORDS,
+  planCaptions,
+  safeArea,
+} from './captions.js';
 import { ColorSchema } from './color.js';
 import type { MediaInfo } from './compile.js';
 import {
@@ -210,6 +215,14 @@ const EDITABLE_VERB_SCHEMAS = [
       .optional()
       .describe('Box color behind the text (default black@0.6), or null for none.'),
     anchor: AnchorSchema.optional().describe('Where captions sit (default bottom-center).'),
+    margin: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe(
+        'How far, in pixels, captions keep from the bottom (or top) edge. Default: a quarter of the height on a portrait canvas, clear of the Shorts, Reels and TikTok overlays; 40 otherwise.',
+      ),
   }),
   z.object({
     verb: z.literal('reframe'),
@@ -545,6 +558,7 @@ export async function lowerVerb(
       if (verb.color !== undefined) style.color = verb.color;
       if (verb.background !== undefined) style.background = verb.background;
       if (verb.anchor !== undefined) style.anchor = verb.anchor;
+      if (verb.margin !== undefined) style.margin = { x: safeArea(comp).side, y: verb.margin };
       const plan = await planCaptions(
         comp,
         {

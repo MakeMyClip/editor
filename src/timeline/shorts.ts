@@ -1,4 +1,5 @@
 import {
+  captionWidthBudget,
   DEFAULT_CAPTION_TRACK,
   DEFAULT_CAPTION_WORDS,
   defaultCaptionStyle,
@@ -242,7 +243,9 @@ export async function planShort(
     // Each piece captions only its own range's words: the lead reaches into the
     // word before, which whisper.cpp stretches over the pause, and that word
     // isn't part of the short even when another range asks for it.
-    const style = defaultCaptionStyle(applyOps(target, ops));
+    const built = applyOps(target, ops);
+    const style = defaultCaptionStyle(built);
+    const maxWidth = captionWidthBudget(built, style);
     const cues = placed.flatMap(({ piece, clip }) => {
       const words = piece.transcript.words.filter((_, i) =>
         piece.asked.some((r) => i >= r.fromIndex && i <= r.toIndex),
@@ -251,6 +254,7 @@ export async function planShort(
         clipWords({ ...piece.transcript, words }, clip),
         clipEndSec(clip),
         request.maxWords ?? DEFAULT_CAPTION_WORDS,
+        maxWidth,
       );
     });
     if (cues.length > 0) {
