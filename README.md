@@ -85,7 +85,7 @@ clip ui   # opens http://127.0.0.1:5573
 
 Put your videos in the extension's **Media folder** (by default `Documents/MakeMyClip`); the editor reads and writes only there. The extension doesn't include FFmpeg (see [License](#license)): it finds the one Homebrew, MacPorts, winget, Scoop or Chocolatey installed, or you pick it in the extension's settings, along with the optional whisper model.
 
-**As an MCP server** (drive it from Claude Desktop / Cursor / any MCP client — no API key, on your existing Claude):
+**As an MCP server** (drive it from Claude Desktop / Cursor / Codex / any MCP client — no API key, on the plan you already have):
 
 ```jsonc
 // claude_desktop_config.json → "mcpServers"
@@ -99,6 +99,15 @@ Put your videos in the extension's **Media folder** (by default `Documents/MakeM
     }
   }
 }
+```
+
+Codex (the CLI and the IDE extension) reads the same server from `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.makemyclip-editor]
+command = "npx"
+args = ["-y", "@makemyclip/editor", "mcp"]
+env = { MAKEMYCLIP_WORKSPACE = "/path/to/your/media", MAKEMYCLIP_WHISPER_MODEL = "/path/to/ggml-base.en.bin" }
 ```
 
 It is listed in the [official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.MakeMyClip/editor) as `io.github.MakeMyClip/editor`, so MCP clients that browse the registry can install it from there. The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The MCP server exposes the timeline tools (show / edit / check / transcribe / undo / redo / export) and a `doctor` setup check over stdio; media stays confined to `MAKEMYCLIP_WORKSPACE`, and `MAKEMYCLIP_WHISPER_MODEL` is only needed for transcription and captions. Everything runs locally and offline — no API key.
