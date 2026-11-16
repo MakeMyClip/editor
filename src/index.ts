@@ -200,6 +200,17 @@ export {
   videoTrack,
 } from './timeline/ops.js';
 export {
+  endInPause,
+  findPauses,
+  measureSpeechLevels,
+  PAUSE_KEEP_SEC,
+  type Pause,
+  parseSpeechLevels,
+  pauseAt,
+  type SpeechLevels,
+  startInPause,
+} from './timeline/pauses.js';
+export {
   type Aspect,
   AspectSchema,
   canvasFor,
@@ -251,7 +262,9 @@ export {
   type ShortPlan,
   type ShortRange,
   type ShortRequest,
+  type ShortSources,
   type ShortTranscriptLookup,
+  type SpeechLevelsLookup,
 } from './timeline/shorts.js';
 export {
   analyzeSilence,

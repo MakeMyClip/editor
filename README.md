@@ -161,15 +161,16 @@ The same steps from the CLI:
 ```bash
 clip timeline new
 clip timeline add-media podcast.mp4                  # prints the clip id, e.g. clip_ec2f047d
-clip timeline transcribe clip_ec2f047d               # each word with its index and time
+clip timeline transcribe clip_ec2f047d               # transcribe it (once per file)
 clip timeline silence clip_ec2f047d                  # cut the pauses on main
+clip timeline transcribe --sentences | head -80      # one line per sentence: time, word indices, text
 clip timeline short best-1 clip_ec2f047d 1400 1478 --x 0.4   # words 1400–1478 as a 9:16 short
 clip timeline --timeline best-1 frame 3 check.jpg    # look at it; move --x if the speaker is off
 clip timeline --timeline best-1 export best-1.mp4
 clip timeline list                                   # main and every short
 ```
 
-`short` starts 0.25 s before the first word and ends with the last, fills the 9:16 frame (`--x` picks the part that shows), sets -14 LUFS and burns in captions. Give several `<clipId> <from> <to>` ranges to join moments, in the order you give them. Any command takes `--timeline <id>` to work on a short, `clip timeline --timeline best-1 undo` takes the short apart again, and `short best-1 … --replace` rebuilds it.
+`short` cuts each edge inside the pause the audio shows there, keeping 0.1 s of room tone (where there's no clear pause it follows the transcript and warns), fills the 9:16 frame (`--x` picks the part that shows), sets -14 LUFS and burns in captions. Give several `<clipId> <from> <to>` ranges to join moments, in the order you give them. Any command takes `--timeline <id>` to work on a short, `clip timeline --timeline best-1 undo` takes the short apart again, and `short best-1 … --replace` rebuilds it.
 
 ---
 

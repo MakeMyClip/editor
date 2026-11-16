@@ -2,7 +2,9 @@ import {
   DEFAULT_CAPTION_TRACK,
   DEFAULT_CAPTION_WORDS,
   defaultCaptionStyle,
+  endsSentence,
   groupCaptions,
+  PAUSE_SEC,
 } from './captions.js';
 import { speedFactor, videoLayers } from './compile.js';
 import {
@@ -14,6 +16,7 @@ import {
   makeClipId,
 } from './composition.js';
 import { applyOps, type CompositionOp, mediaClip, textClip, videoTrack } from './ops.js';
+import { endInPause, pauseAt, type SpeechLevels, startInPause } from './pauses.js';
 import { type Aspect, canvasFor, planReframe } from './reframe.js';
 import { MAIN_TIMELINE, type MediaId } from './schema.js';
 import { clipWords, type Transcript } from './transcript.js';
@@ -38,6 +41,12 @@ export const SHORT_LEAD_SEC = 0.25;
 export const DEFAULT_SHORT_LUFS = -14;
 
 const SHORT_TRACK = 'v0';
+/** A range whose snapped edges leave less than this keeps the transcript's. */
+const MIN_SNAPPED_SEC = 0.2;
+/** How long a word pulled inside a cut lasts. */
+const PULLED_WORD_SEC = 0.25;
+/** The least a word starts after the one before it. */
+const WORD_ORDER_SEC = 0.01;
 /** A piece shorter than this is dropped: too short to hear, just a flash. */
 const MIN_PIECE_SEC = 0.05;
 const SAME_SEC = 1e-6;
@@ -99,6 +108,23 @@ export type ShortTranscriptLookup = (
   transcriptId?: string,
 ) => Promise<{ clip: MediaClip; transcript: Transcript }>;
 
+/** The audio levels of a media clip's source around a time, in source seconds
+ *  (runs FFmpeg); null when the source has no sound. */
+export type SpeechLevelsLookup = (
+  comp: Composition,
+  clipId: string,
+  aroundSec: number,
+) => Promise<SpeechLevels | null>;
+
+/** What `planShort` reads beyond the documents. */
+export interface ShortSources {
+  transcript: ShortTranscriptLookup;
+  /** Moves each edge into the pause the audio shows there. Without it, edges
+   *  follow the transcript. */
+  levels?: SpeechLevelsLookup;
+  mintId?: () => string;
+}
+
 /** Refuse a short on `main` or on the timeline it is cut from. */
 export function checkShortTimelines(target: string, source: string = MAIN_TIMELINE): void {
   if (target === MAIN_TIMELINE) {
@@ -134,8 +160,9 @@ interface Piece extends ShortPiece {
   speed: number;
   sourceClipId: string;
   transcript: Transcript;
-  /** The word ranges the piece plays, which are what it captions. */
-  asked: { fromIndex: number; toIndex: number }[];
+  /** The word ranges the piece plays, which are what it captions, with the
+   *  source window each was cut to. */
+  asked: { fromIndex: number; toIndex: number; start: number; end: number }[];
 }
 
 /**
@@ -148,9 +175,9 @@ export async function planShort(
   target: Composition,
   source: Composition,
   request: ShortRequest,
-  lookup: ShortTranscriptLookup,
-  mintId: () => string = makeClipId,
+  sources: ShortSources,
 ): Promise<ShortPlan> {
+  const mintId = sources.mintId ?? makeClipId;
   if (request.ranges.length === 0) throw new ShortError('Give at least one word range.');
   if (!request.replace && target.tracks.some((t) => t.clips.length > 0)) {
     throw new ShortError(
@@ -165,9 +192,16 @@ export async function planShort(
   }
 
   const windows: WordWindow[] = [];
-  for (const range of request.ranges) {
-    const { clip, transcript } = await lookup(source, range.clipId, range.transcriptId);
-    windows.push(wordWindow(transcript, range, clip));
+  const warnings: string[] = [];
+  for (const [i, range] of request.ranges.entries()) {
+    const { clip, transcript } = await sources.transcript(source, range.clipId, range.transcriptId);
+    const window = wordWindow(transcript, range, clip);
+    warnings.push(...sentenceEdgeWarnings(window, i + 1));
+    windows.push(
+      sources.levels
+        ? await snapToPauses(window, source, clip.id, sources.levels, i + 1, warnings)
+        : window,
+    );
   }
   const pieces: Piece[] = [];
   windows.forEach((window, i) => {
@@ -244,8 +278,8 @@ export async function planShort(
     // isn't part of the short even when another range asks for it.
     const style = defaultCaptionStyle(applyOps(target, ops));
     const cues = placed.flatMap(({ piece, clip }) => {
-      const words = piece.transcript.words.filter((_, i) =>
-        piece.asked.some((r) => i >= r.fromIndex && i <= r.toIndex),
+      const words = piece.asked.flatMap((r) =>
+        wordsInside(piece.transcript.words.slice(r.fromIndex, r.toIndex + 1), r.start, r.end),
       );
       return groupCaptions(
         clipWords({ ...piece.transcript, words }, clip),
@@ -281,7 +315,7 @@ export async function planShort(
     })),
     durationSec: roundMs(at),
     captions,
-    warnings: [],
+    warnings,
   };
 }
 
@@ -319,6 +353,134 @@ function wordWindow(transcript: Transcript, range: ShortRange, clip: MediaClip):
     speechStart: first.startSec,
     speechEnd: last.endSec,
   };
+}
+
+/**
+ * Move a range's edges into the pauses its source's audio shows at its
+ * transcript boundaries: a little room tone before the first word and after
+ * the last, never the next sentence's first syllable. An edge with no clear
+ * pause (speech runs on, music under it, or two pauses the transcript can't
+ * tell apart) keeps the transcript rule, with a warning unless the range was
+ * cut mid-sentence there anyway.
+ */
+async function snapToPauses(
+  window: WordWindow,
+  source: Composition,
+  clipId: string,
+  levelsFor: SpeechLevelsLookup,
+  rangeNumber: number,
+  warnings: string[],
+): Promise<WordWindow> {
+  const words = window.transcript.words;
+  const before = words[window.fromIndex - 1];
+  const first = words[window.fromIndex];
+  const last = words[window.toIndex];
+  const after = words[window.toIndex + 1];
+  if (!first || !last) return window;
+
+  let { start, end } = window;
+  let startLevels: SpeechLevels | null;
+  let endLevels: SpeechLevels | null;
+  try {
+    startLevels = await levelsFor(source, clipId, first.startSec);
+    endLevels = startLevels && (await levelsFor(source, clipId, last.endSec));
+  } catch {
+    // FFmpeg couldn't read the audio; the short is still made, by the transcript.
+    warnings.push(
+      `Range ${rangeNumber}: its audio couldn't be measured, so its edges follow the transcript. Look at it or listen.`,
+    );
+    return window;
+  }
+  if (!startLevels) return window; // no sound to measure
+  const startPause = pauseAt(startLevels, first.startSec, before?.startSec ?? 0);
+  if (typeof startPause === 'object') start = startInPause(startPause);
+  else if (before && !midSentence(before, first)) {
+    warnings.push(
+      `Range ${rangeNumber}: no clear pause before "${first.text}", so its start follows the transcript and may clip that word or keep the end of "${before.text}". Look at it or listen.`,
+    );
+  }
+  const endPause = endLevels ? pauseAt(endLevels, last.endSec, last.startSec) : 'none';
+  if (typeof endPause === 'object') end = endInPause(endPause);
+  else if (after && !midSentence(last, after)) {
+    warnings.push(
+      `Range ${rangeNumber}: no clear pause after "${last.text}", so its end follows the transcript and may keep the start of "${after.text}". Look at it or listen.`,
+    );
+  }
+  // A pause found on the wrong side of a short range would leave nothing.
+  if (end - start < MIN_SNAPPED_SEC) return window;
+  start = roundMs(start);
+  end = roundMs(end);
+  return { ...window, start, end, words: wordsInside(window.words, start, end) };
+}
+
+/**
+ * A range's words kept inside the window it was cut to, in order. A word
+ * whisper places past an edge (it runs late at a sentence end) is pulled just
+ * inside, so the range still holds its speech and the word keeps its caption;
+ * no word starts before the one ahead of it, or a caption shown a word at a
+ * time would lose that one.
+ */
+function wordsInside<W extends { startSec: number; endSec: number }>(
+  words: W[],
+  start: number,
+  end: number,
+): W[] {
+  const starts = words.map((w) => {
+    if (w.startSec >= end) return Math.max(start, end - PULLED_WORD_SEC);
+    if (w.endSec <= start) return start;
+    return w.startSec;
+  });
+  // In order going forward, then back from the cut: a word pushed up against
+  // the end makes room by moving the ones before it earlier.
+  for (let i = 1; i < starts.length; i++) {
+    starts[i] = Math.max(starts[i] ?? 0, (starts[i - 1] ?? 0) + WORD_ORDER_SEC);
+  }
+  for (let i = starts.length - 1; i >= 0; i--) {
+    const limit = i === starts.length - 1 ? end : (starts[i + 1] ?? end);
+    starts[i] = Math.max(start, Math.min(starts[i] ?? 0, limit - WORD_ORDER_SEC));
+  }
+  return words.map((w, i) => {
+    const startSec = starts[i] ?? w.startSec;
+    const endSec =
+      w.startSec >= end
+        ? end
+        : w.endSec <= start
+          ? Math.min(end, start + PULLED_WORD_SEC)
+          : Math.max(w.endSec, startSec + WORD_ORDER_SEC);
+    return startSec === w.startSec && endSec === w.endSec ? w : { ...w, startSec, endSec };
+  });
+}
+
+/** Whether two neighboring words belong to one sentence: no sentence end and
+ *  no real pause between them. */
+function midSentence(a: { text: string; endSec: number }, b: { startSec: number }): boolean {
+  return !endsSentence(a.text) && b.startSec - a.endSec < PAUSE_SEC;
+}
+
+/**
+ * Where a range starts or ends inside a sentence: right after a word that
+ * doesn't end one (with no real pause between), or right before the next word
+ * of the same sentence. Named by the words on either side; the short is still
+ * made, since a cut mid-sentence can be meant.
+ */
+function sentenceEdgeWarnings(window: WordWindow, rangeNumber: number): string[] {
+  const words = window.transcript.words;
+  const warnings: string[] = [];
+  const before = words[window.fromIndex - 1];
+  const first = words[window.fromIndex];
+  if (before && first && midSentence(before, first)) {
+    warnings.push(
+      `Range ${rangeNumber} starts mid-sentence, between "${before.text}" and "${first.text}" (word ${window.fromIndex}).`,
+    );
+  }
+  const last = words[window.toIndex];
+  const after = words[window.toIndex + 1];
+  if (last && after && midSentence(last, after)) {
+    warnings.push(
+      `Range ${rangeNumber} ends mid-sentence, between "${last.text}" and "${after.text}" (word ${window.toIndex}).`,
+    );
+  }
+  return warnings;
 }
 
 /**
@@ -364,7 +526,14 @@ function piecesUnder(clips: readonly Clip[], window: WordWindow): Piece[] {
         speed: speedFactor(clip.effects),
         sourceClipId: clip.id,
         transcript: window.transcript,
-        asked: [{ fromIndex: window.fromIndex, toIndex: window.toIndex }],
+        asked: [
+          {
+            fromIndex: window.fromIndex,
+            toIndex: window.toIndex,
+            start: window.start,
+            end: window.end,
+          },
+        ],
       });
       taken.push([a, b]);
     }
@@ -415,7 +584,13 @@ function joinContinuous(pieces: Piece[]): Piece[] {
       joined[joined.length - 1] = {
         ...prev,
         sourceOutSec: piece.sourceOutSec,
-        asked: [...prev.asked, ...piece.asked],
+        // One range across a split comes back once, or its captions would repeat.
+        asked: [
+          ...prev.asked,
+          ...piece.asked.filter(
+            (r) => !prev.asked.some((q) => q.fromIndex === r.fromIndex && q.toIndex === r.toIndex),
+          ),
+        ],
       };
     } else {
       joined.push(piece);

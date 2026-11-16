@@ -9,6 +9,7 @@ import {
 } from '../timeline/composition.js';
 import { readComposition } from '../timeline/document-store.js';
 import { buildMediaMap, buildMediaRefs } from '../timeline/media-registry.js';
+import { measureSpeechLevels } from '../timeline/pauses.js';
 import { ownFraming } from '../timeline/reframe.js';
 import type { MediaId, MediaRef } from '../timeline/schema.js';
 import { analyzeSilence } from '../timeline/silence.js';
@@ -35,6 +36,12 @@ export function makeVerbContext(): VerbContext {
       return { mediaId: result.mediaId, durationSec: result.ref.durationSec };
     },
     readTimeline: (timeline) => readComposition(timeline),
+    speechLevels: async (comp, clipId, aroundSec) => {
+      const clip = findClip(comp, clipId)?.clip;
+      if (clip?.kind !== 'media') return null;
+      const info = (await clipConfinedMedia(comp, clipId)).get(clip.mediaId);
+      return info?.hasAudio ? measureSpeechLevels(info.path, aroundSec) : null;
+    },
     analyzeSilence: async (comp, clipId, sensitivity) =>
       analyzeSilence(comp, clipId, { media: await clipConfinedMedia(comp, clipId), sensitivity }),
     transcript: async (comp, clipId, transcriptId) => {

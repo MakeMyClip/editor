@@ -354,9 +354,14 @@ export async function applyVerbs(
   verbs: CompositionVerb[],
   ctx: VerbContext,
   timeline: string = MAIN_TIMELINE,
-): Promise<{ doc: Composition; ops: CompositionOp[] }> {
+): Promise<{ doc: Composition; ops: CompositionOp[]; warnings: string[] }> {
   const create = verbs[0]?.verb === 'make_short';
-  const editCtx: VerbContext = { ...ctx, timeline };
+  let warnings: string[] = [];
+  const editCtx: VerbContext = {
+    ...ctx,
+    timeline,
+    warn: (message) => warnings.push(message),
+  };
   // The default append point (`trackEnd`) is baked from the snapshot we lower
   // against, so if another in-process writer commits between the read and the
   // apply, re-lower against the fresh doc rather than land overlapping clips. A
@@ -366,6 +371,7 @@ export async function applyVerbs(
   // tail silently losing to a `CompositionConflictError`.
   for (let attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
     const current = await readForEdit(timeline, create);
+    warnings = [];
     const ops = await lowerVerbs(current, verbs, editCtx);
     try {
       const doc = await mutateComposition(ops, {
@@ -373,7 +379,7 @@ export async function applyVerbs(
         timeline,
         create,
       });
-      return { doc, ops };
+      return { doc, ops, warnings };
     } catch (err) {
       if (err instanceof CompositionConflictError && attempt < MAX_COMMIT_ATTEMPTS) continue;
       throw err;
