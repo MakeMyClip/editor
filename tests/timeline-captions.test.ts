@@ -441,6 +441,8 @@ describe('captions on a vertical canvas', () => {
     expect(textWidthEm('mm')).toBe(2);
     expect(textWidthEm('ЩЮ')).toBeCloseTo(2.2, 6);
     expect(textWidthEm('жш')).toBeCloseTo(1.9, 6);
+    // Math signs are about 0.84 em in DejaVu: 2+2=4 is 3 digits and 2 signs.
+    expect(textWidthEm('2+2=4')).toBeCloseTo(3 * 0.64 + 2 * 0.85, 6);
     // Accented Latin counts as its base letter.
     expect(textWidthEm('é')).toBe(textWidthEm('e'));
   });

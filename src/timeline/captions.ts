@@ -353,6 +353,8 @@ function tooWide(text: string, maxWidthEm: number): boolean {
 
 const WIDEST = /[WMmw@%#&ÆŒæœ]/u;
 const NARROW = /[ijlItfr.,:;'’!|()[\]-]/u;
+/** ASCII math signs: DejaVu draws them at about 0.84 em. */
+const SIGNS = /[+=<>~^]/u;
 const ASCII = /^[\x20-\x7e]$/;
 
 /**
@@ -369,6 +371,7 @@ export function textWidthEm(text: string): number {
     if (base === ' ') width += 0.32;
     else if (WIDE.test(ch) || WIDEST.test(base)) width += 1;
     else if (!ASCII.test(base)) width += base === base.toLowerCase() ? 0.95 : 1.1;
+    else if (SIGNS.test(base)) width += 0.85;
     else if (NARROW.test(base)) width += 0.4;
     else if (base !== base.toLowerCase()) width += 0.8;
     else width += 0.64;
