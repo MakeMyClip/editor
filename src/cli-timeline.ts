@@ -60,7 +60,7 @@ import {
   planReframe,
 } from './timeline/reframe.js';
 import { reviewCuts } from './timeline/review.js';
-import { runPlan } from './timeline/run-plan.js';
+import { exportTimelines, runPlan } from './timeline/run-plan.js';
 import { MAIN_TIMELINE, TimelineIdSchema } from './timeline/schema.js';
 import { checkShortTimelines, planShort, type ShortRange } from './timeline/shorts.js';
 import { analyzeSilence, DEFAULT_SENSITIVITY, SensitivitySchema } from './timeline/silence.js';
@@ -109,6 +109,7 @@ Every command works on the main timeline unless --timeline <id> names another
   clip timeline redo
   clip timeline log
   clip timeline export [<output>] [--format mp4|fcpxml|xmeml]
+  clip timeline export --all <dir>      (every short, as <dir>/<id>.mp4)
 `;
 
 interface Parsed {
@@ -117,7 +118,7 @@ interface Parsed {
 }
 
 /** Flags that take no value, so they don't swallow the next argument. */
-const BOOLEAN_FLAGS = new Set(['dry-run', 'reset', 'no-captions', 'replace', 'sentences']);
+const BOOLEAN_FLAGS = new Set(['all', 'dry-run', 'reset', 'no-captions', 'replace', 'sentences']);
 
 function parseArgs(args: string[]): Parsed {
   const positional: string[] = [];
@@ -868,6 +869,25 @@ export async function runTimeline(args: string[]): Promise<void> {
     }
 
     case 'export': {
+      if (flags.all === 'true') {
+        const [dir] = positional;
+        if (!dir) throw new Error('Usage: clip timeline export --all <dir>');
+        if (flags.timeline !== undefined || (flags.format && flags.format !== 'mp4')) {
+          throw new Error(
+            '--all renders every short as mp4. Export one timeline with --timeline <id>, or a project with --format.',
+          );
+        }
+        const shorts = (await listTimelines())
+          .map((t) => t.id)
+          .filter((id) => id !== MAIN_TIMELINE);
+        if (shorts.length === 0) {
+          throw new Error('No shorts to export. Make one with `clip timeline short`.');
+        }
+        const exported = await exportTimelines(shorts, resolveInput(dir));
+        out({ exported });
+        if (exported.some((e) => 'error' in e)) process.exitCode = 1;
+        return;
+      }
       const [output] = positional;
       const format = flags.format || (output && interchangeFormatFor(output)) || 'mp4';
       if (format !== 'mp4') {
