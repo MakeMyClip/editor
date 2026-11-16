@@ -260,6 +260,17 @@ describe('timelineOutline', () => {
     const transcribe = transcribeFrom(talk);
     const one = await timelineOutline(comp, MEDIA, { transcribe, clipId: 'c1' });
     expect(one.sentences.map((s) => s.clipId)).toEqual(['c1']);
+    // A clip off the picture track (here a second media track) is still outlined.
+    const twoTracks = applyOps(comp, [
+      { op: 'addTrack', track: videoTrack({ id: 'v1' }) },
+      {
+        op: 'addClip',
+        trackId: 'v1',
+        clip: mediaClip({ id: 'x1', mediaId: M, sourceInSec: 1.2, sourceOutSec: 2, startSec: 0 }),
+      },
+    ]);
+    const off = await timelineOutline(twoTracks, MEDIA, { transcribe, clipId: 'x1' });
+    expect(off.sentences.map((s) => [s.clipId, s.fromIndex, s.toIndex])).toEqual([['x1', 3, 4]]);
     await expect(timelineOutline(comp, MEDIA, { transcribe, clipId: 't1' })).rejects.toThrow(
       /text clip/,
     );

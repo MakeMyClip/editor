@@ -30,11 +30,11 @@ afterEach(async () => {
   await rm(workspace, { recursive: true, force: true });
 });
 
-/** 720p30 test pattern (its counter and gradient move every frame) with a 2 s GOP. */
-async function testPattern(path: string, seconds: number): Promise<void> {
+/** 720p test pattern (its counter and gradient move every frame) with a 2 s GOP. */
+async function testPattern(path: string, seconds: number, rate = 30): Promise<void> {
   await runFfmpeg([
     ...['-hide_banner', '-loglevel', 'error'],
-    ...['-f', 'lavfi', '-i', `testsrc=size=1280x720:rate=30:duration=${seconds}`],
+    ...['-f', 'lavfi', '-i', `testsrc=size=1280x720:rate=${rate}:duration=${seconds}`],
     ...['-f', 'lavfi', '-i', `sine=frequency=220:sample_rate=48000:duration=${seconds}`],
     ...['-c:v', 'libx264', '-preset', 'ultrafast', '-g', '60', '-pix_fmt', 'yuv420p'],
     ...['-c:a', 'aac', '-shortest', path],
@@ -139,6 +139,27 @@ describe.skipIf(!IS_CI)('frame preview from a short window, against real FFmpeg'
       await runPlan(plan);
 
       expect(await psnr(full, windowFrame), name).toBeGreaterThanOrEqual(40);
+    }
+
+    // A 24 fps source on the 30 fps canvas: export repeats some source frames,
+    // and the preview shows the one export plays, up to the clip's very end.
+    const slow = join(workspace, 'slow.mp4');
+    await testPattern(slow, 4, 24);
+    const slowMedia = new Map<MediaId, MediaInfo>([[M, { path: slow, hasAudio: true }]]);
+    const slowDoc = vertical(mediaClip({ id: 'c1', mediaId: M, sourceOutSec: 4, startSec: 0 }));
+    const slowExport = join(workspace, 'slow-export.mp4');
+    await runPlan(
+      compileTimeline(slowDoc, { media: slowMedia, dir: workspace, output: slowExport }),
+    );
+    for (const atSec of [1.5, 3.999]) {
+      const full = join(workspace, `slow-${atSec}-full.jpg`);
+      const exportSec = Math.min(atSec, 4 - 1 / 30);
+      await runFfmpeg(buildPreviewFrameArgs({ input: slowExport, output: full, atSec: exportSec }));
+      const windowFrame = join(workspace, `slow-${atSec}-window.jpg`);
+      await runPlan(
+        buildFrameAtPlan(slowDoc, { media: slowMedia, dir: workspace, output: windowFrame }, atSec),
+      );
+      expect(await psnr(full, windowFrame), `24 fps at ${atSec}`).toBeGreaterThanOrEqual(40);
     }
 
     // The very end of a clip that ends with its source: the seek must not pass

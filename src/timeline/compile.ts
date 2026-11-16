@@ -614,6 +614,9 @@ function seconds(sec: number): string {
   return String(Math.round(sec * 1000) / 1000);
 }
 
+/** How much of the source a frame preview reads before the frame. */
+const FRAME_PREROLL_SEC = 1;
+
 function floorUs(sec: number): number {
   return Math.floor(sec * 1e6 + 1e-6) / 1e6;
 }
@@ -779,22 +782,28 @@ export function buildFrameAtPlan(
     if (!info) {
       throw new CompileError(`No media registered for "${clip.mediaId}" (clip "${clip.id}").`);
     }
-    // Seconds into the clip's source. The chain's speed `setpts` divides the
-    // offset back into segment time, which is what its fades and text read.
-    // Rounded down, to the microsecond: rounding up could seek past the clip's
-    // last frame (no image) or past its out-point.
+    // Where the window starts, in seconds into the clip's source: a little
+    // before the frame, so a source frame that export repeats into it (a source
+    // slower than the canvas) is still read. An input seek starts timestamps at
+    // the seek point, so adding `from` gives source time even when the first
+    // frame read comes after it. The chain's speed `setpts` divides
+    // the offset back into segment time, which its fades and text read, and
+    // `trim` then takes the first frame at the frame's segment time, as reading
+    // it out of the encoded segment would. Rounded down, to the microsecond, so
+    // the seek never passes the clip's last frame or its out-point.
     const local = floorUs(clamped * speedFactor(clip.effects));
+    const from = floorUs(Math.max(0, local - FRAME_PREROLL_SEC));
     const { chain, textFiles } = clipChains(comp, clip, index, ctx, overlays);
     const frameStep: FfmpegStep = {
       label,
       args: [
         '-y',
         '-ss',
-        String(floorUs(clip.sourceInSec + local)),
+        String(floorUs(clip.sourceInSec + from)),
         '-i',
         info.path,
         '-filter_complex',
-        `[0:v]setpts=PTS-STARTPTS+${local}/TB,${chain}[v]`,
+        `[0:v]setpts=PTS+${from}/TB,${chain},trim=start=${floorUs(clamped)}[v]`,
         ...['-map', '[v]', '-an', '-frames:v', '1', '-q:v', '2'],
         ctx.output,
       ],

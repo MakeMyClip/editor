@@ -405,15 +405,12 @@ export async function timelineOutline(
   opts: OutlineOptions = {},
 ): Promise<TimelineOutline> {
   const transcribe = opts.transcribe ?? ((mediaId, info) => transcribeMedia(mediaId, info, opts));
-  const picture = videoLayers(comp).picture;
-  const clips = (picture?.clips ?? [])
-    .filter((c): c is MediaClip => c.kind === 'media')
-    .filter((c) => opts.clipId === undefined || c.id === opts.clipId)
-    .sort((a, b) => a.startSec - b.startSec);
-  if (opts.clipId !== undefined && clips.length === 0) {
-    // The clip isn't a media clip on the picture track: say why, as a lookup would.
-    locateMediaClip(comp, opts.clipId, media);
-  }
+  const clips =
+    opts.clipId !== undefined
+      ? [locateMediaClip(comp, opts.clipId, media).clip]
+      : (videoLayers(comp).picture?.clips ?? [])
+          .filter((c): c is MediaClip => c.kind === 'media')
+          .sort((a, b) => a.startSec - b.startSec);
 
   const transcripts = new Map<MediaId, Transcript | null>();
   const sentences: OutlineSentence[] = [];
