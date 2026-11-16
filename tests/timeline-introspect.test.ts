@@ -114,7 +114,7 @@ describe('buildFrameAtPlan', () => {
     // Rounded down, never past that frame or the clip's out-point.
     expect(near?.args.slice(1, 3)).toEqual(['-ss', '106.966666']);
     expect(graphOf(near?.args)).toMatch(/^\[0:v\]setpts=PTS\+6\.966666\/TB,/);
-    expect(graphOf(near?.args)).toMatch(/,trim=start=7\.966666\[v\]$/);
+    expect(graphOf(near?.args)).toMatch(/,trim=start=7\.96666666\d*\[v\]$/);
   });
 
   it('frames the picture the way export does (fit, zoom, position)', () => {
@@ -145,6 +145,12 @@ describe('buildFrameAtPlan', () => {
     expect(segOut('frame-abc123')).toBe('/ws/tl-seg-frame-abc123-0-c1.mp4');
     // …and two different preview requests never share a segment path.
     expect(segOut('frame-aaa')).not.toBe(segOut('frame-bbb'));
+  });
+
+  it('takes the first frame at or after a time between frames, as export would', () => {
+    // 30 fps: 3.01 s falls between the frames at 3.0 and 3.0333.
+    const graph = graphOf(buildFrameAtPlan(oneClip(), CTX('/ws/f.jpg'), 3.01).steps[0]?.args);
+    expect(graph).toMatch(/,trim=start=3\.0333333\d*\[v\]$/);
   });
 
   it('selects the second clip and offsets into it for a time in the second clip', () => {

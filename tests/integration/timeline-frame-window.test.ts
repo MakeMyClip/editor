@@ -30,11 +30,17 @@ afterEach(async () => {
   await rm(workspace, { recursive: true, force: true });
 });
 
-/** 720p test pattern (its counter and gradient move every frame) with a 2 s GOP. */
+/** 720p test pattern with a 2 s GOP. Its hue turns 24 degrees a frame, so
+ *  every frame differs all over and a frame off by one fails the PSNR check. */
 async function testPattern(path: string, seconds: number, rate = 30): Promise<void> {
   await runFfmpeg([
     ...['-hide_banner', '-loglevel', 'error'],
-    ...['-f', 'lavfi', '-i', `testsrc=size=1280x720:rate=${rate}:duration=${seconds}`],
+    ...[
+      '-f',
+      'lavfi',
+      '-i',
+      `testsrc=size=1280x720:rate=${rate}:duration=${seconds},hue=h=t*${24 * rate}`,
+    ],
     ...['-f', 'lavfi', '-i', `sine=frequency=220:sample_rate=48000:duration=${seconds}`],
     ...['-c:v', 'libx264', '-preset', 'ultrafast', '-g', '60', '-pix_fmt', 'yuv420p'],
     ...['-c:a', 'aac', '-shortest', path],
@@ -89,6 +95,14 @@ describe.skipIf(!IS_CI)('frame preview from a short window, against real FFmpeg'
         ),
         atSec: 3,
         exportSec: 3,
+      },
+      {
+        name: 'between two frames',
+        doc: vertical(
+          mediaClip({ id: 'c1', mediaId: M, sourceInSec: 5, sourceOutSec: 15, startSec: 0 }),
+        ),
+        atSec: 3.01,
+        exportSec: 3.01,
       },
       {
         name: 'inside a fade',
