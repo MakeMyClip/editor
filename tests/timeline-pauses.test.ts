@@ -136,6 +136,19 @@ describe('pauseAt', () => {
     expect(pauseAt(levels, 11.75, 11.65)).toBe('none');
   });
 
+  it('never takes the pause before the last word for the one after it', () => {
+    // An accurate last word, 15–15.5, a long pause before it and a short one after.
+    const around = levelsOf([
+      [4.7, -20],
+      [0.3, -60],
+      [0.5, -20],
+      [0.1, -60],
+      [1, -20],
+    ]);
+    const pause = pauseAt(around, 15.5, 15);
+    expect(pause).toEqual({ startSec: expect.closeTo(15.5, 6), endSec: expect.closeTo(15.6, 6) });
+  });
+
   it('says none when speech runs on, and ambiguous when two pauses compete', () => {
     expect(pauseAt(levelsOf([[3, -20]]), 11.5, 11)).toBe('none');
     const two = levelsOf([

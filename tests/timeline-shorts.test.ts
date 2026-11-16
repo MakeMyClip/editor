@@ -294,6 +294,13 @@ describe('planShort: cut from the source timeline', () => {
     const split = sourceOf([clipOf('c1', 0, 4, 0), clipOf('c2', 4, 10, 4)]);
     const short = await plan(split, { ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 4 }] });
     expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 2.75, sourceOutSec: 5.5 }]);
+    // …and captions the range once.
+    const captioned = await plan(split, {
+      ranges: [{ clipId: 'c1', fromIndex: 2, toIndex: 4 }],
+      captions: true,
+    });
+    const texts = addedClips(captioned.ops).flatMap((c) => (c.kind === 'text' ? [c.text] : []));
+    expect(texts).toEqual(['w2 w3 w4']);
   });
 
   it('keeps color and volume, and drops the fades of the source clip', async () => {
@@ -648,6 +655,37 @@ describe('planShort: edges in the pauses', () => {
       toIndex: 5,
     });
     expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 5.47, sourceOutSec: 5.7 }]);
+  });
+
+  it('keeps both captions when the last two words crowd the cut', async () => {
+    // Cut at 6.0; whisper puts the last two words at 5.99 and 6.1.
+    const transcript = transcriptOf(M, [
+      [0.3, 1.3],
+      [1.3, 2.3],
+      [2.3, 3.3],
+      [3.3, 5.99],
+      [5.99, 6.1],
+      [6.1, 6.5],
+      [6.5, 7.5],
+    ]);
+    const speech: [number, number][] = [
+      [0.1, 0.9],
+      [1.1, 1.9],
+      [2.1, 2.9],
+      [3.1, 3.9],
+      [4.1, 5],
+      [5.1, 5.9],
+      [6.3, 7],
+    ];
+    const short = await planShort(
+      emptyComposition(),
+      whole,
+      { ranges: [{ clipId: 'c1', fromIndex: 3, toIndex: 5 }], maxWords: 1 },
+      { transcript: lookupFor([transcript]), levels: levelsFrom(speech), mintId: counter() },
+    );
+    expect(short.pieces.at(-1)?.sourceOutSec).toBe(6);
+    const texts = addedClips(short.ops).flatMap((c) => (c.kind === 'text' ? [c.text] : []));
+    expect(texts).toEqual(['w3', 'w4', 'w5']);
   });
 
   it('keeps the caption of a last word whisper places past the cut', async () => {

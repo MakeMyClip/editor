@@ -425,19 +425,28 @@ function wordsInside<W extends { startSec: number; endSec: number }>(
   start: number,
   end: number,
 ): W[] {
-  let prevStart = Number.NEGATIVE_INFINITY;
-  return words.map((w) => {
-    let startSec = w.startSec;
-    let endSec = w.endSec;
-    if (startSec >= end) {
-      startSec = Math.max(start, end - PULLED_WORD_SEC);
-      endSec = end;
-    } else if (endSec <= start) {
-      startSec = start;
-      endSec = Math.min(end, start + PULLED_WORD_SEC);
-    }
-    startSec = Math.min(Math.max(startSec, prevStart + WORD_ORDER_SEC), endSec - WORD_ORDER_SEC);
-    prevStart = startSec;
+  const starts = words.map((w) => {
+    if (w.startSec >= end) return Math.max(start, end - PULLED_WORD_SEC);
+    if (w.endSec <= start) return start;
+    return w.startSec;
+  });
+  // In order going forward, then back from the cut: a word pushed up against
+  // the end makes room by moving the ones before it earlier.
+  for (let i = 1; i < starts.length; i++) {
+    starts[i] = Math.max(starts[i] ?? 0, (starts[i - 1] ?? 0) + WORD_ORDER_SEC);
+  }
+  for (let i = starts.length - 1; i >= 0; i--) {
+    const limit = i === starts.length - 1 ? end : (starts[i + 1] ?? end);
+    starts[i] = Math.max(start, Math.min(starts[i] ?? 0, limit - WORD_ORDER_SEC));
+  }
+  return words.map((w, i) => {
+    const startSec = starts[i] ?? w.startSec;
+    const endSec =
+      w.startSec >= end
+        ? end
+        : w.endSec <= start
+          ? Math.min(end, start + PULLED_WORD_SEC)
+          : Math.max(w.endSec, startSec + WORD_ORDER_SEC);
     return startSec === w.startSec && endSec === w.endSec ? w : { ...w, startSec, endSec };
   });
 }
@@ -575,7 +584,13 @@ function joinContinuous(pieces: Piece[]): Piece[] {
       joined[joined.length - 1] = {
         ...prev,
         sourceOutSec: piece.sourceOutSec,
-        asked: [...prev.asked, ...piece.asked],
+        // One range across a split comes back once, or its captions would repeat.
+        asked: [
+          ...prev.asked,
+          ...piece.asked.filter(
+            (r) => !prev.asked.some((q) => q.fromIndex === r.fromIndex && q.toIndex === r.toIndex),
+          ),
+        ],
       };
     } else {
       joined.push(piece);

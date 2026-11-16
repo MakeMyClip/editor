@@ -114,8 +114,8 @@ export function findPauses(levels: SpeechLevels): Pause[] {
 
 /**
  * The pause at a transcript boundary: the longest pause reaching into
- * [boundary − 0.9 s, boundary + 0.05 s], but not before the start of the word
- * the boundary ends. `none` when there is none (speech runs on, or music under
+ * [boundary − 0.9 s, boundary + 0.05 s] that is still going after the word
+ * the boundary ends has started (not the pause before that word). `none` when there is none (speech runs on, or music under
  * it); `ambiguous` when two pauses of 0.12 s or more are in reach, since the
  * transcript can't say which one it means.
  */
@@ -124,7 +124,8 @@ export function pauseAt(
   boundarySec: number,
   wordBeforeStartSec: number,
 ): Pause | 'none' | 'ambiguous' {
-  const from = Math.max(boundarySec - SEARCH_BEFORE_SEC, wordBeforeStartSec - SEARCH_AFTER_SEC);
+  // A pause that ends by the time that word starts is the one before it.
+  const from = Math.max(boundarySec - SEARCH_BEFORE_SEC, wordBeforeStartSec + SEARCH_AFTER_SEC);
   const to = boundarySec + SEARCH_AFTER_SEC;
   const inReach = findPauses(levels).filter((p) => p.endSec > from && p.startSec < to);
   if (inReach.length === 0) return 'none';
