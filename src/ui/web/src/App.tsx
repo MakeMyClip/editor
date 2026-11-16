@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ClipInspector } from './components/ClipInspector.js';
 import { DetailPane } from './components/DetailPane.js';
 import { DocTimeline } from './components/DocTimeline.js';
@@ -23,7 +23,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useSession } from './hooks/useSession.js';
 import { useSessionSafety } from './hooks/useSessionSafety.js';
 import { useTimeline } from './hooks/useTimeline.js';
-import { findClip, nextClipOnTrack } from './lib/composition.js';
+import { findClip, mediaNames, nextClipOnTrack } from './lib/composition.js';
 import { applyTimelineVerbs, type Verb } from './lib/verbs.js';
 
 export function App() {
@@ -42,6 +42,7 @@ export function App() {
   const selectedEntry =
     selectedId === null ? null : (session.entries.find((e) => e.id === selectedId) ?? null);
   const selected = selectedClipId === null ? null : findClip(composition, selectedClipId);
+  const names = useMemo(() => mediaNames(session.entries), [session.entries]);
 
   // Selecting an op and selecting a doc-clip are mutually exclusive — each owns
   // the inspector pane, so picking one clears the other.
@@ -224,6 +225,7 @@ export function App() {
               <ClipInspector
                 key={selected.clip.id}
                 clip={selected.clip}
+                mediaNames={names}
                 playheadSec={playheadSec}
                 hasNext={nextClipOnTrack(selected.track, selected.clip) !== null}
                 canvasFit={composition.fit}
@@ -244,6 +246,7 @@ export function App() {
       </main>
       <DocTimeline
         composition={composition}
+        mediaNames={names}
         selectedClipId={selectedClipId}
         onSelectClip={selectClip}
         playheadSec={playheadSec}
