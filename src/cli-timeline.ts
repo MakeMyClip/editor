@@ -647,6 +647,10 @@ export async function runTimeline(args: string[]): Promise<void> {
           `${clock(s.startSec)}  #${s.fromIndex}–${s.toIndex}  ${s.clipId}${source}  ${s.text}`,
         );
       }
+      // `| head` closes the pipe early: that ends the listing, not with an error.
+      process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code !== 'EPIPE') throw err;
+      });
       process.stdout.write(lines.length > 0 ? `${lines.join('\n')}\n` : '');
       return;
     }

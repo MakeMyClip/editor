@@ -187,6 +187,37 @@ describe.skipIf(!IS_CI)('frame preview from a short window, against real FFmpeg'
       expect(await psnr(full, windowFrame), `24 fps at ${atSec}`).toBeGreaterThanOrEqual(40);
     }
 
+    // Slow motion: at 0.25x a canvas frame can need the source frame before the
+    // keyframe the frame's own time falls just after (2.5 s here, a 60-frame GOP).
+    const slowMotion = vertical(
+      mediaClip({
+        id: 'c1',
+        mediaId: M,
+        sourceInSec: 0.01,
+        sourceOutSec: 4,
+        startSec: 0,
+        effects: [{ type: 'speed', factor: 0.25 }],
+      }),
+    );
+    const slowMotionExport = join(workspace, 'slow-motion.mp4');
+    await runPlan(
+      compileTimeline(slowMotion, { media: slowMedia, dir: workspace, output: slowMotionExport }),
+    );
+    const slowMotionFull = join(workspace, 'slow-motion-full.jpg');
+    // Timeline 2.491 s of a 0.25x clip plays at 9.964 s of its segment.
+    await runFfmpeg(
+      buildPreviewFrameArgs({ input: slowMotionExport, output: slowMotionFull, atSec: 9.964 }),
+    );
+    const slowMotionWindow = join(workspace, 'slow-motion-window.jpg');
+    await runPlan(
+      buildFrameAtPlan(
+        slowMotion,
+        { media: slowMedia, dir: workspace, output: slowMotionWindow },
+        2.491,
+      ),
+    );
+    expect(await psnr(slowMotionFull, slowMotionWindow), 'slow motion').toBeGreaterThanOrEqual(40);
+
     // A sparse source (a frame every 5 s, like a screen recording holding a
     // still): at 18 s export still shows the frame from 15 s.
     const sparse = join(workspace, 'sparse.mp4');

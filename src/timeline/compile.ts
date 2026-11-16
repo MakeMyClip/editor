@@ -614,6 +614,9 @@ function seconds(sec: number): string {
   return String(Math.round(sec * 1000) / 1000);
 }
 
+/** How much of the source a frame preview reads before the frame, at least. */
+const FRAME_PREROLL_SEC = 1;
+
 function floorUs(sec: number): number {
   return Math.floor(sec * 1e6 + 1e-6) / 1e6;
 }
@@ -779,18 +782,18 @@ export function buildFrameAtPlan(
     if (!info) {
       throw new CompileError(`No media registered for "${clip.mediaId}" (clip "${clip.id}").`);
     }
-    // Seconds into the clip's source. The seek keeps every frame from the
-    // keyframe before it (`-noaccurate_seek`), so a frame that export repeats
-    // into this time (a source slower than the canvas, or a screen recording
-    // holding a still frame) is still read; its timestamps count from the seek
-    // point, so adding `local` gives source time from the clip's in-point.
+    // Seconds into the clip's source. The seek lands a second before that and
+    // keeps every frame from the keyframe before it (`-noaccurate_seek`), so a
+    // frame that export repeats into this time (a source slower than the
+    // canvas, slow motion, or a screen recording holding a still frame) is
+    // still read; undoing the seek gives source time from the clip's in-point.
     // Frames before the in-point are dropped, as export's seek drops them. The
     // chain's speed `setpts` turns source time into segment time, which its
     // fades and text read, and `trim` takes the frame at the frame's segment
     // time. Rounded down, to the microsecond, so the seek never passes the
     // clip's last frame or its out-point.
     const local = floorUs(clamped * speedFactor(clip.effects));
-    const seek = floorUs(clip.sourceInSec + local);
+    const seek = floorUs(clip.sourceInSec + Math.max(0, local - FRAME_PREROLL_SEC));
     // The first canvas frame at or after the frame's time (`trim` rounds an
     // off-grid start to the nearest frame, which could be the one before), but
     // no later than the segment's last frame: encoding to the clip's length

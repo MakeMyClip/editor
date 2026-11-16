@@ -82,12 +82,12 @@ describe('buildFrameAtPlan', () => {
     expect(plan.steps).toHaveLength(1);
     const [frame] = plan.steps;
     expect(frame?.label).toBe('frame:c1@3');
-    // Seek to 3 s, keeping the frames from the keyframe before it.
+    // Seek a second before 3 s, keeping the frames from the keyframe before that.
     expect(frame?.args.slice(0, 6)).toEqual([
       '-y',
       '-noaccurate_seek',
       '-ss',
-      '3',
+      '2',
       '-i',
       '/in.mp4',
     ]);
@@ -105,7 +105,7 @@ describe('buildFrameAtPlan', () => {
     const exported = graphOf(compileTimeline(doc, CTX('/ws/out.mp4')).steps[0]?.args);
     const segmentChain = exported.slice('[0:v]'.length, exported.indexOf('[v]'));
     expect(graphOf(frame?.args)).toBe(
-      `[0:v]setpts=PTS+round(3/TB)-round(0/TB),trim=start=0,${segmentChain},trim=start=3[v]`,
+      `[0:v]setpts=PTS+round(2/TB)-round(0/TB),trim=start=0,${segmentChain},trim=start=3[v]`,
     );
   });
 
@@ -121,9 +121,9 @@ describe('buildFrameAtPlan', () => {
     const near = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 7.999).steps[0];
     // 30 fps: the last frame starts at 8 - 1/30 s.
     // Rounded down, never past that frame or the clip's out-point.
-    expect(near?.args.slice(2, 4)).toEqual(['-ss', '107.966666']);
+    expect(near?.args.slice(2, 4)).toEqual(['-ss', '106.966666']);
     expect(graphOf(near?.args)).toMatch(
-      /^\[0:v\]setpts=PTS\+round\(107\.966666\/TB\)-round\(100\/TB\),trim=start=0,/,
+      /^\[0:v\]setpts=PTS\+round\(106\.966666\/TB\)-round\(100\/TB\),trim=start=0,/,
     );
     expect(graphOf(near?.args)).toMatch(/,trim=start=7\.96666666\d*\[v\]$/);
   });
@@ -188,9 +188,9 @@ describe('buildFrameAtPlan', () => {
     ]);
     const plan = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 10); // 2s into c2 ([8,12))
     expect(plan.steps[0]?.label).toBe('frame:c2@10');
-    expect(plan.steps[0]?.args.slice(2, 4)).toEqual(['-ss', '3']);
+    expect(plan.steps[0]?.args.slice(2, 4)).toEqual(['-ss', '2']);
     expect(graphOf(plan.steps[0]?.args)).toMatch(
-      /^\[0:v\]setpts=PTS\+round\(3\/TB\)-round\(1\/TB\),/,
+      /^\[0:v\]setpts=PTS\+round\(2\/TB\)-round\(1\/TB\),/,
     );
     expect(graphOf(plan.steps[0]?.args)).toMatch(/,trim=start=2\[v\]$/);
   });
@@ -215,9 +215,9 @@ describe('buildFrameAtPlan', () => {
     // the chain's setpts=PTS/2 turns source time into segment time, which the
     // fades and text windows read, and trim takes the frame at segment time 2.
     const frame = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 4).steps[0];
-    expect(frame?.args.slice(2, 4)).toEqual(['-ss', '4']);
+    expect(frame?.args.slice(2, 4)).toEqual(['-ss', '3']);
     const graph = graphOf(frame?.args);
-    expect(graph).toMatch(/^\[0:v\]setpts=PTS\+round\(4\/TB\)-round\(0\/TB\),/);
+    expect(graph).toMatch(/^\[0:v\]setpts=PTS\+round\(3\/TB\)-round\(0\/TB\),/);
     expect(graph).toContain('setpts=PTS/2');
     expect(graph).toMatch(/,trim=start=2\[v\]$/);
   });
