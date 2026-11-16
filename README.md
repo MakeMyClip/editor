@@ -16,7 +16,7 @@ The open-source AI video editor for Claude Code and any MCP client: remove silen
 </p>
 
 <p align="center">
-  <img src="./docs/hero.png" alt="MakeMyClip Editor's browser timeline: a talking-head clip with a title and captions" width="720" />
+  <img src="./docs/hero.png" alt="Chat with your video editor: a request to cut the pauses and add captions, the reply, and the editor's monitor and timeline" width="720" />
 </p>
 
 **MakeMyClip Editor is a free, open-source (MIT) video editor that AI agents drive.** You ask Claude to edit a recording; it calls the editor's tools, and FFmpeg and a local whisper.cpp do the work on your computer. It ships as a Claude Code skill, the `clip` CLI, an MCP server, and a browser timeline editor. No cloud upload, no account, no API key, no telemetry, no generative AI.
@@ -194,6 +194,10 @@ Same registry, same session log, same output.
 Plus four meta-ops not in the registry: `snapshot`, `undo`, `inspect`, `delete`.
 
 The browser UI is a dark timeline editor: drag-drop import, a monitor (the composited frame at the playhead), an editable timeline (select a clip to trim / split / move / transition / remove, frame it (fill, zoom, position), cut its silences, or cut words and retakes from its transcript), the output shape (16:9, 9:16, 1:1 or 4:5) and loudness, captions from transcripts, one-click export (an mp4, or a project for Final Cut Pro, DaVinci Resolve or Premiere Pro), timeline undo/redo, snapshot, and keyboard shortcuts.
+
+<p align="center">
+  <img src="./docs/ui-screenshot.jpg" alt="The browser editor: imported clips, the monitor showing a captioned frame, and a timeline with video, title and caption tracks" width="720" />
+</p>
 
 ---
 
