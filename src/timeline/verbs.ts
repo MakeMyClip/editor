@@ -23,7 +23,7 @@ import {
   planReframe,
 } from './reframe.js';
 import { MAIN_TIMELINE, type MediaId, TimelineIdSchema } from './schema.js';
-import { checkShortTimelines, planShort } from './shorts.js';
+import { checkShortTimelines, planShort, type SpeechLevelsLookup } from './shorts.js';
 import { SensitivitySchema, type SilenceCut } from './silence.js';
 import {
   clipWords,
@@ -402,6 +402,9 @@ export interface VerbContext {
   ) => Promise<{ clip: MediaClip; transcript: Transcript; media: Map<MediaId, MediaInfo> }>;
   /** Read another timeline of the workspace (make_short's source). */
   readTimeline: (timeline: string) => Promise<Composition>;
+  /** A media clip's source audio levels around a time (runs FFmpeg), for
+   *  placing a short's edges in pauses; null when the source has no sound. */
+  speechLevels: SpeechLevelsLookup;
   /** Track a clip is placed on when the verb doesn't say. */
   defaultTrack: string;
   /** The timeline being edited (default `main`); `applyVerbs` sets it. */
@@ -585,7 +588,7 @@ export async function lowerVerb(
           targetLufs: verb.targetLufs,
           replace: verb.replace,
         },
-        ctx.transcript,
+        { transcript: ctx.transcript, levels: ctx.speechLevels },
       );
       for (const warning of plan.warnings) ctx.warn?.(warning);
       return plan.ops;

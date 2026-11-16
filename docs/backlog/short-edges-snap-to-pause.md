@@ -1,3 +1,0 @@
-# Snap short edges to the pause
-
-whisper.cpp (`-ml 1 -sow`) gives each pause to the word before it, so at a sentence edge its words run late. On a 30-sentence test recording (macOS `say`, model base.en), a short ending on a sentence's last word ran past the pause into the next sentence in 18 of 29 cases, by up to 0.35 s. Even with the 0.25 s lead, 3 of 29 starts lost up to 0.1 s of the first word. No fixed padding fixes both. Move each edge of a range to the quietest point of the audio near it: run a silencedetect pass over a second or so around the edge and keep the edge inside the pause between the range and its neighbors. `-dtw base.en` didn't change the per-word offsets in a quick check.

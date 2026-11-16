@@ -45,6 +45,7 @@ import {
 } from './timeline/interchange.js';
 import { buildMediaMap, buildMediaRefs } from './timeline/media-registry.js';
 import { colorClip, mediaClip, textClip } from './timeline/ops.js';
+import { measureSpeechLevels } from './timeline/pauses.js';
 import {
   AspectSchema,
   type FramingFit,
@@ -572,7 +573,15 @@ export async function runTimeline(args: string[]): Promise<void> {
             flags.loudness === undefined ? undefined : loudnessValue(flags.loudness, usage),
           replace: flags.replace === 'true',
         },
-        (comp, clipId, transcriptId) => storedTranscriptForClip(comp, clipId, media, transcriptId),
+        {
+          transcript: (comp, clipId, transcriptId) =>
+            storedTranscriptForClip(comp, clipId, media, transcriptId),
+          levels: async (comp, clipId, aroundSec) => {
+            const clip = findClip(comp, clipId)?.clip;
+            const info = clip?.kind === 'media' ? media.get(clip.mediaId) : undefined;
+            return info?.hasAudio ? measureSpeechLevels(info.path, aroundSec) : null;
+          },
+        },
       );
       const report = {
         timeline: target,

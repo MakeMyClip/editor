@@ -293,6 +293,8 @@ describe('MCP shorts (named timelines)', () => {
       expect(edit.warnings).toEqual([
         'Range 1 starts mid-sentence, between "word1" and "word2" (word 2).',
         'Range 1 ends mid-sentence, between "word6" and "word7" (word 6).',
+        // The fixture's "video" is a few bytes, which FFmpeg can't measure.
+        "Range 1: its audio couldn't be measured, so its edges follow the transcript. Look at it or listen.",
       ]);
       const doc = edit.document as Record<string, unknown>;
       expect(doc.timeline).toBe('clip-1');

@@ -170,7 +170,7 @@ clip timeline --timeline best-1 export best-1.mp4
 clip timeline list                                   # main and every short
 ```
 
-`short` starts 0.25 s before the first word and ends with the last, fills the 9:16 frame (`--x` picks the part that shows), sets -14 LUFS and burns in captions. Give several `<clipId> <from> <to>` ranges to join moments, in the order you give them. Any command takes `--timeline <id>` to work on a short, `clip timeline --timeline best-1 undo` takes the short apart again, and `short best-1 … --replace` rebuilds it.
+`short` cuts each edge inside the pause the audio shows there, keeping 0.1 s of room tone (where there's no clear pause it follows the transcript and warns), fills the 9:16 frame (`--x` picks the part that shows), sets -14 LUFS and burns in captions. Give several `<clipId> <from> <to>` ranges to join moments, in the order you give them. Any command takes `--timeline <id>` to work on a short, `clip timeline --timeline best-1 undo` takes the short apart again, and `short best-1 … --replace` rebuilds it.
 
 ---
 
