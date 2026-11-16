@@ -97,9 +97,7 @@ describe('buildFrameAtPlan', () => {
     // The same video chain export runs, on timestamps offset to the frame's time.
     const exported = graphOf(compileTimeline(doc, CTX('/ws/out.mp4')).steps[0]?.args);
     const segmentChain = exported.slice('[0:v]'.length, exported.indexOf('[v]'));
-    expect(graphOf(frame?.args)).toBe(
-      `[0:v]setpts=PTS+2/TB,${segmentChain},trim=start=3[v]`,
-    );
+    expect(graphOf(frame?.args)).toBe(`[0:v]setpts=PTS+2/TB,${segmentChain},trim=start=3[v]`);
   });
 
   it('seeks into the source from the clip in-point and stops at its last frame', () => {
