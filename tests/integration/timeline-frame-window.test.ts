@@ -105,6 +105,15 @@ describe.skipIf(!IS_CI)('frame preview from a short window, against real FFmpeg'
         exportSec: 3.01,
       },
       {
+        // 1.01 s encodes 30 frames at 30 fps; the last one is at 29/30 s.
+        name: 'the last frame of a clip off the frame grid',
+        doc: vertical(
+          mediaClip({ id: 'c1', mediaId: M, sourceInSec: 5, sourceOutSec: 6.01, startSec: 0 }),
+        ),
+        atSec: 1.009,
+        exportSec: 29 / 30,
+      },
+      {
         name: 'inside a fade',
         doc: vertical(
           mediaClip({

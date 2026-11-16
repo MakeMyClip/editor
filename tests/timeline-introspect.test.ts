@@ -153,6 +153,20 @@ describe('buildFrameAtPlan', () => {
     expect(graph).toMatch(/,trim=start=3\.0333333\d*\[v\]$/);
   });
 
+  it("stops at the segment's last frame on a clip whose length is off the frame grid", () => {
+    // 1.01 s at 30 fps encodes 30 frames, the last at 29/30 s.
+    const short = applyOps(emptyComposition(), [
+      { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+      {
+        op: 'addClip',
+        trackId: 'v0',
+        clip: mediaClip({ id: 'c1', mediaId: M, sourceOutSec: 1.01, startSec: 0 }),
+      },
+    ]);
+    const graph = graphOf(buildFrameAtPlan(short, CTX('/ws/f.jpg'), 1.009).steps[0]?.args);
+    expect(graph).toMatch(/,trim=start=0\.9666666\d*\[v\]$/);
+  });
+
   it('selects the second clip and offsets into it for a time in the second clip', () => {
     const doc = applyOps(oneClip(), [
       {

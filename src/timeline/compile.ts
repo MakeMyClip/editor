@@ -793,9 +793,12 @@ export function buildFrameAtPlan(
     // the seek never passes the clip's last frame or its out-point.
     const local = floorUs(clamped * speedFactor(clip.effects));
     const from = floorUs(Math.max(0, local - FRAME_PREROLL_SEC));
-    // The first canvas frame at or after the frame's time: `trim` rounds an
-    // off-grid start to the nearest frame, which could be the one before.
-    const firstFrame = Math.ceil(clamped * comp.fps - 1e-6) / comp.fps;
+    // The first canvas frame at or after the frame's time (`trim` rounds an
+    // off-grid start to the nearest frame, which could be the one before), but
+    // no later than the segment's last frame: encoding to the clip's length
+    // keeps round(length x fps) frames.
+    const lastIndex = Math.max(0, Math.round(outDur * comp.fps) - 1);
+    const firstFrame = Math.min(Math.ceil(clamped * comp.fps - 1e-6), lastIndex) / comp.fps;
     const { chain, textFiles } = clipChains(comp, clip, index, ctx, overlays);
     const frameStep: FfmpegStep = {
       label,
