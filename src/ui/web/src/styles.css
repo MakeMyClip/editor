@@ -918,6 +918,113 @@ body,
 
 /* ─── Doc timeline — the CompositionDoc (the editor's centerpiece) ────── */
 
+/* ─── Timeline tabs: main and every short ─────────────────────────── */
+
+.tl-tabs-bar {
+  flex: 0 0 auto;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border-2);
+}
+
+.tl-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  padding: 0.4rem 1.1rem 0;
+}
+
+.tl-tabs-list {
+  display: flex;
+  gap: 0.25rem;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.tl-tab {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  background: var(--bg);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.tl-tab.is-current {
+  background: #181b21;
+  border-color: var(--border-2);
+  color: var(--text);
+}
+
+.tl-tab-select {
+  font: inherit;
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.4rem 0.35rem 0.7rem;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.tl-tab-shape {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--border-2);
+  border-radius: 3px;
+  color: var(--text-2);
+}
+
+.tl-tab.is-current .tl-tab-shape {
+  border-color: var(--accent);
+  color: var(--accent-hi);
+}
+
+.tl-tab-delete {
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.5rem 0.2rem 0.2rem;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.tl-tab-delete:hover {
+  color: var(--danger);
+}
+
+.tl-export-all {
+  margin: 0 0 0.3rem auto;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.75rem;
+  white-space: nowrap;
+}
+
+.tl-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.4rem 1.1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--text-2);
+}
+
+.tl-notice.is-warn {
+  color: var(--warn);
+}
+
+.tl-notice-lines {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .doc-timeline {
   background: linear-gradient(180deg, #181b21, #141619);
   border-top: 1px solid var(--border-2);
@@ -1361,6 +1468,24 @@ body,
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.ci-short {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+}
+
+.ci-short-name {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+  font-family: var(--mono);
+  font-size: 0.82rem;
 }
 
 .ci-remove {

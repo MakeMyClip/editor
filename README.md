@@ -176,9 +176,12 @@ clip timeline short best-1 clip_ec2f047d 1400 1478 --x 0.4   # words 1400–1478
 clip timeline --timeline best-1 frame 3 check.jpg    # look at it; move --x if the speaker is off
 clip timeline --timeline best-1 export best-1.mp4
 clip timeline list                                   # main and every short
+clip timeline export --all ./shorts                  # every short, as ./shorts/<id>.mp4
 ```
 
 `short` cuts each edge inside the pause the audio shows there, keeping 0.1 s of room tone (where there's no clear pause it follows the transcript and warns), fills the 9:16 frame (`--x` picks the part that shows), sets -14 LUFS and burns in captions. Give several `<clipId> <from> <to>` ranges to join moments, in the order you give them. Any command takes `--timeline <id>` to work on a short, `clip timeline --timeline best-1 undo` takes the short apart again, and `short best-1 … --replace` rebuilds it.
+
+In `clip ui`, select words in a clip's transcript and press **Make short**: the short opens in a tab of its own above the timeline, next to main. **Export all shorts** renders every one.
 
 ---
 

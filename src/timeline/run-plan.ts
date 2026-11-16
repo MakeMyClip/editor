@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
 import {
   buildLoudnormApplyArgs,
@@ -7,7 +7,12 @@ import {
   parseLoudnormJson,
 } from '../ffmpeg/args/loudnorm.js';
 import { filterGraphFileOption, requireDrawtext, runFfmpeg } from '../ffmpeg/run.js';
-import type { FfmpegPlan } from './compile.js';
+import { getWorkspace } from '../workspace.js';
+import { compileTimeline, type FfmpegPlan, type MediaInfo } from './compile.js';
+import type { Composition } from './composition.js';
+import { readComposition } from './document-store.js';
+import { buildMediaMap } from './media-registry.js';
+import type { MediaId } from './schema.js';
 
 export interface LoudnessResult {
   targetLufs: number;
@@ -149,4 +154,57 @@ async function normalizeLoudness(
     await unlink(output).catch(() => undefined);
     throw err;
   }
+}
+
+/** A timeline `exportTimelines` rendered, or why it couldn't. */
+export type TimelineExport =
+  | {
+      timeline: string;
+      rev: number;
+      output: string;
+      durationSec: number;
+      durationMs: number;
+      loudness?: LoudnessResult;
+    }
+  | { timeline: string; error: string };
+
+/**
+ * Render each timeline to `<dir>/<id>.mp4`, one at a time. A timeline that
+ * can't render is reported with its error, and the rest still render. `media`
+ * resolves each document's files (default: the registry as ingested); callers
+ * acting for the UI pass one that re-checks them against the workspace.
+ */
+export async function exportTimelines(
+  timelines: readonly string[],
+  dir: string,
+  media: (comp: Composition) => Promise<Map<MediaId, MediaInfo>> = () => buildMediaMap(),
+): Promise<TimelineExport[]> {
+  await mkdir(dir, { recursive: true });
+  // Intermediates are named per run, so a concurrent export or frame preview
+  // in the same workspace can't overwrite them.
+  const run = randomBytes(4).toString('hex');
+  const results: TimelineExport[] = [];
+  for (const timeline of timelines) {
+    try {
+      const comp = await readComposition(timeline);
+      const plan = compileTimeline(comp, {
+        media: await media(comp),
+        dir: getWorkspace(),
+        output: join(dir, `${timeline}.mp4`),
+        tag: `${run}-${timeline}`,
+      });
+      const result = await runPlan(plan);
+      results.push({
+        timeline,
+        rev: comp.rev,
+        output: result.output,
+        durationSec: plan.durationSec,
+        durationMs: result.durationMs,
+        ...(result.loudness ? { loudness: result.loudness } : {}),
+      });
+    } catch (err) {
+      results.push({ timeline, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return results;
 }

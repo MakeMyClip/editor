@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { withTimeline } from '../lib/timelines.js';
 
 interface Exportable {
   exportable: boolean;
@@ -16,7 +17,7 @@ type FrameState =
  * from the export. The playhead is debounced so scrubbing doesn't fire an FFmpeg
  * render per pixel, and a banner surfaces whether the document can render at all.
  */
-export function Viewer({ atSec, rev }: { atSec: number; rev: number }) {
+export function Viewer({ timeline, atSec, rev }: { timeline: string; atSec: number; rev: number }) {
   const [debouncedAt, setDebouncedAt] = useState(atSec);
   const [status, setStatus] = useState<Exportable | null>(null);
   const [frame, setFrame] = useState<FrameState>({ kind: 'loading' });
@@ -30,7 +31,7 @@ export function Viewer({ atSec, rev }: { atSec: number; rev: number }) {
   // Re-check exportability whenever the document changes (rev cache-busts).
   useEffect(() => {
     let alive = true;
-    fetch(`/api/timeline/exportable?rev=${rev}`)
+    fetch(withTimeline(`/api/timeline/exportable?rev=${rev}`, timeline))
       .then((r) => r.json() as Promise<Exportable>)
       .then((s) => {
         if (alive) setStatus(s);
@@ -41,13 +42,13 @@ export function Viewer({ atSec, rev }: { atSec: number; rev: number }) {
     return () => {
       alive = false;
     };
-  }, [rev]);
+  }, [timeline, rev]);
 
   // Fetch the composited frame as a blob (not via <img src>) so a superseded
   // scrub is ABORTED instead of left rendering, and a transient 503 reads as a
   // clean message rather than a broken image. The previous frame stays on screen
   // until the next one decodes — no blank flash while FFmpeg works.
-  const src = `/api/timeline/frame?at=${debouncedAt.toFixed(2)}&rev=${rev}`;
+  const src = withTimeline(`/api/timeline/frame?at=${debouncedAt.toFixed(2)}&rev=${rev}`, timeline);
   useEffect(() => {
     const controller = new AbortController();
     fetch(src, { signal: controller.signal })

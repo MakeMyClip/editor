@@ -110,7 +110,7 @@ export function FramingSection({
   );
 }
 
-function Slider({
+export function Slider({
   label,
   value,
   min,

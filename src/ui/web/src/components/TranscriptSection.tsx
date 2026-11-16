@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isTimelineId, MAIN_TIMELINE, withTimeline } from '../lib/timelines.js';
 import type { Verb } from '../lib/verbs.js';
 import type { MediaClip } from '../types.js';
+import { Slider } from './FramingSection.js';
 
 /** Mirrors ClipTranscript in src/timeline/transcript.ts. */
 interface ClipWord {
@@ -19,19 +21,28 @@ interface ClipTranscript {
 /**
  * Edit a media clip by its words: transcribe on request (the local whisper.cpp
  * is optional, so its setup message shows here when it's missing), click a word
- * to move the playhead, shift-click to select a range, then cut it. Phrases
- * said twice in a row are marked and can all be cut at once. Every cut is one
- * undoable edit through the verb layer.
+ * to move the playhead, shift-click to select a range, then cut it or make a
+ * short of it. Phrases said twice in a row are marked and can all be cut at
+ * once. Every cut is one undoable edit through the verb layer.
  */
 export function TranscriptSection({
+  timeline,
   clip,
   busy,
+  nextShortId,
   onApply,
+  onMakeShort,
   onSeek,
 }: {
+  /** The timeline the clip is on, which a short is cut from. */
+  timeline: string;
   clip: MediaClip;
   busy: boolean;
+  /** A name no timeline uses yet, offered for a new short. */
+  nextShortId: string;
   onApply: (verbs: Verb[]) => Promise<number | null>;
+  /** Make a short on timeline `id` and open it; resolves false when that failed. */
+  onMakeShort: (id: string, verb: Verb) => Promise<boolean>;
   onSeek: (sec: number) => void;
 }) {
   const [transcript, setTranscript] = useState<ClipTranscript | null>(null);
@@ -39,6 +50,10 @@ export function TranscriptSection({
   const [error, setError] = useState<string | null>(null);
   const [anchor, setAnchor] = useState<number | null>(null);
   const [focus, setFocus] = useState<number | null>(null);
+  // null until the name is edited, so the offered name follows the timelines.
+  const [shortName, setShortName] = useState<string | null>(null);
+  const [shortX, setShortX] = useState(0.5);
+  const [nameError, setNameError] = useState<string | null>(null);
   // Set once the transcript has been asked for; `latest` numbers requests so a
   // response for an older clip window is dropped instead of shown.
   const wanted = useRef(false);
@@ -50,7 +65,9 @@ export function TranscriptSection({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/timeline/transcript/${encodeURIComponent(clip.id)}`);
+      const res = await fetch(
+        withTimeline(`/api/timeline/transcript/${encodeURIComponent(clip.id)}`, timeline),
+      );
       const json = (await res.json()) as ClipTranscript & { error?: string };
       if (request !== latest.current) return;
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
@@ -60,7 +77,7 @@ export function TranscriptSection({
     } finally {
       if (request === latest.current) setLoading(false);
     }
-  }, [clip.id]);
+  }, [clip.id, timeline]);
 
   // A cut or trim changes the clip's window: reload a transcript that was asked
   // for, even one still loading (its response is then dropped as outdated). The
@@ -83,6 +100,33 @@ export function TranscriptSection({
     from === null || to === null ? 0 : words.filter((w) => w.index >= from && w.index <= to).length;
   const inRetake = (index: number): boolean =>
     retakes.some((r) => index >= r.fromIndex && index <= r.toIndex);
+  const name = shortName ?? nextShortId;
+
+  const makeShort = async (): Promise<void> => {
+    if (from === null || to === null || !transcript) return;
+    const id = name.trim();
+    if (!isTimelineId(id)) {
+      setNameError('Name it with lowercase letters, digits and dashes, like best-1.');
+      return;
+    }
+    if (id === MAIN_TIMELINE || id === timeline) {
+      setNameError(`A short needs a name of its own, not ${id}.`);
+      return;
+    }
+    const made = await onMakeShort(id, {
+      verb: 'make_short',
+      ranges: [
+        { clipId: clip.id, fromIndex: from, toIndex: to, transcriptId: transcript.transcriptId },
+      ],
+      source: timeline,
+      x: shortX,
+    });
+    if (made) {
+      setAnchor(null);
+      setFocus(null);
+      setShortName(null);
+    }
+  };
 
   return (
     <div className="ci-section">
@@ -182,6 +226,45 @@ export function TranscriptSection({
               </button>
             ) : null}
           </div>
+          {selectedCount > 0 ? (
+            <div className="ci-short">
+              <label className="ci-slider">
+                <span className="cap-row-label">Short</span>
+                <input
+                  className="form-input ci-short-name"
+                  value={name}
+                  aria-label="Name of the new short"
+                  spellCheck={false}
+                  onChange={(e) => {
+                    setShortName(e.target.value);
+                    setNameError(null);
+                  }}
+                />
+              </label>
+              <Slider
+                label="Left–right"
+                value={shortX}
+                min={0}
+                max={1}
+                step={0.01}
+                onChange={setShortX}
+                percent
+              />
+              {nameError ? <div className="form-error">{nameError}</div> : null}
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busy || loading}
+                onClick={() => void makeShort()}
+              >
+                Make short from {selectedCount} word{selectedCount === 1 ? '' : 's'}
+              </button>
+              <p className="form-hint">
+                A 9:16 short of these words with captions, at -14 LUFS, its edges in the pauses. It
+                opens when made; Undo there takes it apart.
+              </p>
+            </div>
+          ) : null}
           <p className="form-hint">
             Click a word to move the playhead; shift-click to select a range. Undo restores.
           </p>

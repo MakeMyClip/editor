@@ -238,7 +238,13 @@ export {
   renderCutSheet,
   reviewCuts,
 } from './timeline/review.js';
-export { type LoudnessResult, type RunPlanResult, runPlan } from './timeline/run-plan.js';
+export {
+  exportTimelines,
+  type LoudnessResult,
+  type RunPlanResult,
+  runPlan,
+  type TimelineExport,
+} from './timeline/run-plan.js';
 export {
   AudioStreamSchema,
   MAIN_TIMELINE,

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { clipDuration, clipEndSec, clipLabel, compositionDuration } from '../lib/composition.js';
+import { withTimeline } from '../lib/timelines.js';
 import type { Verb } from '../lib/verbs.js';
 import type { Clip, Composition, MediaClip } from '../types.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
@@ -20,6 +21,7 @@ const MAX_THUMBS = 16; // cap thumbnails per clip to bound requests
  * playhead is controlled by the parent so the clip inspector can split at it.
  */
 export function DocTimeline({
+  timeline,
   composition,
   mediaNames,
   selectedClipId,
@@ -33,6 +35,8 @@ export function DocTimeline({
   onApply,
   verbError,
 }: {
+  /** The timeline shown: `main` or a short. */
+  timeline: string;
   composition: Composition;
   /** File name of each media id, for labeling media clips. */
   mediaNames: ReadonlyMap<string, string>;
@@ -74,7 +78,7 @@ export function DocTimeline({
   });
   useEffect(() => {
     let alive = true;
-    fetch(`/api/timeline/history?rev=${composition.rev}`)
+    fetch(withTimeline(`/api/timeline/history?rev=${composition.rev}`, timeline))
       .then((r) => r.json() as Promise<{ canUndo: boolean; canRedo: boolean }>)
       .then((h) => {
         if (alive) setHistory(h);
@@ -83,7 +87,7 @@ export function DocTimeline({
     return () => {
       alive = false;
     };
-  }, [composition.rev]);
+  }, [timeline, composition.rev]);
 
   return (
     <section className="doc-timeline">
@@ -119,7 +123,12 @@ export function DocTimeline({
         >
           ↷
         </button>
-        <ExportButton busy={exporting} disabled={!hasClips} onExportVideo={onExport} />
+        <ExportButton
+          timeline={timeline}
+          busy={exporting}
+          disabled={!hasClips}
+          onExportVideo={onExport}
+        />
       </div>
 
       {hasClips ? (
