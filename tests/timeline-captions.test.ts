@@ -436,9 +436,10 @@ describe('captions on a vertical canvas', () => {
     // Arial draws W at 0.94 em and DejaVu Sans at 1.0: the estimate takes 1.
     expect(textWidthEm('W')).toBe(1);
     expect(textWidthEm('MOM')).toBeCloseTo(2.8, 6);
-    // DejaVu Sans draws m at 0.97 em; Cyrillic ж and ш at about 0.9.
+    // DejaVu Sans draws m at 0.97 em, Щ and Ю at about 1.1, ж and ш under 0.95.
     expect(textWidthEm('mm')).toBe(2);
-    expect(textWidthEm('жш')).toBeCloseTo(1.8, 6);
+    expect(textWidthEm('ЩЮ')).toBeCloseTo(2.2, 6);
+    expect(textWidthEm('жш')).toBeCloseTo(1.9, 6);
     // Accented Latin counts as its base letter.
     expect(textWidthEm('é')).toBe(textWidthEm('e'));
   });
@@ -465,6 +466,9 @@ describe('captions on a vertical canvas', () => {
     const fitted = fitCaptionStyle('UNBELIEVABLE', big, vertical);
     expect(fitted.fontSize).toBeLessThan(96);
     expect(textWidthEm('UNBELIEVABLE') * fitted.fontSize).toBeLessThanOrEqual(754);
+    // 13 of Cyrillic's widest capital (about 1.1 em each in DejaVu) are fitted too.
+    const shch = fitCaptionStyle('ЩЩЩЩЩЩЩЩЩЩЩЩЩ', defaultCaptionStyle(vertical), vertical);
+    expect(13 * 1.095 * shch.fontSize).toBeLessThanOrEqual(754);
     // A word that fits keeps the style as it is.
     expect(fitCaptionStyle('YES', big, vertical)).toBe(big);
   });

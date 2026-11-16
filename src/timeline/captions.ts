@@ -358,7 +358,7 @@ const ASCII = /^[\x20-\x7e]$/;
  * sans-serif caption fonts: for each class at least what Arial and DejaVu Sans
  * draw (W and m are about 0.95–1.0 em), so the estimate errs wide and a line it
  * lets through fits on screen. Accented Latin counts as its base letter; other
- * scripts count as wide letters (Cyrillic ж or ш is about 0.9 em).
+ * scripts count as their widest letters (DejaVu's Щ and Ю are about 1.1 em).
  */
 export function textWidthEm(text: string): number {
   let width = 0;
@@ -366,7 +366,7 @@ export function textWidthEm(text: string): number {
     const base = ch.normalize('NFD').charAt(0);
     if (base === ' ') width += 0.32;
     else if (WIDE.test(ch) || WIDEST.test(base)) width += 1;
-    else if (!ASCII.test(base)) width += base === base.toLowerCase() ? 0.9 : 1;
+    else if (!ASCII.test(base)) width += base === base.toLowerCase() ? 0.95 : 1.1;
     else if (NARROW.test(base)) width += 0.4;
     else if (base !== base.toLowerCase()) width += 0.8;
     else width += 0.64;
