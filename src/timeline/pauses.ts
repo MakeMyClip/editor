@@ -48,6 +48,8 @@ const MAX_BLIP_SEC = 0.04;
 /** Two pauses at least this long in reach make the boundary ambiguous. */
 const COMPETING_PAUSE_SEC = 0.12;
 const SILENT_DB = -120;
+/** At or below this, a frame is digital silence, not a room. */
+const DIGITAL_SILENCE_DB = -100;
 
 /** Read the per-frame levels `buildSpeechLevelsArgs` prints. */
 export function parseSpeechLevels(stderr: string, fromSec: number): SpeechLevels {
@@ -72,10 +74,13 @@ export async function measureSpeechLevels(
 
 /** Every pause in the levels, by a threshold set from the levels themselves. */
 export function findPauses(levels: SpeechLevels): Pause[] {
-  const sorted = [...levels.db].sort((a, b) => a - b);
+  // Digital silence (padding where the audio starts late, or a muted stretch)
+  // is quiet, but it isn't the room's floor: leave it out of the estimate, or
+  // the room tone between sentences would count as sound.
+  const sorted = levels.db.filter((level) => level > DIGITAL_SILENCE_DB).sort((a, b) => a - b);
   const at = (q: number): number => sorted[Math.floor(q * (sorted.length - 1))] ?? SILENT_DB;
   const threshold = Math.min(at(0.05) + ABOVE_FLOOR_DB, at(0.95) - BELOW_SPEECH_DB);
-  const quiet = levels.db.map((level) => level <= threshold);
+  const quiet = levels.db.map((level) => level <= DIGITAL_SILENCE_DB || level <= threshold);
   const maxBlip = Math.round(MAX_BLIP_SEC / levels.frameSec);
   // A short burst of sound between two quiet stretches is part of the pause.
   for (let i = 0; i < quiet.length; ) {

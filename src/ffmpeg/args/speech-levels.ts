@@ -29,7 +29,9 @@ export function buildSpeechLevelsArgs({ input, fromSec, durationSec }: SpeechLev
     '0:a:0',
     '-af',
     [
-      `aresample=${LEVEL_SAMPLE_RATE}`,
+      // A late start or a timestamp gap becomes silence, as for transcription,
+      // so frame n is always n x 10 ms after the seek point.
+      `aresample=${LEVEL_SAMPLE_RATE}:async=1:first_pts=0`,
       'aformat=channel_layouts=mono',
       `asetnsamples=n=${LEVEL_FRAME_SAMPLES}:p=0`,
       'astats=metadata=1:reset=1',

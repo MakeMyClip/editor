@@ -33,7 +33,7 @@ describe('buildSpeechLevelsArgs', () => {
       '-map',
       '0:a:0',
       '-af',
-      'aresample=16000,aformat=channel_layouts=mono,asetnsamples=n=160:p=0,astats=metadata=1:reset=1,ametadata=mode=print:key=lavfi.astats.Overall.RMS_level',
+      'aresample=16000:async=1:first_pts=0,aformat=channel_layouts=mono,asetnsamples=n=160:p=0,astats=metadata=1:reset=1,ametadata=mode=print:key=lavfi.astats.Overall.RMS_level',
       '-f',
       'null',
       '-',
@@ -82,6 +82,19 @@ describe('findPauses', () => {
     ]);
     expect(findPauses(levels).map((p) => [near(p.startSec), near(p.endSec)])).toEqual([
       [11, 11.33],
+    ]);
+  });
+
+  it('sets the floor by the room, not by digital silence before the audio starts', () => {
+    const levels = levelsOf([
+      [0.5, -120], // padding: the audio starts late
+      [1, -20],
+      [0.3, -62], // room tone between sentences
+      [1, -20],
+    ]);
+    expect(findPauses(levels).map((p) => [near(p.startSec), near(p.endSec)])).toEqual([
+      [10, 10.5],
+      [11.5, 11.8],
     ]);
   });
 

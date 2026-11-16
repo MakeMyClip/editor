@@ -43,6 +43,10 @@ export const DEFAULT_SHORT_LUFS = -14;
 const SHORT_TRACK = 'v0';
 /** A range whose snapped edges leave less than this keeps the transcript's. */
 const MIN_SNAPPED_SEC = 0.2;
+/** How long a word pulled inside a cut lasts. */
+const PULLED_WORD_SEC = 0.25;
+/** The least a word starts after the one before it. */
+const WORD_ORDER_SEC = 0.01;
 /** A piece shorter than this is dropped: too short to hear, just a flash. */
 const MIN_PIECE_SEC = 0.05;
 const SAME_SEC = 1e-6;
@@ -274,19 +278,9 @@ export async function planShort(
     // isn't part of the short even when another range asks for it.
     const style = defaultCaptionStyle(applyOps(target, ops));
     const cues = placed.flatMap(({ piece, clip }) => {
-      // A word whisper places past the cut (it runs late at a sentence end) is
-      // pulled inside it, so its caption isn't lost.
-      const words = piece.transcript.words.flatMap((w, i) => {
-        const range = piece.asked.find((r) => i >= r.fromIndex && i <= r.toIndex);
-        if (!range) return [];
-        if (w.startSec >= range.end) {
-          return [{ ...w, startSec: Math.max(range.start, range.end - 0.25), endSec: range.end }];
-        }
-        if (w.endSec <= range.start) {
-          return [{ ...w, startSec: range.start, endSec: Math.min(range.end, range.start + 0.25) }];
-        }
-        return [w];
-      });
+      const words = piece.asked.flatMap((r) =>
+        wordsInside(piece.transcript.words.slice(r.fromIndex, r.toIndex + 1), r.start, r.end),
+      );
       return groupCaptions(
         clipWords({ ...piece.transcript, words }, clip),
         clipEndSec(clip),
@@ -414,7 +408,38 @@ async function snapToPauses(
   }
   // A pause found on the wrong side of a short range would leave nothing.
   if (end - start < MIN_SNAPPED_SEC) return window;
-  return { ...window, start: roundMs(start), end: roundMs(end) };
+  start = roundMs(start);
+  end = roundMs(end);
+  return { ...window, start, end, words: wordsInside(window.words, start, end) };
+}
+
+/**
+ * A range's words kept inside the window it was cut to, in order. A word
+ * whisper places past an edge (it runs late at a sentence end) is pulled just
+ * inside, so the range still holds its speech and the word keeps its caption;
+ * no word starts before the one ahead of it, or a caption shown a word at a
+ * time would lose that one.
+ */
+function wordsInside<W extends { startSec: number; endSec: number }>(
+  words: W[],
+  start: number,
+  end: number,
+): W[] {
+  let prevStart = Number.NEGATIVE_INFINITY;
+  return words.map((w) => {
+    let startSec = w.startSec;
+    let endSec = w.endSec;
+    if (startSec >= end) {
+      startSec = Math.max(start, end - PULLED_WORD_SEC);
+      endSec = end;
+    } else if (endSec <= start) {
+      startSec = start;
+      endSec = Math.min(end, start + PULLED_WORD_SEC);
+    }
+    startSec = Math.min(Math.max(startSec, prevStart + WORD_ORDER_SEC), endSec - WORD_ORDER_SEC);
+    prevStart = startSec;
+    return startSec === w.startSec && endSec === w.endSec ? w : { ...w, startSec, endSec };
+  });
 }
 
 /** Whether two neighboring words belong to one sentence: no sentence end and

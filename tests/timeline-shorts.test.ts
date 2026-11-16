@@ -590,6 +590,66 @@ describe('planShort: edges in the pauses', () => {
     ]);
   });
 
+  it('keeps every word’s caption, in order, one word at a time', async () => {
+    // Cut at 5.7: the word before the last starts at 5.6, the last at 5.8.
+    const transcript = transcriptOf(M, [
+      [0.3, 1.3],
+      [1.3, 2.3],
+      [2.3, 3.3],
+      [3.3, 5.6],
+      [5.6, 5.8],
+      [5.8, 6.4],
+      [6.4, 7.4],
+    ]);
+    const speech: [number, number][] = [
+      [0.1, 0.9],
+      [1.1, 1.9],
+      [2.1, 2.9],
+      [3.1, 3.9],
+      [4.1, 4.8],
+      [4.9, 5.6],
+      [6.2, 7],
+    ];
+    const short = await planShort(
+      emptyComposition(),
+      whole,
+      { ranges: [{ clipId: 'c1', fromIndex: 3, toIndex: 5 }], maxWords: 1 },
+      { transcript: lookupFor([transcript]), levels: levelsFrom(speech), mintId: counter() },
+    );
+    expect(short.pieces.at(-1)?.sourceOutSec).toBe(5.7);
+    const texts = addedClips(short.ops).flatMap((c) => (c.kind === 'text' ? [c.text] : []));
+    expect(texts).toEqual(['w3', 'w4', 'w5']);
+  });
+
+  it('keeps a one-word range whose word whisper places past its cut', async () => {
+    // The word is spoken 5.2–5.6; whisper says 5.72–6.4. Its start finds two
+    // pauses (ambiguous, so the transcript's), its end the pause at 5.6.
+    const transcript = transcriptOf(M, [
+      [0.3, 1.3],
+      [1.3, 2.3],
+      [2.3, 3.3],
+      [3.3, 4.3],
+      [4.3, 5.72],
+      [5.72, 6.4],
+      [6.4, 7.4],
+    ]);
+    const speech: [number, number][] = [
+      [0.1, 0.9],
+      [1.1, 1.9],
+      [2.1, 2.9],
+      [3.1, 3.9],
+      [4.1, 4.9],
+      [5.2, 5.6],
+      [6.2, 7],
+    ];
+    const short = await snap(transcript, levelsFrom(speech), {
+      clipId: 'c1',
+      fromIndex: 5,
+      toIndex: 5,
+    });
+    expect(short.pieces).toEqual([{ mediaId: M, sourceInSec: 5.47, sourceOutSec: 5.7 }]);
+  });
+
   it('keeps the caption of a last word whisper places past the cut', async () => {
     // Speech of word 5 ends at 5.6; whisper starts it at 5.8.
     const transcript = transcriptOf(M, [

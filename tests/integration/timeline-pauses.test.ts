@@ -45,6 +45,29 @@ describe.skipIf(!IS_CI)('pauses against real FFmpeg', () => {
     expect(pause.endSec).toBeLessThanOrEqual(4.1 + 1e-6);
     expect(pause.endSec).toBeGreaterThanOrEqual(4.06);
 
+    // Audio that starts a second into the file: the levels still count from
+    // the seek point, so the pause lands where it is (1.7–2.1), not 0.15 s early.
+    const late = join(workspace, 'late.mp4');
+    await runFfmpeg([
+      ...['-hide_banner', '-loglevel', 'error'],
+      ...['-f', 'lavfi', '-i', 'color=c=gray:s=320x240:r=30:d=8'],
+      ...['-itsoffset', '1'],
+      ...[
+        '-f',
+        'lavfi',
+        '-i',
+        "aevalsrc='0.3*sin(2*PI*220*t)*between(mod(t,1),0.1,0.7)+0.001*(random(0)-0.5)':s=48000:d=7",
+      ],
+      ...['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'],
+      ...['-c:a', 'aac', late],
+    ]);
+    const shifted = pauseAt(await measureSpeechLevels(late, 2.35), 2.35, 1.35);
+    if (typeof shifted !== 'object') throw new Error(`no pause found: ${shifted}`);
+    expect(shifted.startSec).toBeGreaterThanOrEqual(1.7 - 1e-6);
+    expect(shifted.startSec).toBeLessThanOrEqual(1.74);
+    expect(shifted.endSec).toBeLessThanOrEqual(2.1 + 1e-6);
+    expect(shifted.endSec).toBeGreaterThanOrEqual(2.06);
+
     // Where the tone never stops there is no pause to find.
     const steady = join(workspace, 'steady.mp4');
     await runFfmpeg([
