@@ -111,14 +111,19 @@ function titlePlacement(
   height: number,
 ): { position: string; alignment: 'left' | 'center' | 'right' } {
   const { anchor, fontSize } = title.style;
+  const margin = title.style.margin ?? { x: EDGE, y: EDGE };
   const alignment = anchor.endsWith('left')
     ? 'left'
     : anchor.endsWith('right')
       ? 'right'
       : 'center';
   const x =
-    alignment === 'left' ? -(width / 2 - EDGE) : alignment === 'right' ? width / 2 - EDGE : 0;
-  const rowOffset = height / 2 - EDGE - fontSize / 2;
+    alignment === 'left'
+      ? -(width / 2 - margin.x)
+      : alignment === 'right'
+        ? width / 2 - margin.x
+        : 0;
+  const rowOffset = height / 2 - margin.y - fontSize / 2;
   const y = anchor.startsWith('top') ? rowOffset : anchor.startsWith('bottom') ? -rowOffset : 0;
   return { position: `${num(x)} ${num(y)}`, alignment };
 }

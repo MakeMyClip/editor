@@ -1,5 +1,10 @@
 import { appendOp } from './session/store.js';
-import { CaptionError, DEFAULT_CAPTION_WORDS, planCaptions } from './timeline/captions.js';
+import {
+  CaptionError,
+  captionSideMargin,
+  DEFAULT_CAPTION_WORDS,
+  planCaptions,
+} from './timeline/captions.js';
 import { invalidColorMessage, isColor } from './timeline/color.js';
 import {
   buildFrameAtPlan,
@@ -90,7 +95,7 @@ Every command works on the main timeline unless --timeline <id> names another
   clip timeline transcribe [<clipId>] [--sentences] [--from S] [--to S] [--model <model.bin>] [--language <code>]
   clip timeline cut-words <clipId> <fromIndex> <toIndex> [--transcript <id>]
   clip timeline remove-retakes <clipId> [--dry-run] [--transcript <id>]
-  clip timeline captions [<clipId>] [--words N] [--track T] [--font N --color C --anchor A --background C|none] [--dry-run]
+  clip timeline captions [<clipId>] [--words N] [--track T] [--font N --color C --anchor A --background C|none --margin PX] [--dry-run]
   clip timeline reframe <9:16|1:1|4:5|16:9|WxH> [--fit cover|contain] [--x 0..1] [--y 0..1] [--dry-run]
   clip timeline framing <clipId> [--fit cover|contain|inherit] [--scale 0.1..4] [--x 0..1] [--y 0..1] [--reset]
   clip timeline loudness <-14|-16|LUFS|off>
@@ -722,6 +727,15 @@ export async function runTimeline(args: string[]): Promise<void> {
         style.background = flags.background === 'none' ? null : flags.background;
       if (flags.anchor) style.anchor = AnchorSchema.parse(flags.anchor);
       const comp = await readComposition(timeline);
+      const margin = optionalNum('margin', flags.margin);
+      if (margin !== undefined) {
+        if (!Number.isInteger(margin) || margin < 0) {
+          throw new CaptionError(
+            `--margin must be a whole number of pixels, got "${flags.margin}".`,
+          );
+        }
+        style.margin = { x: captionSideMargin(comp), y: margin };
+      }
       const media = await buildMediaMap();
       const plan = await planCaptions(
         comp,

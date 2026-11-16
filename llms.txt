@@ -18,7 +18,7 @@
 - **Transcribe locally:** `clip timeline transcribe <clipId>` returns each word with its timeline time, via whisper.cpp on the user's machine; `clip timeline transcribe --sentences` lists a long recording as numbered sentences
 - **Edit by transcript:** `clip timeline cut-words <clipId> <fromIndex> <toIndex>` cuts a range of words
 - **Remove repeated takes:** `clip timeline remove-retakes <clipId>` cuts the earlier take of each phrase said twice in a row
-- **Captions:** `clip timeline captions` burns in captions timed to the words (short phrases or one word at a time)
+- **Captions:** `clip timeline captions` burns in captions timed to the words (short phrases or one word at a time); on a vertical canvas they stay clear of the Shorts, Reels and TikTok overlays, and their width follows the font size
 - **Reframe:** `clip timeline reframe 9:16` turns a landscape cut vertical (also 1:1, 4:5); `--x` picks the part that shows, `clip timeline framing <clipId>` sets one clip's zoom and position
 - **Loudness:** `clip timeline loudness -14` normalizes the exported mp4 to -14 LUFS (or `-16` for podcasts) in two passes
 - **Shorts from a long recording:** `clip timeline short best-1 <clipId> <fromIndex> <toIndex>` (MCP: the `make_short` verb) turns a range of transcript words into a 9:16 short on a timeline of its own, captioned and at -14 LUFS, keeping the cuts made on the main timeline; `--timeline <id>` points any command at a short

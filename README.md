@@ -423,7 +423,7 @@ Yes. MakeMyClip Editor transcribes with whisper.cpp on your machine; install it 
 
 ### Can Claude add captions or subtitles to a video?
 
-Yes. After transcription, MakeMyClip Editor's `clip timeline captions` (or the UI's Captions button) puts captions timed to the words on a track above the video, and export burns them in. Captions come as short phrases or one word at a time, with your choice of size, color, position, and background. Non-Latin scripts use an installed font that has the glyphs. In the Premiere export, captions become `.srt` files. On Linux, the bundled FFmpeg can't draw text, so set `MAKEMYCLIP_FFMPEG_PATH` to an FFmpeg built with libfreetype and libharfbuzz.
+Yes. After transcription, MakeMyClip Editor's `clip timeline captions` (or the UI's Captions button) puts captions timed to the words on a track above the video, and export burns them in. Captions come as short phrases or one word at a time, with your choice of size, color, position, and background. On a vertical canvas they sit above the bottom quarter, clear of the Shorts, Reels and TikTok buttons, and a line is never wider than fits at its font size. Non-Latin scripts use an installed font that has the glyphs. In the Premiere export, captions become `.srt` files. On Linux, the bundled FFmpeg can't draw text, so set `MAKEMYCLIP_FFMPEG_PATH` to an FFmpeg built with libfreetype and libharfbuzz.
 
 ### Can it cut Shorts or Reels out of a podcast?
 
