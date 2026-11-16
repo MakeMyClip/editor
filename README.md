@@ -17,7 +17,7 @@ The open-source AI video editor for Claude Code and any MCP client: remove silen
 </p>
 
 <p align="center">
-  <img src="./docs/hero.png" alt="MakeMyClip Editor — chat-driven video editing demo (real screencast coming soon)" width="720" />
+  <img src="./docs/hero.png" alt="MakeMyClip Editor's browser timeline: a talking-head clip with a title and captions" width="720" />
 </p>
 
 **MakeMyClip Editor is a free, open-source (MIT) video editor that AI agents drive.** You ask Claude to edit a recording; it calls the editor's tools, and FFmpeg and a local whisper.cpp do the work on your computer. It ships as a Claude Code skill, the `clip` CLI, an MCP server, and a browser timeline editor. No cloud upload, no account, no API key, no telemetry, no generative AI.
@@ -85,7 +85,7 @@ clip ui   # opens http://127.0.0.1:5573
 
 Put your videos in the extension's **Media folder** (by default `Documents/MakeMyClip`); the editor reads and writes only there. The extension doesn't include FFmpeg (see [License](#license)): it finds the one Homebrew, MacPorts, winget, Scoop or Chocolatey installed, or you pick it in the extension's settings, along with the optional whisper model.
 
-**As an MCP server** (drive it from Claude Desktop / Cursor / any MCP client — no API key, on your existing Claude):
+**As an MCP server** (drive it from Claude Desktop / Cursor / Codex / any MCP client — no API key, on the plan you already have):
 
 ```jsonc
 // claude_desktop_config.json → "mcpServers"
@@ -99,6 +99,15 @@ Put your videos in the extension's **Media folder** (by default `Documents/MakeM
     }
   }
 }
+```
+
+Codex (the CLI and the IDE extension) reads the same server from `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.makemyclip-editor]
+command = "npx"
+args = ["-y", "@makemyclip/editor", "mcp"]
+env = { MAKEMYCLIP_WORKSPACE = "/path/to/your/media", MAKEMYCLIP_WHISPER_MODEL = "/path/to/ggml-base.en.bin" }
 ```
 
 It is listed in the [official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.MakeMyClip/editor) as `io.github.MakeMyClip/editor`, so MCP clients that browse the registry can install it from there. The Claude Code skill auto-discovers triggers and shells out via `npx -y` on demand. The MCP server exposes the timeline tools (show / edit / check / transcribe / undo / redo / export) and a `doctor` setup check over stdio; media stays confined to `MAKEMYCLIP_WORKSPACE`, and `MAKEMYCLIP_WHISPER_MODEL` is only needed for transcription and captions. Everything runs locally and offline — no API key.
