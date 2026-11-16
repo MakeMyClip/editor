@@ -367,7 +367,7 @@ describe('planShort: the edit', () => {
             background: 'black@0.6',
             anchor: 'bottom-center',
             // Clear of the vertical feeds' overlays: the bottom quarter, 14% a side.
-            margin: { x: 151, y: 480 },
+            margin: { x: 163, y: 492 },
           },
         }),
       },

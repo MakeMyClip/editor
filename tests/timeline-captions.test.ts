@@ -340,7 +340,7 @@ describe('caption_speech verb', () => {
       { verb: 'caption_speech', clipId: 'a', margin: 300 },
       verbCtx(),
     );
-    expect(ops[1]).toMatchObject({ clip: { style: { margin: { x: 151, y: 300 } } } });
+    expect(ops[1]).toMatchObject({ clip: { style: { margin: { x: 163, y: 300 } } } });
     expect(() => EditableVerbSchema.parse({ verb: 'caption_speech', margin: -1 })).toThrow();
   });
 
@@ -409,21 +409,22 @@ describe('captions on a vertical canvas', () => {
     });
   });
 
-  it('get that margin by default there, and none on landscape (unchanged documents)', () => {
+  it('get that margin by default there, box included, and none on landscape (unchanged documents)', () => {
     expect(defaultCaptionStyle(vertical)).toEqual({
       fontSize: 54,
       color: 'white',
       background: 'black@0.6',
       anchor: 'bottom-center',
-      margin: { x: 151, y: 480 },
+      margin: { x: 163, y: 492 },
     });
     expect('margin' in defaultCaptionStyle(landscape)).toBe(false);
   });
 
   it('fit their width to the room between the side margins, at the font size', () => {
-    // (1080 − 2·151 − 2·12) / 54 px = 13.96 em; landscape (1920 − 80 − 24) / 54 = 33.6 em.
+    // Text keeps 163 px from each side (151 + the 12 px box): (1080 − 326) / 54 px
+    // = 13.96 em; landscape keeps 40 px: (1920 − 80) / 54 = 34.1 em.
     expect(captionWidthBudget(vertical, defaultCaptionStyle(vertical))).toBeCloseTo(13.963, 3);
-    expect(captionWidthBudget(landscape, defaultCaptionStyle(landscape))).toBeCloseTo(33.63, 2);
+    expect(captionWidthBudget(landscape, defaultCaptionStyle(landscape))).toBeCloseTo(34.07, 2);
     // A larger font leaves room for less, on any canvas.
     expect(
       captionWidthBudget(vertical, { ...defaultCaptionStyle(vertical), fontSize: 96 }),
@@ -435,6 +436,11 @@ describe('captions on a vertical canvas', () => {
     // Arial draws W at 0.94 em and DejaVu Sans at 1.0: the estimate takes 1.
     expect(textWidthEm('W')).toBe(1);
     expect(textWidthEm('MOM')).toBeCloseTo(2.8, 6);
+    // DejaVu Sans draws m at 0.97 em; Cyrillic ж and ш at about 0.9.
+    expect(textWidthEm('mm')).toBe(2);
+    expect(textWidthEm('жш')).toBeCloseTo(1.8, 6);
+    // Accented Latin counts as its base letter.
+    expect(textWidthEm('é')).toBe(textWidthEm('e'));
   });
 
   it('break a line before it passes the width budget, even all in capitals', () => {
@@ -468,7 +474,7 @@ describe('captions on a vertical canvas', () => {
     const plan = await planCaptions(currentDoc, {}, lookup(new Map([[M, RECORDING]])), counter());
     const doc = applyOps(currentDoc, plan.ops);
     for (const clip of doc.tracks[1]?.clips ?? []) {
-      expect(clip.kind === 'text' && clip.style.margin).toEqual({ x: 151, y: 480 });
+      expect(clip.kind === 'text' && clip.style.margin).toEqual({ x: 163, y: 492 });
     }
   });
 });

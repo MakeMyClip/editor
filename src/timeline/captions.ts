@@ -228,15 +228,21 @@ export function defaultCaptionStyle(comp: Composition): TextStyle {
     anchor: 'bottom-center' satisfies Anchor,
   };
   if (comp.height <= comp.width) return style;
-  const { side, bottom } = safeArea(comp);
-  return { ...style, margin: { x: side, y: bottom } };
+  // The box drawtext draws behind the text reaches past it, so the text keeps
+  // that much further in for the box to stay inside the safe area too.
+  const { bottom } = safeArea(comp);
+  return { ...style, margin: { x: captionSideMargin(comp), y: bottom + CAPTION_BOX_PX } };
 }
 
-/** Pixels a caption line may take between the style's side margins, its
- *  box included. */
+/** How far caption text keeps from the side edges: inside the safe area with
+ *  its box on a portrait canvas, the usual 40 px otherwise. */
+export function captionSideMargin(comp: Composition): number {
+  return comp.height <= comp.width ? TEXT_EDGE_PX : safeArea(comp).side + CAPTION_BOX_PX;
+}
+
+/** Pixels a caption line's text may take between the style's side margins. */
 function captionRoomPx(comp: Composition, style: TextStyle): number {
-  const side = style.margin?.x ?? TEXT_EDGE_PX;
-  return Math.max(1, comp.width - 2 * side - 2 * CAPTION_BOX_PX);
+  return Math.max(1, comp.width - 2 * (style.margin?.x ?? TEXT_EDGE_PX));
 }
 
 /**
@@ -343,22 +349,26 @@ function tooWide(text: string, maxWidthEm: number): boolean {
   return displayWidth(text) > MAX_CAPTION_WIDTH || textWidthEm(text) > maxWidthEm;
 }
 
-const WIDEST = /[WM@%ÆŒ]/u;
+const WIDEST = /[WMmw@%#&ÆŒæœ]/u;
 const NARROW = /[ijlItfr.,:;'’!|()[\]-]/u;
+const ASCII = /^[\x20-\x7e]$/;
 
 /**
  * A line's width in em, estimated from the characters' advances in common
  * sans-serif caption fonts: for each class at least what Arial and DejaVu Sans
- * draw (W is 1.0 em in DejaVu), so the estimate errs wide and a line it lets
- * through fits on screen.
+ * draw (W and m are about 0.95–1.0 em), so the estimate errs wide and a line it
+ * lets through fits on screen. Accented Latin counts as its base letter; other
+ * scripts count as wide letters (Cyrillic ж or ш is about 0.9 em).
  */
 export function textWidthEm(text: string): number {
   let width = 0;
   for (const ch of text) {
-    if (ch === ' ') width += 0.32;
-    else if (WIDE.test(ch) || WIDEST.test(ch)) width += 1;
-    else if (NARROW.test(ch)) width += 0.4;
-    else if (ch !== ch.toLowerCase() || ch === 'm' || ch === 'w') width += 0.8;
+    const base = ch.normalize('NFD').charAt(0);
+    if (base === ' ') width += 0.32;
+    else if (WIDE.test(ch) || WIDEST.test(base)) width += 1;
+    else if (!ASCII.test(base)) width += base === base.toLowerCase() ? 0.9 : 1;
+    else if (NARROW.test(base)) width += 0.4;
+    else if (base !== base.toLowerCase()) width += 0.8;
     else width += 0.64;
   }
   return width;

@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import {
+  captionSideMargin,
   DEFAULT_CAPTION_TRACK,
   DEFAULT_CAPTION_WORDS,
   planCaptions,
-  safeArea,
 } from './captions.js';
 import { ColorSchema } from './color.js';
 import type { MediaInfo } from './compile.js';
@@ -558,7 +558,7 @@ export async function lowerVerb(
       if (verb.color !== undefined) style.color = verb.color;
       if (verb.background !== undefined) style.background = verb.background;
       if (verb.anchor !== undefined) style.anchor = verb.anchor;
-      if (verb.margin !== undefined) style.margin = { x: safeArea(comp).side, y: verb.margin };
+      if (verb.margin !== undefined) style.margin = { x: captionSideMargin(comp), y: verb.margin };
       const plan = await planCaptions(
         comp,
         {

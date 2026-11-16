@@ -14,9 +14,9 @@ import { emptyComposition } from '../../src/timeline/composition.js';
 import { applyOps, colorClip, textClip, videoTrack } from '../../src/timeline/ops.js';
 import { runPlan } from '../../src/timeline/run-plan.js';
 
-// Captions drawn by real FFmpeg on a 9:16 frame, measured with bbox: the text
-// must stay inside the safe area (x 151–929, bottom at or above y 1440). Runs
-// where FFmpeg can draw text (CI's Linux build can't).
+// Captions drawn by real FFmpeg on a 9:16 frame, measured with bbox: text and
+// box must stay inside the safe area (x 151–929, bottom at or above y 1440).
+// Runs where FFmpeg can draw text (CI's Linux build can't).
 const IS_CI = process.env.CI === 'true';
 const HAS_DRAWTEXT = IS_CI && (await listFilters()).has('drawtext');
 
@@ -70,10 +70,20 @@ describe.skipIf(!HAS_DRAWTEXT)('captions inside the safe area, drawn by real FFm
       12,
       captionWidthBudget(canvas, big),
     ).map((c) => c.text);
+    // The widest lowercase (m in DejaVu is 0.97 em) and Cyrillic capitals.
+    const grouped = (text: string) =>
+      groupCaptions(
+        text.split(' ').map((t, i) => ({ index: i, text: t, startSec: i, endSec: i + 0.5 })),
+        60,
+        12,
+        budget,
+      ).map((c) => c.text);
     const cases = [
       ...lines.map((line) => ({ line, lineStyle: style })),
       ...wide.map((line) => ({ line, lineStyle: big })),
       { line: 'UNBELIEVABLE', lineStyle: fitCaptionStyle('UNBELIEVABLE', big, canvas) },
+      ...grouped('mmm mmmm mmm mmmm mmm mmmm').map((line) => ({ line, lineStyle: style })),
+      ...grouped('ШИРОКИЕ ЖЁЛТЫЕ ЩИТЫ ЮЖНЫХ ПЛОЩАДЕЙ').map((line) => ({ line, lineStyle: style })),
     ];
 
     for (const [i, { line, lineStyle }] of cases.entries()) {
@@ -88,7 +98,14 @@ describe.skipIf(!HAS_DRAWTEXT)('captions inside the safe area, drawn by real FFm
         {
           op: 'addClip',
           trackId: 'captions',
-          clip: textClip({ id: 'c', text: line, durationSec: 1, startSec: 0, style: lineStyle }),
+          // A light box, so the box's own edges are measured, not just the text.
+          clip: textClip({
+            id: 'c',
+            text: line,
+            durationSec: 1,
+            startSec: 0,
+            style: { ...lineStyle, background: 'white@0.6' },
+          }),
         },
       ]);
       const frame = join(workspace, `line-${i}.png`);

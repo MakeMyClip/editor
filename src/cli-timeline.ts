@@ -1,9 +1,9 @@
 import { appendOp } from './session/store.js';
 import {
   CaptionError,
+  captionSideMargin,
   DEFAULT_CAPTION_WORDS,
   planCaptions,
-  safeArea,
 } from './timeline/captions.js';
 import { invalidColorMessage, isColor } from './timeline/color.js';
 import {
@@ -695,7 +695,7 @@ export async function runTimeline(args: string[]): Promise<void> {
             `--margin must be a whole number of pixels, got "${flags.margin}".`,
           );
         }
-        style.margin = { x: safeArea(comp).side, y: margin };
+        style.margin = { x: captionSideMargin(comp), y: margin };
       }
       const media = await buildMediaMap();
       const plan = await planCaptions(
