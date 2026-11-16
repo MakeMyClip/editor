@@ -9,6 +9,20 @@ export const MediaIdSchema = z.string().regex(/^m_[a-f0-9]{12}$/, {
   message: 'MediaId must be of the form m_<12 hex chars>',
 });
 
+/** The timeline every workspace starts with, kept at `composition.json`. */
+export const MAIN_TIMELINE = 'main';
+
+/** A named timeline in the workspace: `main`, or a short such as `best-1`. */
+export const TimelineIdSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9-]{0,47}$/, {
+    message:
+      'A timeline id is 1–48 lowercase letters, digits or hyphens, starting with a letter or digit (e.g. "best-1").',
+  })
+  .describe(
+    'Timeline to work on (default "main"). A short made with make_short is a timeline of its own.',
+  );
+
 export const VideoStreamSchema = z.object({
   codec: z.string(),
   width: z.number().int().positive(),

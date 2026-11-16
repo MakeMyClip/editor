@@ -1,4 +1,4 @@
-import { videoLayers } from './compile.js';
+import { TEXT_EDGE_PX, videoLayers } from './compile.js';
 import {
   type Anchor,
   type Clip,
@@ -24,8 +24,14 @@ export const DEFAULT_CAPTION_WORDS = 7;
 
 /** Widest caption, in Latin characters (a CJK character counts as two). */
 const MAX_CAPTION_WIDTH = 32;
-/** A pause this long between words starts a new caption. */
-const PAUSE_SEC = 0.7;
+/** The box drawtext draws behind a caption reaches this far past its text. */
+const CAPTION_BOX_PX = 12;
+/** Share of a portrait canvas the vertical feeds' overlays cover: the caption,
+ *  buttons and progress bar at the bottom, the action column at the sides. */
+const PORTRAIT_BOTTOM_SHARE = 0.25;
+const PORTRAIT_SIDE_SHARE = 0.14;
+/** A pause this long between words starts a new caption, or a new sentence. */
+export const PAUSE_SEC = 0.7;
 /** How long a caption stays up after its last word, unless the next one starts. */
 const HOLD_SEC = 0.4;
 /** Shortest caption shown. */
@@ -108,8 +114,9 @@ export async function planCaptions(
   const removed = (track?.clips.length ?? 0) - kept.length;
 
   const style = { ...defaultCaptionStyle(comp), ...request.style };
+  const maxWidth = captionWidthBudget(comp, style);
   const added: CompositionOp[] = sources.flatMap(({ clip, transcript }) =>
-    groupCaptions(clipWords(transcript, clip), clipEndSec(clip), maxWords).map(
+    groupCaptions(clipWords(transcript, clip), clipEndSec(clip), maxWords, maxWidth).map(
       (cue): CompositionOp => ({
         op: 'addClip',
         trackId,
@@ -118,7 +125,7 @@ export async function planCaptions(
           text: cue.text,
           startSec: cue.startSec,
           durationSec: roundMs(cue.endSec - cue.startSec),
-          style,
+          style: fitCaptionStyle(cue.text, style, comp),
         }),
       }),
     ),
@@ -196,23 +203,78 @@ async function everyTranscribedClip(
   return found;
 }
 
-/** Captions sized to the canvas: white on a dark box, near the bottom. */
-export function defaultCaptionStyle(comp: Composition): TextStyle {
+/**
+ * Where captions stay clear of what a platform draws over the video. On a
+ * portrait canvas (Shorts, Reels, TikTok) that is the bottom quarter and 14%
+ * at each side: none of them publishes pixel specs for organic posts and
+ * third-party estimates conflict, so one conservative box. Other shapes keep
+ * the usual 40 px edge.
+ */
+export function safeArea(comp: Composition): { side: number; bottom: number } {
+  if (comp.height <= comp.width) return { side: TEXT_EDGE_PX, bottom: TEXT_EDGE_PX };
   return {
+    side: Math.round(PORTRAIT_SIDE_SHARE * comp.width),
+    bottom: Math.round(PORTRAIT_BOTTOM_SHARE * comp.height),
+  };
+}
+
+/** Captions sized to the canvas: white on a dark box, near the bottom, and on
+ *  a portrait canvas inside its safe area. */
+export function defaultCaptionStyle(comp: Composition): TextStyle {
+  const style: TextStyle = {
     fontSize: Math.round(Math.min(comp.width, comp.height) / 20),
     color: 'white',
     background: 'black@0.6',
     anchor: 'bottom-center' satisfies Anchor,
   };
+  if (comp.height <= comp.width) return style;
+  // The box drawtext draws behind the text reaches past it, so the text keeps
+  // that much further in for the box to stay inside the safe area too.
+  const { bottom } = safeArea(comp);
+  return { ...style, margin: { x: captionSideMargin(comp), y: bottom + CAPTION_BOX_PX } };
+}
+
+/** How far caption text keeps from the side edges: inside the safe area with
+ *  its box on a portrait canvas, the usual 40 px otherwise. */
+export function captionSideMargin(comp: Composition): number {
+  return comp.height <= comp.width ? TEXT_EDGE_PX : safeArea(comp).side + CAPTION_BOX_PX;
+}
+
+/** Pixels a caption line's text may take between the style's side margins. */
+function captionRoomPx(comp: Composition, style: TextStyle): number {
+  return Math.max(1, comp.width - 2 * (style.margin?.x ?? TEXT_EDGE_PX));
+}
+
+/**
+ * How wide a caption line may be, in em of its font: what fits between the
+ * style's side margins at its font size. drawtext doesn't wrap, so a wider
+ * line runs off the frame or into a platform's buttons.
+ */
+export function captionWidthBudget(comp: Composition, style: TextStyle): number {
+  return captionRoomPx(comp, style) / style.fontSize;
+}
+
+/** The caption style a line is drawn with: a single word too wide for the
+ *  room even on a line of its own gets a font size that fits it. */
+export function fitCaptionStyle(text: string, style: TextStyle, comp: Composition): TextStyle {
+  const width = textWidthEm(text);
+  const room = captionRoomPx(comp, style);
+  if (width * style.fontSize <= room) return style;
+  return { ...style, fontSize: Math.max(1, Math.floor(room / width)) };
 }
 
 /**
  * Group a clip's words (timeline times) into captions: a new one starts after
- * `maxWords` words, past the width limit, after a pause, or after a sentence
- * ends. Each stays up a moment after its last word, but never into the next
- * one or past `endSec`.
+ * `maxWords` words, past 32 characters or `maxWidthEm` em of estimated width,
+ * after a pause, or after a sentence ends. Each stays up a moment after its
+ * last word, but never into the next one or past `endSec`.
  */
-export function groupCaptions(words: ClipWord[], endSec: number, maxWords: number): CaptionCue[] {
+export function groupCaptions(
+  words: ClipWord[],
+  endSec: number,
+  maxWords: number,
+  maxWidthEm: number = Number.POSITIVE_INFINITY,
+): CaptionCue[] {
   const groups: ClipWord[][] = [];
   let current: ClipWord[] = [];
   for (const word of words) {
@@ -222,7 +284,7 @@ export function groupCaptions(words: ClipWord[], endSec: number, maxWords: numbe
       (current.length >= maxWords ||
         word.startSec - prev.endSec > PAUSE_SEC ||
         endsSentence(prev.text) ||
-        displayWidth(joinWords([...current, word].map((w) => w.text))) > MAX_CAPTION_WIDTH)
+        tooWide(joinWords([...current, word].map((w) => w.text)), maxWidthEm))
     ) {
       groups.push(current);
       current = [];
@@ -270,7 +332,9 @@ export function joinWords(texts: string[]): string {
   return out;
 }
 
-function endsSentence(text: string): boolean {
+/** Whether a word ends a sentence: it ends in . ! ? … (or 。！？), maybe
+ *  followed by a closing quote or bracket. */
+export function endsSentence(text: string): boolean {
   return /[.!?。！？…]["')\]」』]?$/u.test(text);
 }
 
@@ -280,6 +344,38 @@ const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦\u{20000}-\u{3ff
 function displayWidth(text: string): number {
   let width = 0;
   for (const ch of text) width += WIDE.test(ch) ? 2 : 1;
+  return width;
+}
+
+function tooWide(text: string, maxWidthEm: number): boolean {
+  return displayWidth(text) > MAX_CAPTION_WIDTH || textWidthEm(text) > maxWidthEm;
+}
+
+const WIDEST = /[WMmw@%#&ÆŒæœ]/u;
+const NARROW = /[ijlItfr.,:;'’!|()[\]-]/u;
+/** ASCII math signs: DejaVu draws them at about 0.84 em. */
+const SIGNS = /[+=<>~^]/u;
+const ASCII = /^[\x20-\x7e]$/;
+
+/**
+ * A line's width in em, estimated from the characters' advances in common
+ * sans-serif caption fonts: for each class at least what Arial and DejaVu Sans
+ * draw (W and m are about 0.95–1.0 em), so the estimate errs wide and a line it
+ * lets through fits on screen. Accented Latin counts as its base letter; other
+ * scripts count as their widest letters (DejaVu's Щ and Ю are about 1.1 em).
+ */
+export function textWidthEm(text: string): number {
+  let width = 0;
+  for (const ch of text) {
+    const base = ch.normalize('NFD').charAt(0);
+    if (base === ' ') width += 0.32;
+    else if (WIDE.test(ch) || WIDEST.test(base)) width += 1;
+    else if (!ASCII.test(base)) width += base === base.toLowerCase() ? 0.95 : 1.1;
+    else if (SIGNS.test(base)) width += 0.85;
+    else if (NARROW.test(base)) width += 0.4;
+    else if (base !== base.toLowerCase()) width += 0.8;
+    else width += 0.64;
+  }
   return width;
 }
 

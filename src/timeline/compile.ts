@@ -3,6 +3,7 @@ import { buildPreviewFrameArgs } from '../ffmpeg/args/preview.js';
 import { buildTransitionArgs } from '../ffmpeg/args/transition.js';
 import { quoteFilterArg } from '../ffmpeg/escape.js';
 import { fontFileFor, MissingFontError } from '../ffmpeg/font.js';
+import { invalidColorMessage, isColor } from './color.js';
 import {
   type Clip,
   type Composition,
@@ -322,6 +323,7 @@ interface FadeSuppression {
 function effectFilters(
   clip: Clip,
   outDur: number,
+  fps: number,
   suppress: FadeSuppression = { in: false, out: false },
 ): FilterChains {
   const video: string[] = [];
@@ -343,7 +345,10 @@ function effectFilters(
   if (clip.kind === 'media') {
     const f = speedFactor(clip.effects);
     if (f !== 1) {
-      video.push(`setpts=PTS/${f}`);
+      // Back to the canvas rate right away: retimed frames otherwise reach the
+      // encoder off its frame grid, and which ones it drops or repeats varies,
+      // so a frame preview couldn't show the frame export plays.
+      video.push(`setpts=PTS/${f}`, `fps=${fps}`);
       audio.push(atempoChain(f));
     }
   }
@@ -400,81 +405,25 @@ function segPath(dir: string, index: number, clipId: string, tag?: string): stri
 }
 
 /**
- * Normalize one clip to a self-contained segment: canvas-sized video at the
- * composition fps, effects baked in, and a guaranteed stereo AAC audio track
- * (the source's, or generated silence) so the fold can always join segments.
- * Text clips from the tracks above that overlap the clip are drawn last, over
- * its effects, for the part of them inside it.
+ * A clip's segment filters after its input: the video chain (framing onto the
+ * canvas, a text clip's own text, effects, then the text over it) and the audio
+ * effects. Shared by export and the frame preview, so a preview can't drift
+ * from what export draws.
  */
-function buildSegmentStep(
+function clipChains(
   comp: Composition,
   clip: Clip,
   index: number,
   ctx: CompileContext,
   overlays: TextClip[],
   fadeSuppress: FadeSuppression = { in: false, out: false },
-  joins: Joins = { head: false, tail: false },
-): FfmpegStep {
-  assertCompilable(clip);
+): { chain: string; audio: string[]; textFiles: StepSideFile[] } {
   const outDur = outputDuration(clip);
   const { width, height, fps, background } = comp;
-  const out = segPath(ctx.dir, index, clip.id, ctx.tag);
-  const { video: fx, audio: afx } = effectFilters(clip, outDur, fadeSuppress);
+  const { video: fx, audio } = effectFilters(clip, outDur, fps, fadeSuppress);
   const textFiles: StepSideFile[] = [];
 
-  const inputArgs: string[] = [];
-  let videoSource: string; // filtergraph input label feeding the video chain, e.g. [0:v]
-  let audioSource: string; // BARE stream specifier (e.g. 0:a) — bracket only when fed to a filter
-
-  if (clip.kind === 'media') {
-    const info = ctx.media.get(clip.mediaId);
-    if (!info)
-      throw new CompileError(`No media registered for "${clip.mediaId}" (clip "${clip.id}").`);
-    // Input-seek to the trim in-point; the chain + final -t bound the window.
-    inputArgs.push('-ss', String(clip.sourceInSec), '-i', info.path);
-    videoSource = '[0:v]';
-    if (info.hasAudio) {
-      audioSource = '0:a';
-    } else {
-      inputArgs.push(
-        '-f',
-        'lavfi',
-        '-i',
-        `anullsrc=channel_layout=stereo:sample_rate=${SAMPLE_RATE}`,
-      );
-      audioSource = '1:a';
-    }
-  } else if (clip.kind === 'color') {
-    inputArgs.push(
-      '-f',
-      'lavfi',
-      '-i',
-      `color=c=${quoteColor(clip.color)}:s=${width}x${height}:r=${fps}`,
-    );
-    inputArgs.push(
-      '-f',
-      'lavfi',
-      '-i',
-      `anullsrc=channel_layout=stereo:sample_rate=${SAMPLE_RATE}`,
-    );
-    videoSource = '[0:v]';
-    audioSource = '1:a';
-  } else {
-    // text: a background-colour source with drawtext burned in.
-    inputArgs.push(
-      '-f',
-      'lavfi',
-      '-i',
-      `color=c=${quoteColor(background)}:s=${width}x${height}:r=${fps}`,
-    );
-    inputArgs.push(
-      '-f',
-      'lavfi',
-      '-i',
-      `anullsrc=channel_layout=stereo:sample_rate=${SAMPLE_RATE}`,
-    );
-    videoSource = '[0:v]';
-    audioSource = '1:a';
+  if (clip.kind === 'text') {
     const textfile = resolve(ctx.dir, `${TEXT_PREFIX}-${tagInfix(ctx.tag)}${index}-${clip.id}.txt`);
     textFiles.push({ path: textfile, content: clip.text });
     fx.unshift(drawtextFilter(textfile, clip, fontFor(ctx, clip, false)));
@@ -505,8 +454,90 @@ function buildSegmentStep(
     `fps=${fps}`,
     'format=yuv420p',
   ];
+  return { chain: [...geometry, ...fx].join(','), audio, textFiles };
+}
 
-  const videoChain = [...geometry, ...fx].join(',');
+/**
+ * Normalize one clip to a self-contained segment: canvas-sized video at the
+ * composition fps, effects baked in, and a guaranteed stereo AAC audio track
+ * (the source's, or generated silence) so the fold can always join segments.
+ * Text clips from the tracks above that overlap the clip are drawn last, over
+ * its effects, for the part of them inside it.
+ */
+function buildSegmentStep(
+  comp: Composition,
+  clip: Clip,
+  index: number,
+  ctx: CompileContext,
+  overlays: TextClip[],
+  fadeSuppress: FadeSuppression = { in: false, out: false },
+  joins: Joins = { head: false, tail: false },
+): FfmpegStep {
+  assertCompilable(clip);
+  const outDur = outputDuration(clip);
+  const { width, height, fps, background } = comp;
+  const out = segPath(ctx.dir, index, clip.id, ctx.tag);
+  const {
+    chain: videoChain,
+    audio: afx,
+    textFiles,
+  } = clipChains(comp, clip, index, ctx, overlays, fadeSuppress);
+
+  const inputArgs: string[] = [];
+  let videoSource: string; // filtergraph input label feeding the video chain, e.g. [0:v]
+  let audioSource: string; // BARE stream specifier (e.g. 0:a) — bracket only when fed to a filter
+
+  if (clip.kind === 'media') {
+    const info = ctx.media.get(clip.mediaId);
+    if (!info)
+      throw new CompileError(`No media registered for "${clip.mediaId}" (clip "${clip.id}").`);
+    // Input-seek to the trim in-point; the chain + final -t bound the window.
+    inputArgs.push('-ss', String(clip.sourceInSec), '-i', info.path);
+    videoSource = '[0:v]';
+    if (info.hasAudio) {
+      audioSource = '0:a';
+    } else {
+      inputArgs.push(
+        '-f',
+        'lavfi',
+        '-i',
+        `anullsrc=channel_layout=stereo:sample_rate=${SAMPLE_RATE}`,
+      );
+      audioSource = '1:a';
+    }
+  } else if (clip.kind === 'color') {
+    inputArgs.push(
+      '-f',
+      'lavfi',
+      '-i',
+      `color=c=${quoteColor(clip.color, `Color clip "${clip.id}" color`)}:s=${width}x${height}:r=${fps}`,
+    );
+    inputArgs.push(
+      '-f',
+      'lavfi',
+      '-i',
+      `anullsrc=channel_layout=stereo:sample_rate=${SAMPLE_RATE}`,
+    );
+    videoSource = '[0:v]';
+    audioSource = '1:a';
+  } else {
+    // text: a background-colour source with drawtext burned in.
+    inputArgs.push(
+      '-f',
+      'lavfi',
+      '-i',
+      `color=c=${quoteColor(background, CANVAS_BACKGROUND)}:s=${width}x${height}:r=${fps}`,
+    );
+    inputArgs.push(
+      '-f',
+      'lavfi',
+      '-i',
+      `anullsrc=channel_layout=stereo:sample_rate=${SAMPLE_RATE}`,
+    );
+    videoSource = '[0:v]';
+    audioSource = '1:a';
+  }
+
   // Always normalize audio to a uniform stereo/48k layout BEFORE any effects, so
   // the fold's concat/acrossfade can't silently downmix when a source clip is
   // mono (and so every segment exposes a real [a] output). aformat is a harmless
@@ -555,7 +586,7 @@ function framingFilters(
   height: number,
   background: string,
 ): string[] {
-  const pad = `color=${quoteColor(background)}`;
+  const pad = `color=${quoteColor(background, CANVAS_BACKGROUND)}`;
   if (isDefaultFraming(framing)) {
     return [
       `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
@@ -577,11 +608,16 @@ function even(size: number): number {
   return Math.max(2, Math.round(size / 2) * 2);
 }
 
-const CENTER_POS = { x: '(w-text_w)/2', y: '(h-text_h)/2' };
-
 /** Seconds for a filter expression: millisecond precision, no float noise. */
 function seconds(sec: number): string {
   return String(Math.round(sec * 1000) / 1000);
+}
+
+/** How much of the source a frame preview reads before the frame, at least. */
+const FRAME_PREROLL_SEC = 1;
+
+function floorUs(sec: number): number {
+  return Math.floor(sec * 1e6 + 1e-6) / 1e6;
 }
 
 /** The font file for a text clip, with a missing font reported against the clip.
@@ -605,7 +641,7 @@ function drawtextFilter(
   enable?: string,
 ): string {
   const { style } = clip;
-  const pos = ANCHOR_EXPR[style.anchor] ?? CENTER_POS;
+  const pos = anchorPosition(style.anchor, style.margin);
   const opts = [`textfile=${quoteFilterArg(textfile)}`];
   if (fontFile) opts.push(`fontfile=${quoteFilterArg(fontFile)}`);
   opts.push(
@@ -622,21 +658,35 @@ function drawtextFilter(
   return `drawtext=${opts.join(':')}`;
 }
 
-const EDGE = 40;
-const ANCHOR_EXPR: Record<string, { x: string; y: string }> = {
-  'top-left': { x: `${EDGE}`, y: `${EDGE}` },
-  'top-center': { x: '(w-text_w)/2', y: `${EDGE}` },
-  'top-right': { x: `w-text_w-${EDGE}`, y: `${EDGE}` },
-  'center-left': { x: `${EDGE}`, y: '(h-text_h)/2' },
-  center: { x: '(w-text_w)/2', y: '(h-text_h)/2' },
-  'center-right': { x: `w-text_w-${EDGE}`, y: '(h-text_h)/2' },
-  'bottom-left': { x: `${EDGE}`, y: `h-text_h-${EDGE}` },
-  'bottom-center': { x: '(w-text_w)/2', y: `h-text_h-${EDGE}` },
-  'bottom-right': { x: `w-text_w-${EDGE}`, y: `h-text_h-${EDGE}` },
-};
+/** Inset of anchored text from the frame edges when its style sets none. */
+export const TEXT_EDGE_PX = 40;
 
-/** color filter `c=` rejects '#rrggbb'; normalize to 0x form, pass names through. */
-function quoteColor(color: string): string {
+/** drawtext x/y for an anchor, kept `margin` pixels in from the edges it is
+ *  anchored to. */
+function anchorPosition(
+  anchor: string,
+  margin: { x: number; y: number } = { x: TEXT_EDGE_PX, y: TEXT_EDGE_PX },
+): { x: string; y: string } {
+  const x = anchor.endsWith('left')
+    ? `${margin.x}`
+    : anchor.endsWith('right')
+      ? `w-text_w-${margin.x}`
+      : '(w-text_w)/2';
+  const y = anchor.startsWith('top')
+    ? `${margin.y}`
+    : anchor.startsWith('bottom')
+      ? `h-text_h-${margin.y}`
+      : '(h-text_h)/2';
+  return { x, y };
+}
+
+const CANVAS_BACKGROUND = 'Canvas background';
+
+/** color filter `c=` rejects '#rrggbb'; normalize to 0x form, pass names through.
+ *  The value lands unquoted in the graph, so anything but a color is refused: a
+ *  stored document is only as safe as whatever wrote it. */
+function quoteColor(color: string, what: string): string {
+  if (!isColor(color)) throw new CompileError(`${what} ${invalidColorMessage(color)}`);
   return color.startsWith('#') ? `0x${color.slice(1)}` : color;
 }
 
@@ -692,18 +742,18 @@ function assertAbutting(clips: Clip[]): void {
 
 /**
  * Render ONE frame at timeline time `atSec` — the agent's "eyes" on the doc.
- * Goes through the REAL segment path (`buildSegmentStep`) so the preview can't
- * diverge from what export would produce, then extracts a still from that
- * normalized segment. Two steps: encode the active clip's segment, then grab the
- * frame at the mapped offset. Runs the SAME abutting check as export, so it fails
- * (rather than guessing a clip) on an unexportable doc; throws `CompileError` past
- * the end, in a gap, or on an overlap, and inherits the v1 single-video-track /
- * no-compositing guards.
+ * Uses the segment's own video chain (`clipChains`) so the preview can't diverge
+ * from what export would produce. A media clip is one step: seek the source to
+ * the frame and run the chain on a window starting there, with the timestamps
+ * offset so fades and text windows read the time they would in the segment, so
+ * the cost doesn't grow with the clip's length. A text or color card (generated,
+ * and short) is two: encode its segment, then grab the frame from it. Runs the
+ * SAME abutting check as export, so it fails (rather than guessing a clip) on an
+ * unexportable doc; throws `CompileError` past the end, in a gap, or on an
+ * overlap, and inherits the v1 single-video-track / no-compositing guards.
  *
- * Known v1 limits (flag, don't fix here): a frame inside a transition window
- * shows the underlying clip, not the xfade blend; `-ss` is keyframe-accurate
- * (off by up to a GOP) — fine for a thumbnail; and a long clip re-encodes a whole
- * segment to grab one frame.
+ * Known v1 limit (flag, don't fix here): a frame inside a transition window
+ * shows the underlying clip, not the xfade blend.
  */
 export function buildFrameAtPlan(
   comp: Composition,
@@ -728,9 +778,6 @@ export function buildFrameAtPlan(
   }
   assertCompilable(clip);
 
-  // Encode the clip's segment exactly as export would, then extract the frame.
-  const segStep = buildSegmentStep(comp, clip, index, ctx, overlays);
-
   // Map doc-local time to the post-speed SEGMENT timebase. The ratio is 1 unless
   // the clip carries a speed effect, which shortens the segment relative to the
   // document extent — so a frame still lands on the source content the document
@@ -741,9 +788,59 @@ export function buildFrameAtPlan(
   const segTime = clipDur > 0 ? (localDoc * outDur) / clipDur : 0;
   const lastFrame = Math.max(0, outDur - 1 / comp.fps);
   const clamped = Math.max(0, Math.min(segTime, lastFrame));
+  const label = `frame:${clip.id}@${atSec}`;
 
+  if (clip.kind === 'media') {
+    const info = ctx.media.get(clip.mediaId);
+    if (!info) {
+      throw new CompileError(`No media registered for "${clip.mediaId}" (clip "${clip.id}").`);
+    }
+    // Seconds into the clip's source. The seek lands a second before that and
+    // keeps every frame from the keyframe before it (`-noaccurate_seek`), so a
+    // frame that export repeats into this time (a source slower than the
+    // canvas, slow motion, or a screen recording holding a still frame) is
+    // still read; undoing the seek gives source time from the clip's in-point.
+    // Frames before the in-point are dropped, as export's seek drops them. The
+    // chain's speed `setpts` turns source time into segment time, which its
+    // fades and text read, and `trim` takes the frame at the frame's segment
+    // time. Rounded down, to the microsecond, so the seek never passes the
+    // clip's last frame or its out-point.
+    const local = floorUs(clamped * speedFactor(clip.effects));
+    const seek = floorUs(clip.sourceInSec + Math.max(0, local - FRAME_PREROLL_SEC));
+    // The first canvas frame at or after the frame's time (`trim` rounds an
+    // off-grid start to the nearest frame, which could be the one before), but
+    // no later than the segment's last frame: encoding to the clip's length
+    // keeps round(length x fps) frames.
+    const lastIndex = Math.max(0, Math.round(outDur * comp.fps) - 1);
+    const firstFrame = Math.min(Math.ceil(clamped * comp.fps - 1e-6), lastIndex) / comp.fps;
+    const { chain, textFiles } = clipChains(comp, clip, index, ctx, overlays);
+    const frameStep: FfmpegStep = {
+      label,
+      args: [
+        '-y',
+        '-noaccurate_seek',
+        '-ss',
+        String(seek),
+        '-i',
+        info.path,
+        '-filter_complex',
+        // The seek shifted timestamps by (in-point + local) in whole stream
+        // ticks; shifting back by the same rounding leaves them as export's
+        // seek to the in-point does, tick for tick.
+        `[0:v]setpts=PTS+round(${seek}/TB)-round(${floorUs(clip.sourceInSec)}/TB),trim=start=0,${chain},trim=start=${firstFrame}[v]`,
+        ...['-map', '[v]', '-an', '-frames:v', '1', '-q:v', '2'],
+        ctx.output,
+      ],
+      output: ctx.output,
+      textFiles,
+    };
+    return { steps: [frameStep], output: ctx.output, durationSec: 0 };
+  }
+
+  // Encode the card's segment exactly as export would, then extract the frame.
+  const segStep = buildSegmentStep(comp, clip, index, ctx, overlays);
   const frameStep: FfmpegStep = {
-    label: `frame:${clip.id}@${atSec}`,
+    label,
     args: buildPreviewFrameArgs({ input: segStep.output, output: ctx.output, atSec: clamped }),
     output: ctx.output,
     textFiles: [],

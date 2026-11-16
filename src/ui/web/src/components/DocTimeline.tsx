@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { clipDuration, clipEndSec, clipLabel, compositionDuration } from '../lib/composition.js';
+import { withTimeline } from '../lib/timelines.js';
 import type { Verb } from '../lib/verbs.js';
 import type { Clip, Composition, MediaClip } from '../types.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
@@ -20,7 +21,9 @@ const MAX_THUMBS = 16; // cap thumbnails per clip to bound requests
  * playhead is controlled by the parent so the clip inspector can split at it.
  */
 export function DocTimeline({
+  timeline,
   composition,
+  mediaNames,
   selectedClipId,
   onSelectClip,
   playheadSec,
@@ -32,7 +35,11 @@ export function DocTimeline({
   onApply,
   verbError,
 }: {
+  /** The timeline shown: `main` or a short. */
+  timeline: string;
   composition: Composition;
+  /** File name of each media id, for labeling media clips. */
+  mediaNames: ReadonlyMap<string, string>;
   selectedClipId: string | null;
   onSelectClip: (clipId: string | null) => void;
   playheadSec: number;
@@ -71,7 +78,7 @@ export function DocTimeline({
   });
   useEffect(() => {
     let alive = true;
-    fetch(`/api/timeline/history?rev=${composition.rev}`)
+    fetch(withTimeline(`/api/timeline/history?rev=${composition.rev}`, timeline))
       .then((r) => r.json() as Promise<{ canUndo: boolean; canRedo: boolean }>)
       .then((h) => {
         if (alive) setHistory(h);
@@ -80,7 +87,7 @@ export function DocTimeline({
     return () => {
       alive = false;
     };
-  }, [composition.rev]);
+  }, [timeline, composition.rev]);
 
   return (
     <section className="doc-timeline">
@@ -116,7 +123,12 @@ export function DocTimeline({
         >
           ↷
         </button>
-        <ExportButton busy={exporting} disabled={!hasClips} onExportVideo={onExport} />
+        <ExportButton
+          timeline={timeline}
+          busy={exporting}
+          disabled={!hasClips}
+          onExportVideo={onExport}
+        />
       </div>
 
       {hasClips ? (
@@ -156,6 +168,7 @@ export function DocTimeline({
                     <ClipBlock
                       key={clip.id}
                       clip={clip}
+                      label={clipLabel(clip, mediaNames)}
                       selected={clip.id === selectedClipId}
                       onSelect={onSelectClip}
                     />
@@ -205,10 +218,12 @@ export function DocTimeline({
 
 function ClipBlock({
   clip,
+  label,
   selected,
   onSelect,
 }: {
   clip: Clip;
+  label: string;
   selected: boolean;
   onSelect: (clipId: string | null) => void;
 }) {
@@ -220,10 +235,10 @@ function ClipBlock({
       className={`doc-tl-clip doc-tl-clip-${clip.kind}${selected ? ' selected' : ''}`}
       style={{ left, width }}
       onClick={() => onSelect(selected ? null : clip.id)}
-      title={`${clipLabel(clip)} · ${clip.startSec.toFixed(2)}–${clipEndSec(clip).toFixed(2)}s`}
+      title={`${label} · ${clip.startSec.toFixed(2)}–${clipEndSec(clip).toFixed(2)}s`}
     >
       {clip.kind === 'media' ? <Filmstrip clip={clip} width={width} /> : null}
-      <span className="doc-tl-clip-label">{clipLabel(clip)}</span>
+      <span className="doc-tl-clip-label">{label}</span>
       <span className="doc-tl-clip-dur">{clipDuration(clip).toFixed(1)}s</span>
     </button>
   );

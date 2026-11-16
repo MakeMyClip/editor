@@ -1,4 +1,5 @@
-import type { Clip, Composition, Track } from '../types.js';
+import type { Clip, Composition, SessionEntry, Track } from '../types.js';
+import { shortName } from './playable-clips.js';
 
 // Frontend mirror of the doc geometry helpers in src/timeline/composition.ts.
 // The timeline view positions clips by their DOCUMENT extent (startSec +
@@ -23,9 +24,25 @@ export function compositionDuration(comp: Composition): number {
   return end;
 }
 
-/** Short, human-readable label for a clip on the timeline. */
-export function clipLabel(clip: Clip): string {
-  if (clip.kind === 'media') return clip.mediaId;
+/** File name of each ingested media id, read from the session log's `ingest`
+ *  entries (`{ mediaId, ref: { path } }`) — the same registry export resolves
+ *  media through. */
+export function mediaNames(entries: SessionEntry[]): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const entry of entries) {
+    if (entry.tool !== 'ingest') continue;
+    const { mediaId, ref } = entry.result as { mediaId?: unknown; ref?: { path?: unknown } };
+    if (typeof mediaId === 'string' && typeof ref?.path === 'string') {
+      names.set(mediaId, shortName(ref.path));
+    }
+  }
+  return names;
+}
+
+/** Short, human-readable label for a clip on the timeline. A media clip shows its
+ *  file name, or its media id when the session log doesn't name it. */
+export function clipLabel(clip: Clip, names: ReadonlyMap<string, string>): string {
+  if (clip.kind === 'media') return names.get(clip.mediaId) ?? clip.mediaId;
   if (clip.kind === 'text') return `“${clip.text.slice(0, 20)}”`;
   return `color · ${clip.color}`;
 }

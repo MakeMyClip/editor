@@ -41,18 +41,26 @@ function num(value: string): number | undefined {
  * Remounted per clip (keyed by id) so the inputs reset to the selected clip.
  */
 export function ClipInspector({
+  timeline,
   clip,
+  mediaNames,
   playheadSec,
   hasNext,
   canvasFit,
   trackMediaIds,
   busy,
   error,
+  nextShortId,
   onApply,
+  onMakeShort,
   onSeek,
   onClose,
 }: {
+  /** The timeline the clip is on: `main` or a short. */
+  timeline: string;
   clip: Clip;
+  /** File name of each media id, for the heading of a media clip. */
+  mediaNames: ReadonlyMap<string, string>;
   playheadSec: number;
   hasNext: boolean;
   /** The timeline's fit, which a clip without its own follows. */
@@ -61,8 +69,12 @@ export function ClipInspector({
   trackMediaIds: string[];
   busy: boolean;
   error: string | null;
+  /** A name no timeline uses yet, offered for a new short. */
+  nextShortId: string;
   /** Resolves to the number of ops applied, or null if the edit failed. */
   onApply: (verbs: Verb[]) => Promise<number | null>;
+  /** Make a short on timeline `id` and open it; resolves false when that failed. */
+  onMakeShort: (id: string, verb: Verb) => Promise<boolean>;
   /** Move the playhead to a timeline time. */
   onSeek: (sec: number) => void;
   onClose: () => void;
@@ -84,7 +96,7 @@ export function ClipInspector({
     <section className="detail clip-inspector">
       <div className="ci-head">
         <div>
-          <h2>{clipLabel(clip)}</h2>
+          <h2>{clipLabel(clip, mediaNames)}</h2>
           <div className="id">
             {clip.kind} · {clip.id} · {start.toFixed(2)}–{end.toFixed(2)}s (
             {clipDuration(clip).toFixed(2)}s)
@@ -191,7 +203,15 @@ export function ClipInspector({
       ) : null}
 
       {clip.kind === 'media' ? (
-        <TranscriptSection clip={clip} busy={busy} onApply={onApply} onSeek={onSeek} />
+        <TranscriptSection
+          timeline={timeline}
+          clip={clip}
+          busy={busy}
+          nextShortId={nextShortId}
+          onApply={onApply}
+          onMakeShort={onMakeShort}
+          onSeek={onSeek}
+        />
       ) : null}
 
       <div className="ci-section">

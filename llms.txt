@@ -9,18 +9,19 @@
 - **Backend:** FFmpeg (downloaded by `ffmpeg-static` at npm install; the Claude Desktop extension uses an installed FFmpeg); optional user-installed whisper.cpp for transcription
 - **Surfaces:** Claude Code skill · `clip` CLI · browser UI at `127.0.0.1:5573` · MCP server (`clip mcp`)
 - **Agent access:** Claude Code skill + MCP server (`clip mcp`); no API key — the editor embeds no language model, it runs on whichever Claude you already use
-- **Tests:** 859 passing
+- **Tests:** 965 passing
 - **License:** MIT (code); FFmpeg runs as a subprocess under its own license (GPLv3 builds from `ffmpeg-static`, except a nonfree Apple Silicon build; the `.mcpb` ships no FFmpeg)
 
 ## What v0.5.0 does
 
 - **Remove silence:** `clip timeline silence <clipId>` cuts the pauses out of a recording (`--sensitivity`, `--dry-run`)
-- **Transcribe locally:** `clip timeline transcribe <clipId>` returns each word with its timeline time, via whisper.cpp on the user's machine
+- **Transcribe locally:** `clip timeline transcribe <clipId>` returns each word with its timeline time, via whisper.cpp on the user's machine; `clip timeline transcribe --sentences` lists a long recording as numbered sentences
 - **Edit by transcript:** `clip timeline cut-words <clipId> <fromIndex> <toIndex>` cuts a range of words
 - **Remove repeated takes:** `clip timeline remove-retakes <clipId>` cuts the earlier take of each phrase said twice in a row
-- **Captions:** `clip timeline captions` burns in captions timed to the words (short phrases or one word at a time)
+- **Captions:** `clip timeline captions` burns in captions timed to the words (short phrases or one word at a time); on a vertical canvas they stay clear of the Shorts, Reels and TikTok overlays, and their width follows the font size
 - **Reframe:** `clip timeline reframe 9:16` turns a landscape cut vertical (also 1:1, 4:5); `--x` picks the part that shows, `clip timeline framing <clipId>` sets one clip's zoom and position
 - **Loudness:** `clip timeline loudness -14` normalizes the exported mp4 to -14 LUFS (or `-16` for podcasts) in two passes
+- **Shorts from a long recording:** `clip timeline short best-1 <clipId> <fromIndex> <toIndex>` (MCP: the `make_short` verb) turns a range of transcript words into a 9:16 short on a timeline of its own, captioned and at -14 LUFS, keeping the cuts made on the main timeline; `--timeline <id>` points any command at a short, and `clip timeline export --all <dir>` renders every short. In `clip ui`, Make short works from a transcript selection and each short gets a tab
 - **Cut check:** `clip timeline check --sheet cuts.jpg` flags cuts that may clip a word and writes a contact sheet
 - **Export to pro editors:** `clip timeline export --format fcpxml` (Final Cut Pro, DaVinci Resolve) or `--format xmeml` (Premiere Pro; captions as .srt)
 - Every timeline edit is one undoable step (`clip timeline undo` / `redo`), from the CLI, the MCP server or the browser UI
@@ -52,7 +53,7 @@ Plus session meta-ops not in the tool registry: snapshot, undo, inspect, delete.
 - Different category from Runway/Pika (generative AI), Premiere/DaVinci (heavy NLEs) — but it exports its cut to Final Cut Pro, Resolve and Premiere for finishing
 - Overlaps with auto-editor (open-source CLI: silence cuts, transcript edits, NLE export); MakeMyClip Editor adds a shared timeline document that an agent and a person (browser UI) both edit, with undo per step
 - Transcription is local (whisper.cpp); nothing is uploaded
-- Single workspace folder holds composition.json (the timeline), session.json (the op log), output files, snapshots/ — fully version-controllable
+- Single workspace folder holds composition.json (the main timeline), timelines/ (shorts and other named timelines), session.json (the op log), output files, snapshots/ — fully version-controllable
 - Stream-copy for lossless trim/split/concat; re-encodes only when filter graphs require it
 
 ## Architecture

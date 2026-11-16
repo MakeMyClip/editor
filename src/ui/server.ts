@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import getPort from 'get-port';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { csrf } from 'hono/csrf';
 import open from 'open';
 import { ZodError, z } from 'zod';
@@ -26,9 +26,13 @@ import {
 import {
   applyVerbs,
   CompositionConflictError,
+  deleteTimeline,
+  listTimelines,
+  NoTimelineError,
   readComposition,
   readDocOpLog,
   redoDocOp,
+  TimelineIdError,
   undoLastDocOp,
 } from '../timeline/document-store.js';
 import {
@@ -40,8 +44,9 @@ import {
 import { buildMediaMap } from '../timeline/media-registry.js';
 import { CompositionOpError } from '../timeline/ops.js';
 import { ReframeError } from '../timeline/reframe.js';
-import { runPlan } from '../timeline/run-plan.js';
-import type { MediaId } from '../timeline/schema.js';
+import { exportTimelines, runPlan } from '../timeline/run-plan.js';
+import { MAIN_TIMELINE, type MediaId, TimelineIdSchema } from '../timeline/schema.js';
+import { ShortError } from '../timeline/shorts.js';
 import { SilenceAnalysisError } from '../timeline/silence.js';
 import { TranscriptError, transcribeClip } from '../timeline/transcript.js';
 import { CompositionVerbSchema } from '../timeline/verbs.js';
@@ -57,14 +62,20 @@ import {
   resolveInWorkspace,
   WorkspaceBoundaryError,
 } from '../workspace.js';
-import { clipConfinedMedia, confinedMediaRefs, makeVerbContext } from './timeline-tools.js';
+import {
+  clipConfinedMedia,
+  confinedMediaMap,
+  confinedMediaRefs,
+  makeVerbContext,
+} from './timeline-tools.js';
 
 /** Errors about the clip or its setup, not the server: silence removal or
- *  transcription can't work on this clip, whisper.cpp isn't set up, or a
- *  reframe asks for a size or position that can't be. */
+ *  transcription can't work on this clip, whisper.cpp isn't set up, a reframe
+ *  asks for a size or position that can't be, or a short can't be made. */
 function isClipConditionError(err: unknown): boolean {
   return (
     err instanceof ReframeError ||
+    err instanceof ShortError ||
     err instanceof SilenceAnalysisError ||
     err instanceof TranscriptError ||
     err instanceof TranscriptionUnavailableError
@@ -72,6 +83,17 @@ function isClipConditionError(err: unknown): boolean {
 }
 
 import { isRegisteredTool, TOOL_REGISTRY } from './tool-registry.js';
+
+/** The timeline a `/api/timeline*` request names with `?timeline=` (default
+ *  `main`); the middleware has already refused a malformed id. */
+function timelineOf(c: Context): string {
+  return c.req.query('timeline') ?? MAIN_TIMELINE;
+}
+
+/** A timeline that doesn't exist, or a malformed id: `onError` answers 404 or 400. */
+function isTimelineError(err: unknown): boolean {
+  return err instanceof NoTimelineError || err instanceof TimelineIdError;
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // `HERE` resolves to different paths depending on whether we're running
@@ -159,6 +181,18 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   });
   app.use('/api/*', csrf());
 
+  app.onError((err, c) => {
+    if (err instanceof NoTimelineError) return c.json({ error: err.message }, 404);
+    if (err instanceof TimelineIdError) return c.json({ error: err.message }, 400);
+    // Otherwise answer as Hono does by default.
+    if ('getResponse' in err && typeof err.getResponse === 'function') {
+      const res = (err.getResponse as () => Response)();
+      return c.newResponse(res.body, res);
+    }
+    console.error(err);
+    return c.text('Internal Server Error', 500);
+  });
+
   app.get('/api/workspace', async (c) => {
     return c.json({ path: getWorkspace() });
   });
@@ -226,9 +260,19 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
 
   // ─── Timeline document (op-aware, undoable) ───────────────────────
 
-  /** GET /api/timeline — the current composition document. */
+  // Every /api/timeline route works on the timeline `?timeline=` names: `main`
+  // when it names none, or a short.
+  app.use('/api/timeline/*', async (c, next) => {
+    const id = c.req.query('timeline') ?? MAIN_TIMELINE;
+    if (!TimelineIdSchema.safeParse(id).success) {
+      return c.json({ error: `Invalid timeline id "${id}".` }, 400);
+    }
+    await next();
+  });
+
+  /** GET /api/timeline — the timeline's composition document. */
   app.get('/api/timeline', async (c) => {
-    return c.json({ document: await readComposition() });
+    return c.json({ document: await readComposition(timelineOf(c)) });
   });
 
   /**
@@ -248,9 +292,10 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         .array(CompositionVerbSchema)
         .min(1)
         .parse((body as { verbs?: unknown }).verbs);
-      const { doc, ops } = await applyVerbs(verbs, makeVerbContext());
-      return c.json({ applied: ops.length, document: doc });
+      const { doc, ops, warnings } = await applyVerbs(verbs, makeVerbContext(), timelineOf(c));
+      return c.json({ applied: ops.length, document: doc, warnings });
     } catch (err) {
+      if (isTimelineError(err)) throw err;
       if (err instanceof ZodError) {
         return c.json({ error: 'Validation failed', issues: err.issues }, 400);
       }
@@ -273,10 +318,11 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
    */
   app.get('/api/timeline/transcript/:clipId', async (c) => {
     try {
-      const comp = await readComposition();
+      const comp = await readComposition(timelineOf(c));
       const clipId = c.req.param('clipId');
       return c.json(await transcribeClip(comp, clipId, await clipConfinedMedia(comp, clipId)));
     } catch (err) {
+      if (isTimelineError(err)) throw err;
       if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
       if (isClipConditionError(err)) return c.json({ error: (err as Error).message }, 422);
       const message = err instanceof Error ? err.message : String(err);
@@ -290,7 +336,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
    * The viewer surfaces this so a not-yet-renderable doc reads as such, not broken.
    */
   app.get('/api/timeline/exportable', async (c) => {
-    const comp = await readComposition();
+    const comp = await readComposition(timelineOf(c));
     const media = await buildMediaMap();
     return c.json(checkExportable(comp, media, getWorkspace()));
   });
@@ -309,7 +355,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
     // a concurrent export's — both run unsynchronized `ffmpeg -y` in the workspace.
     const tag = `frame-${randomBytes(4).toString('hex')}`;
     try {
-      const comp = await readComposition();
+      const comp = await readComposition(timelineOf(c));
       const media = await buildMediaMap();
       const plan = buildFrameAtPlan(comp, { media, dir: getWorkspace(), output, tag }, atSec);
       const result = await runPlan(plan);
@@ -318,6 +364,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       return c.body(jpeg, 200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });
     } catch (err) {
       await unlink(output).catch(() => {});
+      if (isTimelineError(err)) throw err;
       if (err instanceof CompileError) return c.json({ error: err.message }, 422);
       // Not a document problem — a transient render failure (e.g. an FFmpeg
       // hiccup). Surface it as retryable instead of leaking a raw 500.
@@ -389,12 +436,13 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       return c.json({ error: 'Validation failed', issues: parsed.error.issues }, 400);
     }
     const { format, output } = parsed.data;
+    const timeline = timelineOf(c);
     if (format !== 'mp4') {
       try {
         const target = output
           ? resolveInWorkspace(output)
           : newOutputPath('timeline-export', interchangeExtension(format));
-        const comp = await readComposition();
+        const comp = await readComposition(timeline);
         const result = await exportInterchange(comp, await confinedMediaRefs(comp), {
           format,
           output: target,
@@ -408,13 +456,14 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
           notes: result.notes,
         });
       } catch (err) {
+        if (isTimelineError(err)) throw err;
         if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
         if (err instanceof InterchangeError) return c.json({ error: err.message }, 422);
         const message = err instanceof Error ? err.message : String(err);
         return c.json({ error: message }, 500);
       }
     }
-    const comp = await readComposition();
+    const comp = await readComposition(timeline);
     const media = await buildMediaMap();
     try {
       const target = output ? resolveInWorkspace(output) : newOutputPath('timeline-export', 'mp4');
@@ -423,7 +472,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       const loudness = result.loudness ? { loudness: result.loudness } : {};
       const entry = await appendOp({
         tool: 'timeline_export',
-        args: { rev: comp.rev },
+        args: { timeline, rev: comp.rev },
         result: { path: result.output, durationSec: plan.durationSec, ...loudness },
       });
       return c.json({
@@ -443,23 +492,80 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
 
   /** POST /api/timeline/undo — undo the most recent document edit (op-log). */
   app.post('/api/timeline/undo', async (c) => {
-    const { undone, label } = await undoLastDocOp();
+    const { undone, label } = await undoLastDocOp(timelineOf(c));
     return c.json({ undone, label: label ?? null });
   });
 
   /** POST /api/timeline/redo — redo the most recently undone document edit. */
   app.post('/api/timeline/redo', async (c) => {
-    const { redone, label } = await redoDocOp();
+    const { redone, label } = await redoDocOp(timelineOf(c));
     return c.json({ redone, label: label ?? null });
   });
 
   /** GET /api/timeline/history — undo/redo availability for the doc op-log. */
   app.get('/api/timeline/history', async (c) => {
-    const log = await readDocOpLog();
+    const log = await readDocOpLog(timelineOf(c));
     return c.json({
       canUndo: log.cursor > 0,
       canRedo: log.cursor < log.entries.length,
     });
+  });
+
+  // ─── The workspace's timelines: main and every short ──────────────
+
+  /** GET /api/timelines — main first, then every short, with its shape. */
+  app.get('/api/timelines', async (c) => {
+    try {
+      return c.json({ timelines: await listTimelines() });
+    } catch (err) {
+      if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
+      throw err;
+    }
+  });
+
+  /** DELETE /api/timelines/:id — remove a short and its undo history. Main can't go. */
+  app.delete('/api/timelines/:id', async (c) => {
+    const id = c.req.param('id');
+    try {
+      await deleteTimeline(id);
+      return c.json({ deleted: id });
+    } catch (err) {
+      if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
+      throw err;
+    }
+  });
+
+  /**
+   * POST /api/timelines/export — render every short, one at a time, to
+   * `shorts-<hex>/<id>.mp4` in the workspace, and log each to the session so it
+   * shows in Outputs. A short that can't render is reported with its error.
+   */
+  app.post('/api/timelines/export', async (c) => {
+    try {
+      const shorts = (await listTimelines()).map((t) => t.id).filter((id) => id !== MAIN_TIMELINE);
+      if (shorts.length === 0) {
+        return c.json({ error: 'No shorts to export yet. Make one from the transcript.' }, 422);
+      }
+      const dir = resolve(getWorkspace(), `shorts-${randomBytes(4).toString('hex')}`);
+      const exported = [];
+      for (const result of await exportTimelines(shorts, dir, confinedMediaMap)) {
+        if ('error' in result) {
+          exported.push(result);
+          continue;
+        }
+        const { timeline, rev, output, durationSec, loudness } = result;
+        const entry = await appendOp({
+          tool: 'timeline_export',
+          args: { timeline, rev },
+          result: { path: output, durationSec, ...(loudness ? { loudness } : {}) },
+        });
+        exported.push({ ...result, id: entry.id });
+      }
+      return c.json({ dir, exported });
+    } catch (err) {
+      if (err instanceof WorkspaceBoundaryError) return c.json({ error: err.message }, 403);
+      throw err;
+    }
   });
 
   /**

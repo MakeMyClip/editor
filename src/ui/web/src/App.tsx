@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ClipInspector } from './components/ClipInspector.js';
 import { DetailPane } from './components/DetailPane.js';
 import { DocTimeline } from './components/DocTimeline.js';
@@ -17,18 +17,32 @@ import { Header } from './components/Header.js';
 import { ImportZone } from './components/ImportZone.js';
 import { OpList } from './components/OpList.js';
 import { Timeline } from './components/Timeline.js';
+import { type TimelineNotice, TimelineTabs } from './components/TimelineTabs.js';
 import { ToolPickerModal } from './components/ToolPickerModal.js';
 import { Viewer } from './components/Viewer.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useSession } from './hooks/useSession.js';
 import { useSessionSafety } from './hooks/useSessionSafety.js';
 import { useTimeline } from './hooks/useTimeline.js';
-import { findClip, nextClipOnTrack } from './lib/composition.js';
+import { useTimelines } from './hooks/useTimelines.js';
+import { findClip, mediaNames, nextClipOnTrack } from './lib/composition.js';
+import { MAIN_TIMELINE, nextShortId, withTimeline } from './lib/timelines.js';
 import { applyTimelineVerbs, type Verb } from './lib/verbs.js';
+
+/** A short `POST /api/timelines/export` rendered, or why it couldn't. */
+type ExportedShort =
+  | { timeline: string; output: string; loudness?: { outputLufs: number | null } }
+  | { timeline: string; error: string };
 
 export function App() {
   const { session, loading, error, refresh } = useSession();
-  const { composition, refresh: refreshTimeline } = useTimeline();
+  const {
+    timelines,
+    current: timeline,
+    select: selectTimeline,
+    refresh: refreshTimelines,
+  } = useTimelines();
+  const { composition, missing, refresh: refreshTimeline } = useTimeline(timeline);
   const safety = useSessionSafety();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -38,10 +52,31 @@ export function App() {
   const [safetyError, setSafetyError] = useState<string | null>(null);
   const [verbBusy, setVerbBusy] = useState(false);
   const [verbError, setVerbError] = useState<string | null>(null);
+  const [exportingAll, setExportingAll] = useState(false);
+  const [notice, setNotice] = useState<TimelineNotice | null>(null);
 
   const selectedEntry =
     selectedId === null ? null : (session.entries.find((e) => e.id === selectedId) ?? null);
   const selected = selectedClipId === null ? null : findClip(composition, selectedClipId);
+  const names = useMemo(() => mediaNames(session.entries), [session.entries]);
+  const freeShortId = nextShortId(timelines.map((t) => t.id));
+
+  // Each timeline has its own clips and length, so switching starts clean.
+  function openTimeline(id: string) {
+    selectTimeline(id);
+    setSelectedClipId(null);
+    setPlayheadSec(0);
+    setVerbError(null);
+  }
+
+  // A short deleted elsewhere (the agent, another tab) falls back to main.
+  useEffect(() => {
+    if (missing && timeline !== MAIN_TIMELINE) {
+      selectTimeline(MAIN_TIMELINE);
+      setSelectedClipId(null);
+      setPlayheadSec(0);
+    }
+  }, [missing, timeline, selectTimeline]);
 
   // Selecting an op and selecting a doc-clip are mutually exclusive — each owns
   // the inspector pane, so picking one clears the other.
@@ -62,7 +97,7 @@ export function App() {
     setVerbBusy(true);
     setVerbError(null);
     try {
-      const { applied } = await applyTimelineVerbs(verbs);
+      const { applied } = await applyTimelineVerbs(verbs, timeline);
       await Promise.all([refreshTimeline(), refresh()]);
       return applied;
     } catch (err) {
@@ -73,10 +108,100 @@ export function App() {
     }
   }
 
+  /** Make a short on timeline `id` and open it; false when it couldn't be made. */
+  async function handleMakeShort(id: string, verb: Verb): Promise<boolean> {
+    setVerbBusy(true);
+    setVerbError(null);
+    try {
+      const { warnings } = await applyTimelineVerbs([verb], id);
+      await Promise.all([refreshTimelines(), refresh()]);
+      openTimeline(id);
+      setNotice({
+        kind: warnings.length > 0 ? 'warn' : 'info',
+        lines: [`Made ${id}.`, ...warnings],
+      });
+      return true;
+    } catch (err) {
+      setVerbError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setVerbBusy(false);
+    }
+  }
+
+  async function handleDeleteTimeline(id: string): Promise<void> {
+    if (
+      !window.confirm(
+        `Delete the short "${id}"? Its edits and undo history go with it; files you exported stay.`,
+      )
+    ) {
+      return;
+    }
+    setSafetyError(null);
+    try {
+      const res = await fetch(`/api/timelines/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(json.error ?? `HTTP ${res.status}`);
+      }
+      await refreshTimelines();
+      if (id === timeline) openTimeline(MAIN_TIMELINE);
+    } catch (err) {
+      setSafetyError(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  async function handleExportAll(): Promise<void> {
+    setExportingAll(true);
+    setSafetyError(null);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/timelines/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const json = (await res.json()) as {
+        dir?: string;
+        exported?: ExportedShort[];
+        error?: string;
+      };
+      if (!res.ok || !json.exported) throw new Error(json.error ?? `HTTP ${res.status}`);
+      await refresh(); // each short now shows in Outputs
+      const saved = json.exported.flatMap((e) =>
+        'error' in e
+          ? []
+          : [
+              e.loudness?.outputLufs != null
+                ? `${e.timeline} (${e.loudness.outputLufs.toFixed(1)} LUFS)`
+                : e.timeline,
+            ],
+      );
+      const failed = json.exported.flatMap((e) =>
+        'error' in e ? [`${e.timeline} didn't render: ${e.error}`] : [],
+      );
+      setNotice({
+        kind: failed.length > 0 ? 'warn' : 'info',
+        lines: [
+          ...(saved.length > 0
+            ? [`Saved ${saved.length} in ${json.dir ?? 'the workspace'}: ${saved.join(', ')}.`]
+            : []),
+          ...failed,
+        ],
+      });
+    } catch (err) {
+      setSafetyError(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setExportingAll(false);
+    }
+  }
+
   async function handleTimelineHistory(direction: 'undo' | 'redo'): Promise<void> {
     setVerbError(null);
     try {
-      const res = await fetch(`/api/timeline/${direction}`, { method: 'POST' });
+      const res = await fetch(withTimeline(`/api/timeline/${direction}`, timeline), {
+        method: 'POST',
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await Promise.all([refreshTimeline(), refresh()]);
     } catch (err) {
@@ -90,7 +215,7 @@ export function App() {
     setVerbBusy(true);
     setSafetyError(null);
     try {
-      const res = await fetch('/api/timeline/export', {
+      const res = await fetch(withTimeline('/api/timeline/export', timeline), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
@@ -201,7 +326,7 @@ export function App() {
       <main className="main">
         <OpList entries={session.entries} selectedId={selectedId} onSelect={selectOp} />
         <div className="stage">
-          <Viewer atSec={playheadSec} rev={composition.rev} />
+          <Viewer key={timeline} timeline={timeline} atSec={playheadSec} rev={composition.rev} />
           <div className="stage-detail">
             {error ? (
               <section className="detail">
@@ -223,7 +348,9 @@ export function App() {
             ) : selected ? (
               <ClipInspector
                 key={selected.clip.id}
+                timeline={timeline}
                 clip={selected.clip}
+                mediaNames={names}
                 playheadSec={playheadSec}
                 hasNext={nextClipOnTrack(selected.track, selected.clip) !== null}
                 canvasFit={composition.fit}
@@ -232,7 +359,9 @@ export function App() {
                   .map((c) => c.id)}
                 busy={verbBusy}
                 error={verbError}
+                nextShortId={freeShortId}
                 onApply={handleApplyVerbs}
+                onMakeShort={handleMakeShort}
                 onSeek={setPlayheadSec}
                 onClose={() => setSelectedClipId(null)}
               />
@@ -242,8 +371,20 @@ export function App() {
           </div>
         </div>
       </main>
+      <TimelineTabs
+        timelines={timelines}
+        current={timeline}
+        exportingAll={exportingAll}
+        notice={notice}
+        onSelect={openTimeline}
+        onDelete={(id) => void handleDeleteTimeline(id)}
+        onExportAll={() => void handleExportAll()}
+        onDismissNotice={() => setNotice(null)}
+      />
       <DocTimeline
+        timeline={timeline}
         composition={composition}
+        mediaNames={names}
         selectedClipId={selectedClipId}
         onSelectClip={selectClip}
         playheadSec={playheadSec}

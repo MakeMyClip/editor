@@ -30,6 +30,10 @@ const ctx = (durationSec = 10): VerbContext => ({
   transcript: async () => {
     throw new Error('not used');
   },
+  speechLevels: async () => null,
+  readTimeline: async () => {
+    throw new Error('not used');
+  },
   defaultTrack: 'v0',
 });
 
@@ -413,6 +417,10 @@ describe('applyVerbs (op-aware + undoable)', () => {
       openGate = resolve;
     });
     const barrierCtx: VerbContext = {
+      speechLevels: async () => null,
+      readTimeline: async () => {
+        throw new Error('not used');
+      },
       defaultTrack: 'v0',
       analyzeSilence: async () => {
         throw new Error('not used');

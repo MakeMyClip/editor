@@ -117,6 +117,11 @@ export const TextStyleSchema = z.object({
   /** Box color behind the text, or null for none. */
   background: z.string().nullable().default(null),
   anchor: AnchorSchema.default('center'),
+  /** How far, in pixels, anchored text keeps from the frame edges: `x` from
+   *  the left or right edge, `y` from the top or bottom. Absent means 40. */
+  margin: z
+    .object({ x: z.number().int().nonnegative(), y: z.number().int().nonnegative() })
+    .optional(),
 });
 export type TextStyle = z.infer<typeof TextStyleSchema>;
 

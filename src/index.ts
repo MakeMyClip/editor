@@ -165,12 +165,17 @@ export {
   CompositionCorruptError,
   compositionOpsPath,
   compositionPath,
+  deleteTimeline,
+  listTimelines,
   mutateComposition,
+  NoTimelineError,
   overwriteComposition,
   readComposition,
   readDocOpLog,
   redoDocOp,
   resetComposition,
+  TimelineIdError,
+  type TimelineListing,
   undoLastDocOp,
   writeComposition,
   writeCompositionIfUnchanged,
@@ -194,6 +199,17 @@ export {
   textClip,
   videoTrack,
 } from './timeline/ops.js';
+export {
+  endInPause,
+  findPauses,
+  measureSpeechLevels,
+  PAUSE_KEEP_SEC,
+  type Pause,
+  parseSpeechLevels,
+  pauseAt,
+  type SpeechLevels,
+  startInPause,
+} from './timeline/pauses.js';
 export {
   type Aspect,
   AspectSchema,
@@ -222,9 +238,16 @@ export {
   renderCutSheet,
   reviewCuts,
 } from './timeline/review.js';
-export { type LoudnessResult, type RunPlanResult, runPlan } from './timeline/run-plan.js';
+export {
+  exportTimelines,
+  type LoudnessResult,
+  type RunPlanResult,
+  runPlan,
+  type TimelineExport,
+} from './timeline/run-plan.js';
 export {
   AudioStreamSchema,
+  MAIN_TIMELINE,
   type MediaId,
   MediaIdSchema,
   type MediaRef,
@@ -232,8 +255,23 @@ export {
   makeMediaId,
   type Timecode,
   TimecodeSchema,
+  TimelineIdSchema,
   VideoStreamSchema,
 } from './timeline/schema.js';
+export {
+  checkShortTimelines,
+  DEFAULT_SHORT_LUFS,
+  planShort,
+  SHORT_LEAD_SEC,
+  ShortError,
+  type ShortPiece,
+  type ShortPlan,
+  type ShortRange,
+  type ShortRequest,
+  type ShortSources,
+  type ShortTranscriptLookup,
+  type SpeechLevelsLookup,
+} from './timeline/shorts.js';
 export {
   analyzeSilence,
   DEFAULT_SENSITIVITY,

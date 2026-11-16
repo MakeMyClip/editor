@@ -4,10 +4,15 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   CaptionError,
+  captionWidthBudget,
+  defaultCaptionStyle,
+  fitCaptionStyle,
   groupCaptions,
   joinWords,
   planCaptions,
+  safeArea,
   type TranscriptLookup,
+  textWidthEm,
 } from '../src/timeline/captions.js';
 import { checkExportable } from '../src/timeline/compile.js';
 import { type Composition, emptyComposition, findClip } from '../src/timeline/composition.js';
@@ -27,7 +32,7 @@ import {
   type Transcript,
   TranscriptError,
 } from '../src/timeline/transcript.js';
-import { lowerVerb, type VerbContext } from '../src/timeline/verbs.js';
+import { EditableVerbSchema, lowerVerb, type VerbContext } from '../src/timeline/verbs.js';
 
 const M = 'm_aaaaaaaaaaaa' as MediaId;
 const N = 'm_bbbbbbbbbbbb' as MediaId;
@@ -322,7 +327,22 @@ describe('caption_speech verb', () => {
       const { clip, transcript } = await lookup(new Map([[M, RECORDING]]))(clipId);
       return { clip, transcript, media: new Map() };
     },
+    speechLevels: async () => null,
+    readTimeline: async () => {
+      throw new Error('not used');
+    },
     defaultTrack: 'v0',
+  });
+
+  it('takes a margin from the edge, keeping the safe sides', async () => {
+    const vertical = applyOps(cutRecording(), [{ op: 'setCanvas', width: 1080, height: 1920 }]);
+    const ops = await lowerVerb(
+      vertical,
+      { verb: 'caption_speech', clipId: 'a', margin: 300 },
+      verbCtx(),
+    );
+    expect(ops[1]).toMatchObject({ clip: { style: { margin: { x: 163, y: 300 } } } });
+    expect(() => EditableVerbSchema.parse({ verb: 'caption_speech', margin: -1 })).toThrow();
   });
 
   it('lowers style options onto the caption clips', async () => {
@@ -370,5 +390,98 @@ describe('caption_speech verb', () => {
       await undoLastDocOp();
       expect((await readComposition()).tracks.map((t) => t.id)).toEqual(['v0']);
     });
+  });
+});
+
+describe('captions on a vertical canvas', () => {
+  const vertical = emptyComposition({ width: 1080, height: 1920 });
+  const landscape = emptyComposition({ width: 1920, height: 1080 });
+
+  it('keep clear of the bottom quarter and 14% at each side on a portrait canvas', () => {
+    expect(safeArea(vertical)).toEqual({ side: 151, bottom: 480 });
+    expect(safeArea(emptyComposition({ width: 720, height: 1280 }))).toEqual({
+      side: 101,
+      bottom: 320,
+    });
+    expect(safeArea(landscape)).toEqual({ side: 40, bottom: 40 });
+    expect(safeArea(emptyComposition({ width: 1080, height: 1080 }))).toEqual({
+      side: 40,
+      bottom: 40,
+    });
+  });
+
+  it('get that margin by default there, box included, and none on landscape (unchanged documents)', () => {
+    expect(defaultCaptionStyle(vertical)).toEqual({
+      fontSize: 54,
+      color: 'white',
+      background: 'black@0.6',
+      anchor: 'bottom-center',
+      margin: { x: 163, y: 492 },
+    });
+    expect('margin' in defaultCaptionStyle(landscape)).toBe(false);
+  });
+
+  it('fit their width to the room between the side margins, at the font size', () => {
+    // Text keeps 163 px from each side (151 + the 12 px box): (1080 − 326) / 54 px
+    // = 13.96 em; landscape keeps 40 px: (1920 − 80) / 54 = 34.1 em.
+    expect(captionWidthBudget(vertical, defaultCaptionStyle(vertical))).toBeCloseTo(13.963, 3);
+    expect(captionWidthBudget(landscape, defaultCaptionStyle(landscape))).toBeCloseTo(34.07, 2);
+    // A larger font leaves room for less, on any canvas.
+    expect(
+      captionWidthBudget(vertical, { ...defaultCaptionStyle(vertical), fontSize: 96 }),
+    ).toBeCloseTo(7.854, 3);
+  });
+
+  it('estimate a line wide, so capitals and W or M take more room than lowercase', () => {
+    expect(textWidthEm('WOW WOW WOW')).toBeGreaterThan(textWidthEm('wow wow wow'));
+    // Arial draws W at 0.94 em and DejaVu Sans at 1.0: the estimate takes 1.
+    expect(textWidthEm('W')).toBe(1);
+    expect(textWidthEm('MOM')).toBeCloseTo(2.8, 6);
+    // DejaVu Sans draws m at 0.97 em, Щ and Ю at about 1.1, ж and ш under 0.95.
+    expect(textWidthEm('mm')).toBe(2);
+    expect(textWidthEm('ЩЮ')).toBeCloseTo(2.2, 6);
+    expect(textWidthEm('жш')).toBeCloseTo(1.9, 6);
+    // Math signs are about 0.84 em in DejaVu: 2+2=4 is 3 digits and 2 signs.
+    expect(textWidthEm('2+2=4')).toBeCloseTo(3 * 0.64 + 2 * 0.85, 6);
+    // Accented Latin counts as its base letter.
+    expect(textWidthEm('é')).toBe(textWidthEm('e'));
+  });
+
+  it('break a line before it passes the width budget, even all in capitals', () => {
+    const budget = captionWidthBudget(vertical, { ...defaultCaptionStyle(vertical), fontSize: 96 });
+    // 11 characters, within a count of 12, but about 9.6 em of W and O at 96 px: too wide.
+    const wow = groupCaptions(spoken('WOW WOW WOW'), 30, 12, budget);
+    expect(wow.map((c) => c.text)).toEqual(['WOW WOW', 'WOW']);
+    const words = spoken('these words make a caption longer than twenty two');
+    const narrow = groupCaptions(
+      words,
+      30,
+      12,
+      captionWidthBudget(vertical, defaultCaptionStyle(vertical)),
+    );
+    expect(narrow.length).toBeGreaterThan(groupCaptions(words, 30, 12).length);
+    for (const cue of narrow) expect(textWidthEm(cue.text)).toBeLessThanOrEqual(13.97);
+  });
+
+  it('shrink the font of a single word too wide for the room', () => {
+    const big = { ...defaultCaptionStyle(vertical), fontSize: 96 };
+    // 754 px of room; "UNBELIEVABLE" is about 9.4 em, 900 px at 96 px.
+    const fitted = fitCaptionStyle('UNBELIEVABLE', big, vertical);
+    expect(fitted.fontSize).toBeLessThan(96);
+    expect(textWidthEm('UNBELIEVABLE') * fitted.fontSize).toBeLessThanOrEqual(754);
+    // 13 of Cyrillic's widest capital (about 1.1 em each in DejaVu) are fitted too.
+    const shch = fitCaptionStyle('ЩЩЩЩЩЩЩЩЩЩЩЩЩ', defaultCaptionStyle(vertical), vertical);
+    expect(13 * 1.095 * shch.fontSize).toBeLessThanOrEqual(754);
+    // A word that fits keeps the style as it is.
+    expect(fitCaptionStyle('YES', big, vertical)).toBe(big);
+  });
+
+  it('are planned with the safe margin and the narrow budget on a portrait timeline', async () => {
+    currentDoc = applyOps(cutRecording(), [{ op: 'setCanvas', width: 1080, height: 1920 }]);
+    const plan = await planCaptions(currentDoc, {}, lookup(new Map([[M, RECORDING]])), counter());
+    const doc = applyOps(currentDoc, plan.ops);
+    for (const clip of doc.tracks[1]?.clips ?? []) {
+      expect(clip.kind === 'text' && clip.style.margin).toEqual({ x: 163, y: 492 });
+    }
   });
 });
