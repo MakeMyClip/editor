@@ -174,7 +174,9 @@ describe.skipIf(!IS_CI)('frame preview from a short window, against real FFmpeg'
     await runPlan(
       compileTimeline(slowDoc, { media: slowMedia, dir: workspace, output: slowExport }),
     );
-    for (const atSec of [1.5, 3.999]) {
+    // 1.391 s: the seek's whole-tick rounding decides which side of a frame
+    // boundary the source frame at 1.4167 s lands on.
+    for (const atSec of [1.5, 1.391, 3.999]) {
       const full = join(workspace, `slow-${atSec}-full.jpg`);
       const exportSec = Math.min(atSec, 4 - 1 / 30);
       await runFfmpeg(buildPreviewFrameArgs({ input: slowExport, output: full, atSec: exportSec }));

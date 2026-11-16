@@ -641,7 +641,11 @@ export async function runTimeline(args: string[]): Promise<void> {
         ([mediaId, id]) => `transcript ${mediaId}: ${id}`,
       );
       for (const s of outline.sentences) {
-        lines.push(`${clock(s.startSec)}  #${s.fromIndex}–${s.toIndex}  ${s.clipId}  ${s.text}`);
+        // With more than one source, its media id, to match a transcript line.
+        const source = s.mediaId ? `  ${s.mediaId}` : '';
+        lines.push(
+          `${clock(s.startSec)}  #${s.fromIndex}–${s.toIndex}  ${s.clipId}${source}  ${s.text}`,
+        );
       }
       process.stdout.write(lines.length > 0 ? `${lines.join('\n')}\n` : '');
       return;

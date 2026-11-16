@@ -148,6 +148,22 @@ describe('timelineOutline', () => {
     expect(outline.nextFromSec).toBeUndefined();
   });
 
+  it('ends a sentence where the timeline skips words it plays elsewhere', async () => {
+    const run = transcriptOf(M, spoken('a b c d e f g h i j k l'.split(' ')));
+    // Words 0–1, then 10–11, then 2–9: clips moved out of source order.
+    const moved = timelineOf([
+      mediaClip({ id: 'c1', mediaId: M, sourceInSec: 0, sourceOutSec: 0.8, startSec: 0 }),
+      mediaClip({ id: 'c2', mediaId: M, sourceInSec: 4, sourceOutSec: 4.8, startSec: 0.8 }),
+      mediaClip({ id: 'c3', mediaId: M, sourceInSec: 0.8, sourceOutSec: 4, startSec: 1.6 }),
+    ]);
+    const outline = await timelineOutline(moved, MEDIA, { transcribe: transcribeFrom(run) });
+    expect(outline.sentences.map((s) => [s.clipId, s.fromIndex, s.toIndex])).toEqual([
+      ['c1', 0, 1],
+      ['c2', 10, 11],
+      ['c3', 2, 9],
+    ]);
+  });
+
   it('keeps a word the timeline plays twice as two, where a clip replays the source', async () => {
     const hello = transcriptOf(M, spoken(['Hello.', 'and', 'so']));
     const transcribe = transcribeFrom(hello);

@@ -790,6 +790,7 @@ export function buildFrameAtPlan(
     // time. Rounded down, to the microsecond, so the seek never passes the
     // clip's last frame or its out-point.
     const local = floorUs(clamped * speedFactor(clip.effects));
+    const seek = floorUs(clip.sourceInSec + local);
     // The first canvas frame at or after the frame's time (`trim` rounds an
     // off-grid start to the nearest frame, which could be the one before), but
     // no later than the segment's last frame: encoding to the clip's length
@@ -803,11 +804,14 @@ export function buildFrameAtPlan(
         '-y',
         '-noaccurate_seek',
         '-ss',
-        String(floorUs(clip.sourceInSec + local)),
+        String(seek),
         '-i',
         info.path,
         '-filter_complex',
-        `[0:v]setpts=PTS+${local}/TB,trim=start=0,${chain},trim=start=${firstFrame}[v]`,
+        // The seek shifted timestamps by (in-point + local) in whole stream
+        // ticks; shifting back by the same rounding leaves them as export's
+        // seek to the in-point does, tick for tick.
+        `[0:v]setpts=PTS+round(${seek}/TB)-round(${floorUs(clip.sourceInSec)}/TB),trim=start=0,${chain},trim=start=${firstFrame}[v]`,
         ...['-map', '[v]', '-an', '-frames:v', '1', '-q:v', '2'],
         ctx.output,
       ],

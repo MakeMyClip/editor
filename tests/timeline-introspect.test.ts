@@ -105,7 +105,7 @@ describe('buildFrameAtPlan', () => {
     const exported = graphOf(compileTimeline(doc, CTX('/ws/out.mp4')).steps[0]?.args);
     const segmentChain = exported.slice('[0:v]'.length, exported.indexOf('[v]'));
     expect(graphOf(frame?.args)).toBe(
-      `[0:v]setpts=PTS+3/TB,trim=start=0,${segmentChain},trim=start=3[v]`,
+      `[0:v]setpts=PTS+round(3/TB)-round(0/TB),trim=start=0,${segmentChain},trim=start=3[v]`,
     );
   });
 
@@ -122,7 +122,9 @@ describe('buildFrameAtPlan', () => {
     // 30 fps: the last frame starts at 8 - 1/30 s.
     // Rounded down, never past that frame or the clip's out-point.
     expect(near?.args.slice(2, 4)).toEqual(['-ss', '107.966666']);
-    expect(graphOf(near?.args)).toMatch(/^\[0:v\]setpts=PTS\+7\.966666\/TB,trim=start=0,/);
+    expect(graphOf(near?.args)).toMatch(
+      /^\[0:v\]setpts=PTS\+round\(107\.966666\/TB\)-round\(100\/TB\),trim=start=0,/,
+    );
     expect(graphOf(near?.args)).toMatch(/,trim=start=7\.96666666\d*\[v\]$/);
   });
 
@@ -187,7 +189,9 @@ describe('buildFrameAtPlan', () => {
     const plan = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 10); // 2s into c2 ([8,12))
     expect(plan.steps[0]?.label).toBe('frame:c2@10');
     expect(plan.steps[0]?.args.slice(2, 4)).toEqual(['-ss', '3']);
-    expect(graphOf(plan.steps[0]?.args)).toMatch(/^\[0:v\]setpts=PTS\+2\/TB,/);
+    expect(graphOf(plan.steps[0]?.args)).toMatch(
+      /^\[0:v\]setpts=PTS\+round\(3\/TB\)-round\(1\/TB\),/,
+    );
     expect(graphOf(plan.steps[0]?.args)).toMatch(/,trim=start=2\[v\]$/);
   });
 
@@ -213,7 +217,7 @@ describe('buildFrameAtPlan', () => {
     const frame = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 4).steps[0];
     expect(frame?.args.slice(2, 4)).toEqual(['-ss', '4']);
     const graph = graphOf(frame?.args);
-    expect(graph).toMatch(/^\[0:v\]setpts=PTS\+4\/TB,/);
+    expect(graph).toMatch(/^\[0:v\]setpts=PTS\+round\(4\/TB\)-round\(0\/TB\),/);
     expect(graph).toContain('setpts=PTS/2');
     expect(graph).toMatch(/,trim=start=2\[v\]$/);
   });

@@ -344,9 +344,14 @@ export interface TimelineOutline {
 /**
  * Group words (one source, timeline order) into sentences: a sentence ends at
  * sentence-ending punctuation, before a pause longer than `PAUSE_SEC`, after
- * `MAX_SENTENCE_WORDS` words, or where the timeline goes back in the source.
+ * `MAX_SENTENCE_WORDS` words, where the timeline goes back in the source, or
+ * where it skips ahead over words `played` (by index) somewhere else on it, so
+ * a sentence's index range never takes in words it doesn't show.
  */
-export function outlineSentences(words: OutlineWord[]): OutlineSentence[] {
+export function outlineSentences(
+  words: OutlineWord[],
+  played: ReadonlySet<number> = new Set(),
+): OutlineSentence[] {
   const groups: OutlineWord[][] = [];
   let current: OutlineWord[] = [];
   for (const word of words) {
@@ -356,6 +361,7 @@ export function outlineSentences(words: OutlineWord[]): OutlineSentence[] {
       (endsSentence(prev.text) ||
         word.startSec - prev.endSec > PAUSE_SEC ||
         word.index <= prev.index ||
+        skipsPlayed(prev.index, word.index, played) ||
         current.length >= MAX_SENTENCE_WORDS)
     ) {
       groups.push(current);
@@ -379,6 +385,11 @@ export function outlineSentences(words: OutlineWord[]): OutlineSentence[] {
       },
     ];
   });
+}
+
+function skipsPlayed(from: number, to: number, played: ReadonlySet<number>): boolean {
+  for (let i = from + 1; i < to; i++) if (played.has(i)) return true;
+  return false;
 }
 
 export interface OutlineOptions extends TranscribeOptions {
@@ -416,10 +427,9 @@ export async function timelineOutline(
           .sort((a, b) => a.startSec - b.startSec);
 
   const transcripts = new Map<MediaId, Transcript | null>();
-  const bySource: { mediaId: MediaId; sentences: OutlineSentence[] }[] = [];
-  let run: OutlineWord[] = [];
-  let runMedia: MediaId | undefined;
-  let prevClip: MediaClip | undefined;
+  const placed: { clip: MediaClip; words: ClipWord[] }[] = [];
+  /** Word indices each source plays anywhere in the outlined clips. */
+  const played = new Map<MediaId, Set<number>>();
   for (const clip of clips) {
     let transcript = transcripts.get(clip.mediaId);
     if (transcript === undefined) {
@@ -431,8 +441,25 @@ export async function timelineOutline(
       transcripts.set(clip.mediaId, transcript);
     }
     if (!transcript) continue;
+    const words = clipWords(transcript, clip);
+    placed.push({ clip, words });
+    const indices = played.get(clip.mediaId) ?? new Set<number>();
+    for (const w of words) indices.add(w.index);
+    played.set(clip.mediaId, indices);
+  }
+
+  const bySource: { mediaId: MediaId; sentences: OutlineSentence[] }[] = [];
+  let run: OutlineWord[] = [];
+  let runMedia: MediaId | undefined;
+  let prevClip: MediaClip | undefined;
+  const flush = (): void => {
+    if (runMedia) {
+      bySource.push({ mediaId: runMedia, sentences: outlineSentences(run, played.get(runMedia)) });
+    }
+  };
+  for (const { clip, words } of placed) {
     if (clip.mediaId !== runMedia) {
-      if (runMedia) bySource.push({ mediaId: runMedia, sentences: outlineSentences(run) });
+      flush();
       run = [];
       runMedia = clip.mediaId;
     }
@@ -440,7 +467,7 @@ export async function timelineOutline(
     // between them), rather than playing part of it again.
     const continues =
       prevClip?.mediaId === clip.mediaId && clip.sourceInSec >= prevClip.sourceOutSec - 1e-6;
-    for (const word of clipWords(transcript, clip)) {
+    for (const word of words) {
       // A word a cut runs through shows in the clips on both sides of it: one
       // word, from its start in the first to its end in the last.
       const last = run[run.length - 1];
@@ -452,7 +479,7 @@ export async function timelineOutline(
     }
     prevClip = clip;
   }
-  if (runMedia) bySource.push({ mediaId: runMedia, sentences: outlineSentences(run) });
+  flush();
 
   const transcriptIds: Record<string, string> = {};
   for (const [mediaId, transcript] of transcripts) {
