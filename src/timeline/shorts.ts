@@ -3,6 +3,7 @@ import {
   DEFAULT_CAPTION_TRACK,
   DEFAULT_CAPTION_WORDS,
   defaultCaptionStyle,
+  fitCaptionStyle,
   groupCaptions,
 } from './captions.js';
 import { speedFactor, videoLayers } from './compile.js';
@@ -268,7 +269,7 @@ export async function planShort(
             text: cue.text,
             startSec: cue.startSec,
             durationSec: roundMs(cue.endSec - cue.startSec),
-            style,
+            style: fitCaptionStyle(cue.text, style, built),
           }),
         });
       }

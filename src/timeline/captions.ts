@@ -24,9 +24,6 @@ export const DEFAULT_CAPTION_WORDS = 7;
 
 /** Widest caption, in Latin characters (a CJK character counts as two). */
 const MAX_CAPTION_WIDTH = 32;
-/** Width of a capital in em in the widest common caption fonts (Arial
- *  capitals measure 0.61 em at 54 px), so the budget holds for all-caps text. */
-const CHAR_EM = 0.62;
 /** The box drawtext draws behind a caption reaches this far past its text. */
 const CAPTION_BOX_PX = 12;
 /** Share of a portrait canvas the vertical feeds' overlays cover: the caption,
@@ -128,7 +125,7 @@ export async function planCaptions(
           text: cue.text,
           startSec: cue.startSec,
           durationSec: roundMs(cue.endSec - cue.startSec),
-          style,
+          style: fitCaptionStyle(cue.text, style, comp),
         }),
       }),
     ),
@@ -235,28 +232,42 @@ export function defaultCaptionStyle(comp: Composition): TextStyle {
   return { ...style, margin: { x: side, y: bottom } };
 }
 
+/** Pixels a caption line may take between the style's side margins, its
+ *  box included. */
+function captionRoomPx(comp: Composition, style: TextStyle): number {
+  const side = style.margin?.x ?? TEXT_EDGE_PX;
+  return Math.max(1, comp.width - 2 * side - 2 * CAPTION_BOX_PX);
+}
+
 /**
- * The widest caption, in Latin characters, that fits between the style's side
- * margins at its font size, box included: drawtext doesn't wrap, so a longer
- * caption runs off the frame or into a platform's buttons. Never more than 32.
+ * How wide a caption line may be, in em of its font: what fits between the
+ * style's side margins at its font size. drawtext doesn't wrap, so a wider
+ * line runs off the frame or into a platform's buttons.
  */
 export function captionWidthBudget(comp: Composition, style: TextStyle): number {
-  const side = style.margin?.x ?? TEXT_EDGE_PX;
-  const room = comp.width - 2 * side - 2 * CAPTION_BOX_PX;
-  return Math.max(1, Math.min(MAX_CAPTION_WIDTH, Math.floor(room / (style.fontSize * CHAR_EM))));
+  return captionRoomPx(comp, style) / style.fontSize;
+}
+
+/** The caption style a line is drawn with: a single word too wide for the
+ *  room even on a line of its own gets a font size that fits it. */
+export function fitCaptionStyle(text: string, style: TextStyle, comp: Composition): TextStyle {
+  const width = textWidthEm(text);
+  const room = captionRoomPx(comp, style);
+  if (width * style.fontSize <= room) return style;
+  return { ...style, fontSize: Math.max(1, Math.floor(room / width)) };
 }
 
 /**
  * Group a clip's words (timeline times) into captions: a new one starts after
- * `maxWords` words, past `maxWidth` characters, after a pause, or after a
- * sentence ends. Each stays up a moment after its last word, but never into
- * the next one or past `endSec`.
+ * `maxWords` words, past 32 characters or `maxWidthEm` em of estimated width,
+ * after a pause, or after a sentence ends. Each stays up a moment after its
+ * last word, but never into the next one or past `endSec`.
  */
 export function groupCaptions(
   words: ClipWord[],
   endSec: number,
   maxWords: number,
-  maxWidth: number = MAX_CAPTION_WIDTH,
+  maxWidthEm: number = Number.POSITIVE_INFINITY,
 ): CaptionCue[] {
   const groups: ClipWord[][] = [];
   let current: ClipWord[] = [];
@@ -267,7 +278,7 @@ export function groupCaptions(
       (current.length >= maxWords ||
         word.startSec - prev.endSec > PAUSE_SEC ||
         endsSentence(prev.text) ||
-        displayWidth(joinWords([...current, word].map((w) => w.text))) > maxWidth)
+        tooWide(joinWords([...current, word].map((w) => w.text)), maxWidthEm))
     ) {
       groups.push(current);
       current = [];
@@ -325,6 +336,31 @@ const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦\u{20000}-\u{3ff
 function displayWidth(text: string): number {
   let width = 0;
   for (const ch of text) width += WIDE.test(ch) ? 2 : 1;
+  return width;
+}
+
+function tooWide(text: string, maxWidthEm: number): boolean {
+  return displayWidth(text) > MAX_CAPTION_WIDTH || textWidthEm(text) > maxWidthEm;
+}
+
+const WIDEST = /[WM@%ÆŒ]/u;
+const NARROW = /[ijlItfr.,:;'’!|()[\]-]/u;
+
+/**
+ * A line's width in em, estimated from the characters' advances in common
+ * sans-serif caption fonts: for each class at least what Arial and DejaVu Sans
+ * draw (W is 1.0 em in DejaVu), so the estimate errs wide and a line it lets
+ * through fits on screen.
+ */
+export function textWidthEm(text: string): number {
+  let width = 0;
+  for (const ch of text) {
+    if (ch === ' ') width += 0.32;
+    else if (WIDE.test(ch) || WIDEST.test(ch)) width += 1;
+    else if (NARROW.test(ch)) width += 0.4;
+    else if (ch !== ch.toLowerCase() || ch === 'm' || ch === 'w') width += 0.8;
+    else width += 0.64;
+  }
   return width;
 }
 

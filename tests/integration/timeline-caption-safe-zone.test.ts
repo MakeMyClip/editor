@@ -6,6 +6,7 @@ import { listFilters, runFfmpeg } from '../../src/ffmpeg/run.js';
 import {
   captionWidthBudget,
   defaultCaptionStyle,
+  fitCaptionStyle,
   groupCaptions,
 } from '../../src/timeline/captions.js';
 import { buildFrameAtPlan } from '../../src/timeline/compile.js';
@@ -45,7 +46,6 @@ describe.skipIf(!HAS_DRAWTEXT)('captions inside the safe area, drawn by real FFm
     const canvas = emptyComposition({ width: 1080, height: 1920, background: 'black' });
     const style = defaultCaptionStyle(canvas);
     const budget = captionWidthBudget(canvas, style);
-    expect(budget).toBe(22);
 
     // All-caps speech grouped the way captions are: the longest lines it makes.
     const text =
@@ -60,9 +60,23 @@ describe.skipIf(!HAS_DRAWTEXT)('captions inside the safe area, drawn by real FFm
       .map((c) => c.text)
       .sort((a, b) => b.length - a.length)
       .slice(0, 3);
-    expect(lines.every((l) => l.length <= 22)).toBe(true);
+    // The widest letters, and a 96 px font: a W-heavy line and a long word.
+    const big = { ...style, fontSize: 96 };
+    const wide = groupCaptions(
+      'WOW WOW WOW WOW'
+        .split(' ')
+        .map((t, i) => ({ index: i, text: t, startSec: i, endSec: i + 0.5 })),
+      60,
+      12,
+      captionWidthBudget(canvas, big),
+    ).map((c) => c.text);
+    const cases = [
+      ...lines.map((line) => ({ line, lineStyle: style })),
+      ...wide.map((line) => ({ line, lineStyle: big })),
+      { line: 'UNBELIEVABLE', lineStyle: fitCaptionStyle('UNBELIEVABLE', big, canvas) },
+    ];
 
-    for (const [i, line] of lines.entries()) {
+    for (const [i, { line, lineStyle }] of cases.entries()) {
       const doc = applyOps(canvas, [
         { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
         {
@@ -74,7 +88,7 @@ describe.skipIf(!HAS_DRAWTEXT)('captions inside the safe area, drawn by real FFm
         {
           op: 'addClip',
           trackId: 'captions',
-          clip: textClip({ id: 'c', text: line, durationSec: 1, startSec: 0, style }),
+          clip: textClip({ id: 'c', text: line, durationSec: 1, startSec: 0, style: lineStyle }),
         },
       ]);
       const frame = join(workspace, `line-${i}.png`);

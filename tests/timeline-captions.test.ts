@@ -6,11 +6,13 @@ import {
   CaptionError,
   captionWidthBudget,
   defaultCaptionStyle,
+  fitCaptionStyle,
   groupCaptions,
   joinWords,
   planCaptions,
   safeArea,
   type TranscriptLookup,
+  textWidthEm,
 } from '../src/timeline/captions.js';
 import { checkExportable } from '../src/timeline/compile.js';
 import { type Composition, emptyComposition, findClip } from '../src/timeline/composition.js';
@@ -418,32 +420,47 @@ describe('captions on a vertical canvas', () => {
     expect('margin' in defaultCaptionStyle(landscape)).toBe(false);
   });
 
-  it('fit their width to the font: 22 characters at 54 px on 1080x1920, 32 on landscape', () => {
-    expect(captionWidthBudget(vertical, defaultCaptionStyle(vertical))).toBe(22);
-    expect(captionWidthBudget(landscape, defaultCaptionStyle(landscape))).toBe(32);
-    // A larger font shrinks it on any canvas.
-    expect(captionWidthBudget(landscape, { ...defaultCaptionStyle(landscape), fontSize: 96 })).toBe(
-      30,
-    );
-    expect(captionWidthBudget(vertical, { ...defaultCaptionStyle(vertical), fontSize: 96 })).toBe(
-      12,
-    );
+  it('fit their width to the room between the side margins, at the font size', () => {
+    // (1080 − 2·151 − 2·12) / 54 px = 13.96 em; landscape (1920 − 80 − 24) / 54 = 33.6 em.
+    expect(captionWidthBudget(vertical, defaultCaptionStyle(vertical))).toBeCloseTo(13.963, 3);
+    expect(captionWidthBudget(landscape, defaultCaptionStyle(landscape))).toBeCloseTo(33.63, 2);
+    // A larger font leaves room for less, on any canvas.
+    expect(
+      captionWidthBudget(vertical, { ...defaultCaptionStyle(vertical), fontSize: 96 }),
+    ).toBeCloseTo(7.854, 3);
   });
 
-  it('break a line before it passes the width budget', () => {
+  it('estimate a line wide, so capitals and W or M take more room than lowercase', () => {
+    expect(textWidthEm('WOW WOW WOW')).toBeGreaterThan(textWidthEm('wow wow wow'));
+    // Arial draws W at 0.94 em and DejaVu Sans at 1.0: the estimate takes 1.
+    expect(textWidthEm('W')).toBe(1);
+    expect(textWidthEm('MOM')).toBeCloseTo(2.8, 6);
+  });
+
+  it('break a line before it passes the width budget, even all in capitals', () => {
+    const budget = captionWidthBudget(vertical, { ...defaultCaptionStyle(vertical), fontSize: 96 });
+    // 11 characters, within a count of 12, but about 9.6 em of W and O at 96 px: too wide.
+    const wow = groupCaptions(spoken('WOW WOW WOW'), 30, 12, budget);
+    expect(wow.map((c) => c.text)).toEqual(['WOW WOW', 'WOW']);
     const words = spoken('these words make a caption longer than twenty two');
-    const wide = groupCaptions(words, 30, 12);
-    const narrow = groupCaptions(words, 30, 12, 22);
-    expect(wide.map((c) => c.text)).toEqual([
-      'these words make a caption',
-      'longer than twenty two',
-    ]);
-    expect(narrow.map((c) => c.text)).toEqual([
-      'these words make a',
-      'caption longer than',
-      'twenty two',
-    ]);
-    expect(narrow.every((c) => c.text.length <= 22)).toBe(true);
+    const narrow = groupCaptions(
+      words,
+      30,
+      12,
+      captionWidthBudget(vertical, defaultCaptionStyle(vertical)),
+    );
+    expect(narrow.length).toBeGreaterThan(groupCaptions(words, 30, 12).length);
+    for (const cue of narrow) expect(textWidthEm(cue.text)).toBeLessThanOrEqual(13.97);
+  });
+
+  it('shrink the font of a single word too wide for the room', () => {
+    const big = { ...defaultCaptionStyle(vertical), fontSize: 96 };
+    // 754 px of room; "UNBELIEVABLE" is about 9.4 em, 900 px at 96 px.
+    const fitted = fitCaptionStyle('UNBELIEVABLE', big, vertical);
+    expect(fitted.fontSize).toBeLessThan(96);
+    expect(textWidthEm('UNBELIEVABLE') * fitted.fontSize).toBeLessThanOrEqual(754);
+    // A word that fits keeps the style as it is.
+    expect(fitCaptionStyle('YES', big, vertical)).toBe(big);
   });
 
   it('are planned with the safe margin and the narrow budget on a portrait timeline', async () => {
