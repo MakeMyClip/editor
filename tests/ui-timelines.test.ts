@@ -1,7 +1,8 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { appendOp } from '../src/session/store.js';
 import { emptyComposition } from '../src/timeline/composition.js';
 import {
   listTimelines,
@@ -9,7 +10,8 @@ import {
   readComposition,
   resetComposition,
 } from '../src/timeline/document-store.js';
-import { colorClip, videoTrack } from '../src/timeline/ops.js';
+import { colorClip, mediaClip, videoTrack } from '../src/timeline/ops.js';
+import type { MediaId } from '../src/timeline/schema.js';
 import { startUiServer, type UiServer } from '../src/ui/server.js';
 
 // The `clip ui` routes for named timelines: every /api/timeline route takes
@@ -173,5 +175,41 @@ describe('/api/timelines', () => {
     ]);
     const session = await call('GET', '/api/session');
     expect(session.json.entries).toEqual([]);
+  });
+
+  it('refuses a short whose media was swapped for a link out of the workspace', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'mmc-ui-outside-'));
+    try {
+      await writeFile(join(outside, 'private.mp4'), 'not for the export');
+      const linked = join(workspace, 'talk.mp4');
+      await symlink(join(outside, 'private.mp4'), linked);
+      await appendOp({
+        tool: 'ingest',
+        args: { path: linked },
+        result: { mediaId: 'm_0123456789ab', ref: { path: linked, audio: null, video: null } },
+      });
+      await mutateComposition(
+        [
+          { op: 'addTrack', track: videoTrack({ id: 'v0' }) },
+          {
+            op: 'addClip',
+            trackId: 'v0',
+            clip: mediaClip({
+              id: 'c1',
+              mediaId: 'm_0123456789ab' as MediaId,
+              sourceOutSec: 2,
+              startSec: 0,
+            }),
+          },
+        ],
+        { timeline: 'best-1', create: true },
+      );
+      const reply = await call('POST', '/api/timelines/export', {});
+      expect(reply.json.exported).toEqual([
+        { timeline: 'best-1', error: expect.stringContaining('outside the workspace') },
+      ]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });

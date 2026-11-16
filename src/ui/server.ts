@@ -62,7 +62,12 @@ import {
   resolveInWorkspace,
   WorkspaceBoundaryError,
 } from '../workspace.js';
-import { clipConfinedMedia, confinedMediaRefs, makeVerbContext } from './timeline-tools.js';
+import {
+  clipConfinedMedia,
+  confinedMediaMap,
+  confinedMediaRefs,
+  makeVerbContext,
+} from './timeline-tools.js';
 
 /** Errors about the clip or its setup, not the server: silence removal or
  *  transcription can't work on this clip, whisper.cpp isn't set up, a reframe
@@ -543,7 +548,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       }
       const dir = resolve(getWorkspace(), `shorts-${randomBytes(4).toString('hex')}`);
       const exported = [];
-      for (const result of await exportTimelines(shorts, dir)) {
+      for (const result of await exportTimelines(shorts, dir, confinedMediaMap)) {
         if ('error' in result) {
           exported.push(result);
           continue;

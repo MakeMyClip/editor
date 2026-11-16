@@ -35,7 +35,8 @@ export function useTimeline(
   const [loaded, setLoaded] = useState<{ timeline: string; doc: Composition } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [missing, setMissing] = useState(false);
+  // The timeline whose fetch last answered 404, so another one never inherits it.
+  const [missingTimeline, setMissingTimeline] = useState<string | null>(null);
   // A response for a timeline switched away from is dropped, not shown.
   const wanted = useRef(timeline);
   wanted.current = timeline;
@@ -44,7 +45,7 @@ export function useTimeline(
     try {
       const res = await fetch(withTimeline('/api/timeline', timeline));
       if (wanted.current !== timeline) return;
-      setMissing(res.status === 404);
+      setMissingTimeline(res.status === 404 ? timeline : null);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as { document: Composition };
       if (wanted.current !== timeline) return;
@@ -65,5 +66,5 @@ export function useTimeline(
   }, [intervalMs, load]);
 
   const composition = loaded?.timeline === timeline ? loaded.doc : EMPTY;
-  return { composition, loading, error, missing, refresh: load };
+  return { composition, loading, error, missing: missingTimeline === timeline, refresh: load };
 }
