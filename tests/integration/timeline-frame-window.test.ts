@@ -185,6 +185,24 @@ describe.skipIf(!IS_CI)('frame preview from a short window, against real FFmpeg'
       expect(await psnr(full, windowFrame), `24 fps at ${atSec}`).toBeGreaterThanOrEqual(40);
     }
 
+    // A sparse source (a frame every 5 s, like a screen recording holding a
+    // still): at 18 s export still shows the frame from 15 s.
+    const sparse = join(workspace, 'sparse.mp4');
+    await testPattern(sparse, 25, 0.2);
+    const sparseMedia = new Map<MediaId, MediaInfo>([[M, { path: sparse, hasAudio: true }]]);
+    const sparseDoc = vertical(mediaClip({ id: 'c1', mediaId: M, sourceOutSec: 25, startSec: 0 }));
+    const sparseExport = join(workspace, 'sparse-export.mp4');
+    await runPlan(
+      compileTimeline(sparseDoc, { media: sparseMedia, dir: workspace, output: sparseExport }),
+    );
+    const sparseFull = join(workspace, 'sparse-full.jpg');
+    await runFfmpeg(buildPreviewFrameArgs({ input: sparseExport, output: sparseFull, atSec: 18 }));
+    const sparseWindow = join(workspace, 'sparse-window.jpg');
+    await runPlan(
+      buildFrameAtPlan(sparseDoc, { media: sparseMedia, dir: workspace, output: sparseWindow }, 18),
+    );
+    expect(await psnr(sparseFull, sparseWindow), 'sparse source').toBeGreaterThanOrEqual(40);
+
     // The very end of a clip that ends with its source: the seek must not pass
     // the last frame, or there is no image.
     const whole = vertical(mediaClip({ id: 'c1', mediaId: M, sourceOutSec: 20, startSec: 0 }));

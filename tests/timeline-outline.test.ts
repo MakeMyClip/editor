@@ -144,6 +144,7 @@ describe('timelineOutline', () => {
       expect(placed?.findLast((w) => w.index === s.toIndex)?.endSec).toBe(s.endSec);
     }
     expect(Object.keys(outline.transcriptIds)).toEqual([M]);
+    expect(outline.sentences.some((s) => 'mediaId' in s)).toBe(false);
     expect(outline.nextFromSec).toBeUndefined();
   });
 
@@ -196,6 +197,8 @@ describe('timelineOutline', () => {
       ['c2', 3, 4, 'Second point'],
     ]);
     expect(Object.keys(outline.transcriptIds)).toEqual([M, O]);
+    // Two sources: each sentence names its own, to find its transcriptId.
+    expect(outline.sentences.map((s) => s.mediaId)).toEqual([M, O, M]);
   });
 
   it('pages by size and range, so pages put back together give every sentence once', async () => {
@@ -218,6 +221,33 @@ describe('timelineOutline', () => {
 
     const middle = await timelineOutline(comp, MEDIA, { transcribe, fromSec: 1, toSec: 3 });
     expect(middle.sentences.map((s) => s.fromIndex)).toEqual([3]);
+  });
+
+  it('keeps sentences that start together on one page, so paging always moves on', async () => {
+    // Four one-word sentences at the same instant (zero-length words), then two more.
+    const tied = transcriptOf(M, [
+      { text: 'Lead.', startSec: 0, endSec: 0.4 },
+      ...['A.', 'B.', 'C.', 'D.'].map((text) => ({ text, startSec: 1, endSec: 1 })),
+      { text: 'After.', startSec: 1.2, endSec: 1.6 },
+      { text: 'End.', startSec: 1.6, endSec: 2 },
+    ]);
+    const comp = timelineOf([mediaClip({ id: 'c1', mediaId: M, sourceOutSec: 2, startSec: 0 })]);
+    const transcribe = transcribeFrom(tied);
+    const all = (await timelineOutline(comp, MEDIA, { transcribe })).sentences;
+    for (const maxBytes of [300, 450]) {
+      const seen = [];
+      const starts: number[] = [];
+      let fromSec: number | undefined = 0;
+      while (fromSec !== undefined) {
+        starts.push(fromSec);
+        const page = await timelineOutline(comp, MEDIA, { transcribe, fromSec, maxBytes });
+        seen.push(...page.sentences);
+        fromSec = page.nextFromSec;
+        expect(starts.length).toBeLessThan(10);
+      }
+      expect(seen, `maxBytes ${maxBytes}`).toEqual(all);
+      expect(new Set(starts).size).toBe(starts.length);
+    }
   });
 
   it('pages a 60-minute, 9,000-word recording at 40 KB', async () => {

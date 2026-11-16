@@ -82,8 +82,15 @@ describe('buildFrameAtPlan', () => {
     expect(plan.steps).toHaveLength(1);
     const [frame] = plan.steps;
     expect(frame?.label).toBe('frame:c1@3');
-    // Read from 1 s before the frame, then take the first frame at 3 s.
-    expect(frame?.args.slice(0, 5)).toEqual(['-y', '-ss', '2', '-i', '/in.mp4']);
+    // Seek to 3 s, keeping the frames from the keyframe before it.
+    expect(frame?.args.slice(0, 6)).toEqual([
+      '-y',
+      '-noaccurate_seek',
+      '-ss',
+      '3',
+      '-i',
+      '/in.mp4',
+    ]);
     expect(frame?.args.slice(-8)).toEqual([
       '-map',
       '[v]',
@@ -97,7 +104,9 @@ describe('buildFrameAtPlan', () => {
     // The same video chain export runs, on timestamps offset to the frame's time.
     const exported = graphOf(compileTimeline(doc, CTX('/ws/out.mp4')).steps[0]?.args);
     const segmentChain = exported.slice('[0:v]'.length, exported.indexOf('[v]'));
-    expect(graphOf(frame?.args)).toBe(`[0:v]setpts=PTS+2/TB,${segmentChain},trim=start=3[v]`);
+    expect(graphOf(frame?.args)).toBe(
+      `[0:v]setpts=PTS+3/TB,trim=start=0,${segmentChain},trim=start=3[v]`,
+    );
   });
 
   it('seeks into the source from the clip in-point and stops at its last frame', () => {
@@ -112,8 +121,8 @@ describe('buildFrameAtPlan', () => {
     const near = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 7.999).steps[0];
     // 30 fps: the last frame starts at 8 - 1/30 s.
     // Rounded down, never past that frame or the clip's out-point.
-    expect(near?.args.slice(1, 3)).toEqual(['-ss', '106.966666']);
-    expect(graphOf(near?.args)).toMatch(/^\[0:v\]setpts=PTS\+6\.966666\/TB,/);
+    expect(near?.args.slice(2, 4)).toEqual(['-ss', '107.966666']);
+    expect(graphOf(near?.args)).toMatch(/^\[0:v\]setpts=PTS\+7\.966666\/TB,trim=start=0,/);
     expect(graphOf(near?.args)).toMatch(/,trim=start=7\.96666666\d*\[v\]$/);
   });
 
@@ -177,8 +186,8 @@ describe('buildFrameAtPlan', () => {
     ]);
     const plan = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 10); // 2s into c2 ([8,12))
     expect(plan.steps[0]?.label).toBe('frame:c2@10');
-    expect(plan.steps[0]?.args.slice(1, 3)).toEqual(['-ss', '2']);
-    expect(graphOf(plan.steps[0]?.args)).toMatch(/^\[0:v\]setpts=PTS\+1\/TB,/);
+    expect(plan.steps[0]?.args.slice(2, 4)).toEqual(['-ss', '3']);
+    expect(graphOf(plan.steps[0]?.args)).toMatch(/^\[0:v\]setpts=PTS\+2\/TB,/);
     expect(graphOf(plan.steps[0]?.args)).toMatch(/,trim=start=2\[v\]$/);
   });
 
@@ -198,13 +207,13 @@ describe('buildFrameAtPlan', () => {
         }),
       },
     ]);
-    // The frame shows source second 4. Reading starts a second earlier, at 3;
+    // The frame shows source second 4;
     // the chain's setpts=PTS/2 turns source time into segment time, which the
     // fades and text windows read, and trim takes the frame at segment time 2.
     const frame = buildFrameAtPlan(doc, CTX('/ws/f.jpg'), 4).steps[0];
-    expect(frame?.args.slice(1, 3)).toEqual(['-ss', '3']);
+    expect(frame?.args.slice(2, 4)).toEqual(['-ss', '4']);
     const graph = graphOf(frame?.args);
-    expect(graph).toMatch(/^\[0:v\]setpts=PTS\+3\/TB,/);
+    expect(graph).toMatch(/^\[0:v\]setpts=PTS\+4\/TB,/);
     expect(graph).toContain('setpts=PTS/2');
     expect(graph).toMatch(/,trim=start=2\[v\]$/);
   });

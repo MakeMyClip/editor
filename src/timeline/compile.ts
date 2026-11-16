@@ -614,9 +614,6 @@ function seconds(sec: number): string {
   return String(Math.round(sec * 1000) / 1000);
 }
 
-/** How much of the source a frame preview reads before the frame. */
-const FRAME_PREROLL_SEC = 1;
-
 function floorUs(sec: number): number {
   return Math.floor(sec * 1e6 + 1e-6) / 1e6;
 }
@@ -782,17 +779,17 @@ export function buildFrameAtPlan(
     if (!info) {
       throw new CompileError(`No media registered for "${clip.mediaId}" (clip "${clip.id}").`);
     }
-    // Where the window starts, in seconds into the clip's source: a little
-    // before the frame, so a source frame that export repeats into it (a source
-    // slower than the canvas) is still read. An input seek starts timestamps at
-    // the seek point, so adding `from` gives source time even when the first
-    // frame read comes after it. The chain's speed `setpts` divides
-    // the offset back into segment time, which its fades and text read, and
-    // `trim` then takes the first frame at the frame's segment time, as reading
-    // it out of the encoded segment would. Rounded down, to the microsecond, so
-    // the seek never passes the clip's last frame or its out-point.
+    // Seconds into the clip's source. The seek keeps every frame from the
+    // keyframe before it (`-noaccurate_seek`), so a frame that export repeats
+    // into this time (a source slower than the canvas, or a screen recording
+    // holding a still frame) is still read; its timestamps count from the seek
+    // point, so adding `local` gives source time from the clip's in-point.
+    // Frames before the in-point are dropped, as export's seek drops them. The
+    // chain's speed `setpts` turns source time into segment time, which its
+    // fades and text read, and `trim` takes the frame at the frame's segment
+    // time. Rounded down, to the microsecond, so the seek never passes the
+    // clip's last frame or its out-point.
     const local = floorUs(clamped * speedFactor(clip.effects));
-    const from = floorUs(Math.max(0, local - FRAME_PREROLL_SEC));
     // The first canvas frame at or after the frame's time (`trim` rounds an
     // off-grid start to the nearest frame, which could be the one before), but
     // no later than the segment's last frame: encoding to the clip's length
@@ -804,12 +801,13 @@ export function buildFrameAtPlan(
       label,
       args: [
         '-y',
+        '-noaccurate_seek',
         '-ss',
-        String(floorUs(clip.sourceInSec + from)),
+        String(floorUs(clip.sourceInSec + local)),
         '-i',
         info.path,
         '-filter_complex',
-        `[0:v]setpts=PTS+${from}/TB,${chain},trim=start=${firstFrame}[v]`,
+        `[0:v]setpts=PTS+${local}/TB,trim=start=0,${chain},trim=start=${firstFrame}[v]`,
         ...['-map', '[v]', '-an', '-frames:v', '1', '-q:v', '2'],
         ctx.output,
       ],

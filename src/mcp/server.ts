@@ -240,7 +240,7 @@ export function buildMcpServer(): McpServer {
       description:
         "Transcribe the timeline's speech with the local whisper.cpp. Without clipId it returns the timeline as sentences: each with its timeline start and end, the clip it starts in, its word indices fromIndex..toIndex and its text, one page of about 40 KB at a time. Pass nextFromSec as fromSec for the next page, or fromSec/toSec for a stretch of the timeline. Read it to pick a short's moments, then send whole sentences' indices to make_short. " +
         "With clipId it returns that clip's words (view 'words'), each with its index and timeline time, plus phrases said twice in a row (retakes); view 'sentences' gives that clip's sentences instead. " +
-        "transcriptIds (by source) and transcriptId identify the transcript: send one back with an edit by index so it is refused, not misplaced, if the source was transcribed again. A word's `index` is stable for its source file. Optional feature: if whisper.cpp or a model isn't set up, the error says how. The first call per source file takes a while; later calls reuse the stored transcript.",
+        "transcriptIds (by source; with more than one source each sentence names its mediaId) and transcriptId identify the transcript: send one back with an edit by index so it is refused, not misplaced, if the source was transcribed again. A word's `index` is stable for its source file. Optional feature: if whisper.cpp or a model isn't set up, the error says how. The first call per source file takes a while; later calls reuse the stored transcript.",
       inputSchema: {
         timeline: timelineInput,
         clipId: z

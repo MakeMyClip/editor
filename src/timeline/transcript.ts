@@ -325,6 +325,9 @@ export interface OutlineSentence {
   startSec: number;
   endSec: number;
   clipId: string;
+  /** The sentence's source, named only when the timeline has more than one,
+   *  so its `transcriptIds` entry can be found. */
+  mediaId?: MediaId;
   fromIndex: number;
   toIndex: number;
   text: string;
@@ -413,7 +416,7 @@ export async function timelineOutline(
           .sort((a, b) => a.startSec - b.startSec);
 
   const transcripts = new Map<MediaId, Transcript | null>();
-  const sentences: OutlineSentence[] = [];
+  const bySource: { mediaId: MediaId; sentences: OutlineSentence[] }[] = [];
   let run: OutlineWord[] = [];
   let runMedia: MediaId | undefined;
   let prevClip: MediaClip | undefined;
@@ -429,7 +432,7 @@ export async function timelineOutline(
     }
     if (!transcript) continue;
     if (clip.mediaId !== runMedia) {
-      sentences.push(...outlineSentences(run));
+      if (runMedia) bySource.push({ mediaId: runMedia, sentences: outlineSentences(run) });
       run = [];
       runMedia = clip.mediaId;
     }
@@ -449,12 +452,16 @@ export async function timelineOutline(
     }
     prevClip = clip;
   }
-  sentences.push(...outlineSentences(run));
+  if (runMedia) bySource.push({ mediaId: runMedia, sentences: outlineSentences(run) });
 
   const transcriptIds: Record<string, string> = {};
   for (const [mediaId, transcript] of transcripts) {
     if (transcript) transcriptIds[mediaId] = transcriptIdOf(transcript);
   }
+  const named = Object.keys(transcriptIds).length > 1;
+  const sentences = bySource.flatMap(({ mediaId, sentences }) =>
+    named ? sentences.map((s) => ({ ...s, mediaId })) : sentences,
+  );
   const fromSec = opts.fromSec ?? 0;
   const toSec = opts.toSec ?? Number.POSITIVE_INFINITY;
   const inRange = sentences.filter((s) => s.startSec >= fromSec && s.startSec < toSec);
@@ -465,10 +472,22 @@ export async function timelineOutline(
     JSON.stringify({ sentences: [], transcriptIds, nextFromSec: 99999.999 }),
   );
   const page: OutlineSentence[] = [];
-  for (const sentence of inRange) {
+  for (const [i, sentence] of inRange.entries()) {
     const size = Buffer.byteLength(JSON.stringify(sentence)) + 1;
     if (bytes + size > maxBytes && page.length > 0) {
-      return { sentences: page, transcriptIds, nextFromSec: sentence.startSec };
+      // The next page starts at a time, so sentences that start together stay
+      // on one page: split before them, or, when they fill this page from its
+      // first line, keep all of them here.
+      const tied = sentence.startSec;
+      const kept = page.filter((s) => s.startSec !== tied);
+      if (kept.length > 0) return { sentences: kept, transcriptIds, nextFromSec: tied };
+      const rest = inRange.slice(i).findIndex((s) => s.startSec !== tied);
+      if (rest === -1) return { sentences: inRange, transcriptIds };
+      return {
+        sentences: inRange.slice(0, i + rest),
+        transcriptIds,
+        nextFromSec: inRange[i + rest]?.startSec,
+      };
     }
     page.push(sentence);
     bytes += size;
