@@ -12,7 +12,7 @@ The open-source AI video editor for Claude Code and any MCP client: remove silen
   <a href="https://www.npmjs.com/package/@makemyclip/editor"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.npmjs.org%2Fdownloads%2Fpoint%2Flast-week%2F%40makemyclip%2Feditor&query=%24.downloads&label=npm&labelColor=CB3837&color=CB3837&logo=npm&logoColor=white" alt="npm weekly downloads"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="./package.json"><img src="https://img.shields.io/badge/node-%E2%89%A524-brightgreen" alt="Node 24+"></a>
-  <img src="https://img.shields.io/badge/tests-859%20passing-brightgreen" alt="Tests: 859 passing">
+  <img src="https://img.shields.io/badge/tests-965%20passing-brightgreen" alt="Tests: 965 passing">
 </p>
 
 <p align="center">
@@ -352,7 +352,7 @@ No — nowhere. The CLI, the browser UI, the Claude Code skill, and the MCP serv
 ### Capabilities & limits
 
 **Is it production-ready?**
-This release is feature-complete for local editing — a dark timeline editor (view, edit, preview, export), silence removal, transcript editing, captions, 9:16 / 1:1 / 4:5 reframing, loudness normalization, export to Final Cut Pro, DaVinci Resolve and Premiere Pro, 19 single-file tools, an MCP server, and 859 tests passing. The API surface is still pre-1.0 (tool schemas may change in minor ways before 1.0). Use it for real work; pin a version in CI.
+This release is feature-complete for local editing — a dark timeline editor (view, edit, preview, export), silence removal, transcript editing, captions, 9:16 / 1:1 / 4:5 reframing, loudness normalization, export to Final Cut Pro, DaVinci Resolve and Premiere Pro, 19 single-file tools, an MCP server, and 965 tests passing. The API surface is still pre-1.0 (tool schemas may change in minor ways before 1.0). Use it for real work; pin a version in CI.
 
 **What's the maximum video size or duration?**
 No hardcoded limit. FFmpeg streams the file rather than loading it into memory, and the browser UI streams uploads to disk — multi-GB recordings work fine. This release isn't tuned for projects with hundreds of clips or runtime above 30 minutes; for those, drive the CLI directly.
@@ -454,7 +454,7 @@ auto-editor is a mature open-source command-line tool that cuts silence or motio
 
 ## Roadmap
 
-- **Now (v0.5.0)** — silence removal, local transcription, edit by transcript, retake removal, captions, 9:16 / 1:1 / 4:5 reframing, loudness normalization, click-free cuts, export to Final Cut Pro / DaVinci Resolve / Premiere Pro, on top of the dark timeline editor (view / edit / preview / export), 19 tools, MCP server, and snapshot/undo
+- **Now (v0.5.2)** — vertical shorts from a long recording, silence removal, local transcription, edit by transcript, retake removal, captions, 9:16 / 1:1 / 4:5 reframing, loudness normalization, click-free cuts, export to Final Cut Pro / DaVinci Resolve / Premiere Pro, on top of the dark timeline editor (view / edit / preview / export), 19 tools, MCP server, and snapshot/undo
 - **Next** — model picker, SSE for live session updates, AI Elements / shadcn migration
 - **1.0** — frozen tool schemas, MCP transport, published Anthropic skill, docs site
 - **Beyond** — desktop app (Electron), cloud rendering via [MakeMyClip.com](https://makemyclip.com)
