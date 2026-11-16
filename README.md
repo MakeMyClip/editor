@@ -17,7 +17,7 @@ The open-source AI video editor for Claude Code and any MCP client: remove silen
 </p>
 
 <p align="center">
-  <img src="./docs/hero.jpg" alt="MakeMyClip Editor's browser timeline: a talking-head clip with a title and captions" width="720" />
+  <img src="./docs/hero.png" alt="MakeMyClip Editor's browser timeline: a talking-head clip with a title and captions" width="720" />
 </p>
 
 **MakeMyClip Editor is a free, open-source (MIT) video editor that AI agents drive.** You ask Claude to edit a recording; it calls the editor's tools, and FFmpeg and a local whisper.cpp do the work on your computer. It ships as a Claude Code skill, the `clip` CLI, an MCP server, and a browser timeline editor. No cloud upload, no account, no API key, no telemetry, no generative AI.
