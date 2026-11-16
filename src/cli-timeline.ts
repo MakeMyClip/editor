@@ -1,5 +1,6 @@
 import { appendOp } from './session/store.js';
 import { CaptionError, DEFAULT_CAPTION_WORDS, planCaptions } from './timeline/captions.js';
+import { invalidColorMessage, isColor } from './timeline/color.js';
 import {
   buildFrameAtPlan,
   checkExportable,
@@ -148,6 +149,11 @@ function optionalNum(name: string, value: string | undefined): number | undefine
   return n;
 }
 
+function colorFlag(name: string, value: string | undefined): string | undefined {
+  if (value === undefined || isColor(value)) return value;
+  throw new Error(`--${name} ${invalidColorMessage(value)}`);
+}
+
 function fitFlag(value: string | undefined): Fit | undefined {
   if (value === undefined) return undefined;
   const parsed = FitSchema.safeParse(value);
@@ -232,7 +238,7 @@ export async function runTimeline(args: string[]): Promise<void> {
           width: flags.width ? num(flags.width, 1920) : undefined,
           height: flags.height ? num(flags.height, 1080) : undefined,
           fps: flags.fps ? num(flags.fps, 30) : undefined,
-          background: flags.background,
+          background: colorFlag('background', flags.background),
           fit: fitFlag(flags.fit),
         }),
         timeline,
@@ -311,7 +317,7 @@ export async function runTimeline(args: string[]): Promise<void> {
       const start = flags.start !== undefined ? num(flags.start, 0) : trackEnd(comp, trackId);
       const clip = colorClip({
         id: makeClipId(),
-        color: flags.color,
+        color: colorFlag('color', flags.color),
         durationSec: num(duration, 2),
         startSec: start,
       });
