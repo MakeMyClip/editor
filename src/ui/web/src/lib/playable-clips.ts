@@ -26,7 +26,7 @@ function isVideoPath(path: string): boolean {
   return VIDEO_EXT.has(ext);
 }
 
-function shortName(path: string): string {
+export function shortName(path: string): string {
   const base = path.split('/').pop() ?? path;
   // Strip the 8-char random prefix (`xxxxxxxx-`) that we add to import
   // filenames and tool outputs, so cards show "demo.mp4" instead of

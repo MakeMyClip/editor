@@ -42,6 +42,7 @@ function num(value: string): number | undefined {
  */
 export function ClipInspector({
   clip,
+  mediaNames,
   playheadSec,
   hasNext,
   canvasFit,
@@ -53,6 +54,8 @@ export function ClipInspector({
   onClose,
 }: {
   clip: Clip;
+  /** File name of each media id, for the heading of a media clip. */
+  mediaNames: ReadonlyMap<string, string>;
   playheadSec: number;
   hasNext: boolean;
   /** The timeline's fit, which a clip without its own follows. */
@@ -84,7 +87,7 @@ export function ClipInspector({
     <section className="detail clip-inspector">
       <div className="ci-head">
         <div>
-          <h2>{clipLabel(clip)}</h2>
+          <h2>{clipLabel(clip, mediaNames)}</h2>
           <div className="id">
             {clip.kind} · {clip.id} · {start.toFixed(2)}–{end.toFixed(2)}s (
             {clipDuration(clip).toFixed(2)}s)

@@ -186,6 +186,14 @@ body,
 }
 
 .op-list .op {
+  /* Each op is a <button>: clear the browser's light button face. */
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   padding: 0.7rem 1rem;
   border-bottom: 1px solid var(--border);
   cursor: pointer;

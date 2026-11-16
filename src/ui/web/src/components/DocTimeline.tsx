@@ -21,6 +21,7 @@ const MAX_THUMBS = 16; // cap thumbnails per clip to bound requests
  */
 export function DocTimeline({
   composition,
+  mediaNames,
   selectedClipId,
   onSelectClip,
   playheadSec,
@@ -33,6 +34,8 @@ export function DocTimeline({
   verbError,
 }: {
   composition: Composition;
+  /** File name of each media id, for labeling media clips. */
+  mediaNames: ReadonlyMap<string, string>;
   selectedClipId: string | null;
   onSelectClip: (clipId: string | null) => void;
   playheadSec: number;
@@ -156,6 +159,7 @@ export function DocTimeline({
                     <ClipBlock
                       key={clip.id}
                       clip={clip}
+                      label={clipLabel(clip, mediaNames)}
                       selected={clip.id === selectedClipId}
                       onSelect={onSelectClip}
                     />
@@ -205,10 +209,12 @@ export function DocTimeline({
 
 function ClipBlock({
   clip,
+  label,
   selected,
   onSelect,
 }: {
   clip: Clip;
+  label: string;
   selected: boolean;
   onSelect: (clipId: string | null) => void;
 }) {
@@ -220,10 +226,10 @@ function ClipBlock({
       className={`doc-tl-clip doc-tl-clip-${clip.kind}${selected ? ' selected' : ''}`}
       style={{ left, width }}
       onClick={() => onSelect(selected ? null : clip.id)}
-      title={`${clipLabel(clip)} · ${clip.startSec.toFixed(2)}–${clipEndSec(clip).toFixed(2)}s`}
+      title={`${label} · ${clip.startSec.toFixed(2)}–${clipEndSec(clip).toFixed(2)}s`}
     >
       {clip.kind === 'media' ? <Filmstrip clip={clip} width={width} /> : null}
-      <span className="doc-tl-clip-label">{clipLabel(clip)}</span>
+      <span className="doc-tl-clip-label">{label}</span>
       <span className="doc-tl-clip-dur">{clipDuration(clip).toFixed(1)}s</span>
     </button>
   );
